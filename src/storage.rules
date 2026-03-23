@@ -1,0 +1,51 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+
+    // Default deny
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+
+    // Public read for assets that should be public
+    match /event-images/{eventId}/{fileName} {
+      allow read;
+      allow write: if isAdmin();
+    }
+    match /course-maps/{eventId}/{mapType}/{fileName} {
+      allow read;
+      allow write: if isAdmin();
+    }
+    match /event-documents/{eventId}/{fileName} {
+      allow read;
+      allow write: if isAdmin();
+    }
+     match /course-assets/{eventId}/{ticketId}/{fileName} {
+      allow read;
+      allow write: if isAdmin();
+    }
+    match /club-logos/{clubId}/{fileName} {
+      allow read;
+      allow write: if request.auth != null && exists(/databases/$(database)/documents/clubs/$(clubId)) && get(/databases/$(database)/documents/clubs/$(clubId)).data.ownerUid == request.auth.uid;
+    }
+    match /sponsors/{eventId}/{fileName} {
+      allow read;
+      allow write: if isAdmin();
+    }
+
+    // User-specific files
+    match /profilePictures/{userId}/{fileName} {
+      allow read;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    match /eventRegistrations/{eventId}/idProofs/{fileName} {
+      allow write: if request.resource.size < 1 * 1024 * 1024;
+      allow read: if request.auth != null; 
+    }
+  }
+}

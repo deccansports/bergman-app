@@ -1,0 +1,3 @@
+// This file was intentionally neutralized. 
+// Duplicate package.json files can cause build and dependency resolution errors.
+{}

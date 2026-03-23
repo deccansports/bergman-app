@@ -1,0 +1,39 @@
+const { execSync } = require('child_process');
+const fs = require('fs');
+
+const files = execSync('find src/app/api -name route.ts')
+  .toString()
+  .trim()
+  .split('\n');
+
+let failed = false;
+
+for (const file of files) {
+  const content = fs.readFileSync(file, 'utf8').trim();
+
+  const hasHttpExport =
+    /export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)/.test(content);
+
+  const hasDefaultExport = /export\s+default/.test(content);
+  const hasModuleExports = /module\.exports/.test(content);
+  const usesReqRes = /\(\s*req\s*,\s*res\s*\)/.test(content);
+
+  if (!content || !hasHttpExport || hasDefaultExport || hasModuleExports || usesReqRes) {
+    failed = true;
+    console.log('\n❌ INVALID route.ts:', file);
+    if (!content) console.log('   → File is empty');
+    if (!hasHttpExport) console.log('   → Missing HTTP export (GET/POST/etc)');
+    if (hasDefaultExport) console.log('   → Uses export default (NOT allowed)');
+    if (hasModuleExports) console.log('   → Uses module.exports (NOT allowed)');
+    if (usesReqRes) console.log('   → Uses req,res (pages router style)');
+  }
+}
+
+if (!failed) {
+  console.log('\n✅ All route.ts files are valid');
+} else {
+  console.log('\n🚨 Fix the above route.ts files before deploying');
+  process.exit(1);
+}
+
+`

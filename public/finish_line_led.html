@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bergman Finish Line</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Teko:wght@500;700&family=Montserrat:wght@400;700;900&display=swap');
+        body {
+            font-family: 'Montserrat', sans-serif;
+            background-color: #020617;
+            color: #f1f5f9;
+            overflow: hidden;
+        }
+        .font-teko {
+            font-family: 'Teko', sans-serif;
+            letter-spacing: 0.05em;
+        }
+        .text-shadow-md {
+            text-shadow: 0 2px 4px rgba(0,0,0,0.4);
+        }
+        .card-gradient {
+            background-image: linear-gradient(to bottom right, #1e293b, #0f172a);
+        }
+        .animate-roll-down {
+            animation: rollDown 0.8s ease-in-out forwards;
+        }
+        @keyframes rollDown {
+            from { transform: translateY(-100%) scale(0.9); opacity: 0; }
+            to { transform: translateY(0) scale(1); opacity: 1; }
+        }
+        .slide-out {
+            animation: slideOut 0.5s ease-in forwards;
+        }
+        @keyframes slideOut {
+            from { transform: translateY(0); opacity: 1; }
+            to { transform: translateY(100%); opacity: 0; }
+        }
+        .sponsor-slider {
+            display: flex;
+            animation: slide 30s linear infinite;
+        }
+        @keyframes slide {
+            from { transform: translateX(0); }
+            to { transform: translateX(-50%); }
+        }
+    </style>
+</head>
+<body class="w-screen h-screen p-4 md:p-6 lg:p-8 flex flex-col">
+
+    <header class="w-full text-center pb-4 flex-shrink-0">
+        <img id="header-logo" src="/Bmlogowhite.png" alt="Bergman Logo" class="h-16 md:h-20 lg:h-24 mx-auto object-contain transition-all duration-500" data-ai-hint="logo">
+    </header>
+
+    <main class="flex-grow grid grid-cols-1 lg:grid-cols-3 gap-6 min-h-0">
+        
+        <!-- Main Finisher Display -->
+        <div id="main-finisher-card" class="lg:col-span-2 flex flex-col justify-center items-center card-gradient rounded-xl shadow-2xl p-6 md:p-8 border-t-4 border-yellow-400 opacity-0">
+            <!-- Content will be injected here -->
+        </div>
+
+        <!-- Rolling List of Recent Finishers -->
+        <div id="recent-finishers-list" class="flex flex-col gap-3 overflow-hidden">
+            <!-- Finisher items will be injected here -->
+        </div>
+
+    </main>
+
+    <!-- Sponsor Banner -->
+    <footer id="sponsor-banner-container" class="w-full flex-shrink-0 pt-4 hidden">
+        <div class="bg-slate-800/50 rounded-lg p-2 overflow-hidden">
+            <div class="sponsor-slider">
+                <!-- Sponsor logos will be injected here, duplicated for seamless scroll -->
+            </div>
+        </div>
+    </footer>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getFirestore, onSnapshot, collection, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+        const MAX_FINISHERS_IN_FEED = 6; // Main finisher + 5 in the list
+        const SPONSOR_SLIDE_INTERVAL = 5000; // 5 seconds per set of sponsors
+
+        let db;
+        let unsubscribeFinishers = () => {};
+        let unsubscribeSponsors = () => {};
+
+        const mainFinisherCard = document.getElementById('main-finisher-card');
+        const recentFinishersList = document.getElementById('recent-finishers-list');
+        const headerLogo = document.getElementById('header-logo');
+        const sponsorBannerContainer = document.getElementById('sponsor-banner-container');
+        const sponsorSlider = document.querySelector('.sponsor-slider');
+
+        // Function to get country flag emoji from name
+        const countryNameToCode = { 'India': 'IN', 'United States': 'US', 'USA / Canada': 'US', 'United Kingdom': 'GB', 'Canada': 'CA', 'Australia': 'AU', 'Germany': 'DE', 'France': 'FR', 'Singapore': 'SG', 'United Arab Emirates': 'AE' };
+        function getCountryFlagEmoji(countryName) {
+            if (!countryName) return '';
+            const countryCode = countryNameToCode[countryName] || 'XX';
+            return String.fromCodePoint(...[...countryCode.toUpperCase()].map(c => 0x1F1A5 + c.charCodeAt(0)));
+        }
+
+        function updateMainFinisher(finisher) {
+            if (!mainFinisherCard || !finisher) {
+                mainFinisherCard.innerHTML = `<div class="text-center text-slate-400">Waiting for the next finisher...</div>`;
+                return;
+            };
+
+            if(finisher.gender === 'Female') {
+                headerLogo.src = '/Bwwhitelogo.png';
+            } else {
+                headerLogo.src = '/Bmlogowhite.png';
+            }
+            
+            const flag = getCountryFlagEmoji(finisher.country);
+
+            mainFinisherCard.innerHTML = `
+                <div class="text-center w-full animate-roll-down">
+                    <h1 class="text-5xl md:text-7xl lg:text-9xl font-bold text-shadow-md text-white flex items-center justify-center gap-4">
+                        <span class="text-6xl">${flag}</span>
+                        <span>${finisher.name}</span>
+                    </h1>
+                    <p class="text-2xl md:text-4xl lg:text-5xl font-teko text-yellow-400 mt-2">${finisher.ticketName || ''}</p>
+                    ${finisher.clubName ? `<p class="text-xl md:text-2xl lg:text-3xl font-teko text-slate-300">${finisher.clubName}</p>` : ''}
+                    <div class="mt-4 md:mt-8">
+                        <p class="text-lg md:text-2xl font-teko text-yellow-300/80 tracking-widest">Finish Time</p>
+                        <p class="text-6xl md:text-8xl lg:text-9xl font-bold font-teko text-yellow-400 text-shadow-md">${finisher.finishTime}</p>
+                    </div>
+                </div>
+            `;
+            mainFinisherCard.classList.remove('opacity-0');
+        }
+
+        function updateRecentFinishers(finishers) {
+            if (!recentFinishersList) return;
+            recentFinishersList.innerHTML = '';
+            finishers.forEach((finisher, index) => {
+                const flag = getCountryFlagEmoji(finisher.country);
+                const el = document.createElement('div');
+                el.className = 'card-gradient p-3 rounded-lg shadow-lg flex justify-between items-center text-lg md:text-xl lg:text-2xl border-l-4 border-yellow-500/50';
+                el.innerHTML = `
+                    <div class="flex items-center gap-3 font-semibold">
+                        <span class="font-bold text-slate-400">${finisher.bib}</span>
+                        <span class="text-3xl">${flag}</span>
+                        <span class="text-slate-100">${finisher.name}</span>
+                    </div>
+                    <div class="flex flex-col items-end">
+                        <span class="font-bold text-yellow-400 font-mono">${finisher.finishTime}</span>
+                        <span class="text-sm text-slate-400 font-teko">${finisher.ticketName} - ${finisher.ageCategory}</span>
+                    </div>
+                `;
+                
+                // Add rolling animation
+                el.style.animation = `rollDown 0.5s ease-out ${index * 0.1}s backwards`;
+                recentFinishersList.appendChild(el);
+            });
+        }
+        
+        function updateSponsors(sponsors) {
+            if (!sponsorSlider || !sponsorBannerContainer) return;
+            if (sponsors.length === 0) {
+                sponsorBannerContainer.classList.add('hidden');
+                return;
+            }
+            
+            sponsorBannerContainer.classList.remove('hidden');
+            const sponsorContent = sponsors.map(s => `
+                <div class="flex-shrink-0 w-48 h-20 flex items-center justify-center mx-8">
+                    <img src="${s.logoUrl}" alt="${s.name}" class="max-h-16 max-w-full object-contain">
+                </div>
+            `).join('');
+            
+            // Duplicate content for seamless loop
+            sponsorSlider.innerHTML = sponsorContent + sponsorContent;
+        }
+
+        async function initFirebase(config) {
+            try {
+                const app = initializeApp(config);
+                db = getFirestore(app);
+                console.log("Firebase Initialized");
+                return true;
+            } catch (e) {
+                console.error("Firebase initialization failed:", e);
+                return false;
+            }
+        }
+
+        function listenToFinishers(eventId, isDemo) {
+            if (isDemo) {
+                const mockFinishers = [
+                    { id: 5, bib: '1201', name: 'Rohan Gupta', finishTime: '04:30:15', ticketName: 'Bergman 113', ageCategory: '31-40', country: 'India', clubName: 'Delhi Dynamos', gender: 'Male' },
+                    { id: 4, bib: '1004', name: 'Priya Sharma', finishTime: '02:45:30', ticketName: 'Bergman Olympic', ageCategory: '31-40', country: 'India', gender: 'Female' },
+                    { id: 3, bib: '1401', name: 'John Smith', finishTime: '03:10:00', ticketName: 'Bergman Olympic', ageCategory: '41-50', country: 'United States', clubName: 'USA Tri Club', gender: 'Male' },
+                    { id: 2, bib: '1004', name: 'Emily White', finishTime: '05:15:00', ticketName: 'Bergman 113', ageCategory: '16-30', country: 'United Kingdom', gender: 'Female' },
+                    { id: 1, bib: '1005', name: 'Chen Wei', finishTime: '05:25:00', ticketName: 'Bergman 113', ageCategory: '41-50', country: 'Singapore', clubName: 'SG Trihards', gender: 'Male' },
+                    { id: 0, bib: '1006', name: 'Maria Garcia', finishTime: '05:35:10', ticketName: 'Bergman 113', ageCategory: '31-40', country: 'Spain', gender: 'Female' }
+                ];
+                updateMainFinisher(mockFinishers[0]);
+                updateRecentFinishers(mockFinishers.slice(1, 6));
+                return;
+            }
+        
+            if (unsubscribeFinishers) unsubscribeFinishers();
+            const feedRef = collection(db, "finish_line_feed", eventId, "entries");
+            const q = query(feedRef, orderBy("timestamp", "desc"), limit(MAX_FINISHERS_IN_FEED));
+            unsubscribeFinishers = onSnapshot(q, (snapshot) => {
+                const finishers = [];
+                snapshot.forEach(doc => finishers.push({ id: doc.id, ...doc.data() }));
+                if (finishers.length > 0) {
+                    updateMainFinisher(finishers[0]);
+                    updateRecentFinishers(finishers.slice(1));
+                } else {
+                    updateMainFinisher(null);
+                    updateRecentFinishers([]);
+                }
+            });
+        }
+        
+         function listenToSponsors(eventId, isDemo) {
+            if (isDemo) {
+                const mockSponsors = [
+                    { name: "Sponsor A", logoUrl: "https://placehold.co/150x60/f87171/ffffff?text=Sponsor+A" },
+                    { name: "Sponsor B", logoUrl: "https://placehold.co/150x60/60a5fa/ffffff?text=Sponsor+B" },
+                    { name: "Sponsor C", logoUrl: "https://placehold.co/150x60/4ade80/ffffff?text=Sponsor+C" },
+                    { name: "Sponsor D", logoUrl: "https://placehold.co/150x60/c084fc/ffffff?text=Sponsor+D" },
+                ];
+                updateSponsors(mockSponsors);
+                return;
+            }
+
+            if (unsubscribeSponsors) unsubscribeSponsors();
+            const sponsorsRef = collection(db, "events", eventId, "sponsors");
+            const q = query(sponsorsRef, orderBy("order", "asc"));
+            unsubscribeSponsors = onSnapshot(q, (snapshot) => {
+                const sponsors = [];
+                snapshot.forEach(doc => sponsors.push({ id: doc.id, ...doc.data() }));
+                updateSponsors(sponsors);
+            });
+        }
+
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const eventId = urlParams.get('eventId');
+            const isDemo = urlParams.get('demo') === 'true';
+
+            if (!eventId && !isDemo) {
+                mainFinisherCard.innerHTML = `<p class="text-destructive text-center text-2xl">Error: No Event ID provided in the URL.</p>`;
+                return;
+            }
+
+            if (isDemo) {
+                listenToFinishers(null, true);
+                listenToSponsors(null, true);
+            } else {
+                 try {
+                    const response = await fetch('/api/firebase-config');
+                    const firebaseConfig = await response.json();
+                    if (await initFirebase(firebaseConfig)) {
+                       listenToFinishers(eventId, false);
+                       listenToSponsors(eventId, false);
+                    }
+                } catch(e) {
+                    mainFinisherCard.innerHTML = `<p class="text-destructive text-center text-2xl">Error: Could not initialize Firebase.</p>`;
+                }
+            }
+        });
+    </script>
+</body>
+</html>
+
+    

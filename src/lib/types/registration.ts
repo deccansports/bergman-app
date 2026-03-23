@@ -1,0 +1,91 @@
+// src/lib/types/registration.ts
+import type { ReminderInfo, PricingBreakdown } from './common';
+
+export interface RegistrationAttempt {
+  id: string;
+  eventId: string;
+  eventName: string;
+  ticketId: string;
+  ticketName: string;
+  userId?: string | null;
+  athleteUid?: string | null; 
+  name: string;
+  email: string;
+  mobile?: string;
+  dob?: string;
+  gender?: string;
+  bloodGroup?: string;
+  tshirtSize?: string;
+  emergencyContactNumber?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  pincode?: string;
+  clubId?: string | null;
+  couponCode?: string | null;
+  deferralId?: string | null;
+  isDeferral?: boolean;
+  amountPaidPaisa: number;
+  pricingBreakdown?: PricingBreakdown;
+  transactionId?: string | null;
+  specificPaymentMethod?: string | null;
+  razorpayOrderId?: string | null;
+  participantId?: string | null;
+  bookingId?: string | null;
+  bibNumber?: string | null;
+  status: 'pending' | 'Potential' | 'PaymentInitiated' | 'PaymentCaptured' | 'Payment Failed' | 'Completed' | 'RegistrationFailed';
+  lastError?: string;
+  remindersSent?: {
+    email: ReminderInfo;
+    whatsapp: ReminderInfo;
+  };
+  updatedAt?: any;
+  createdAt?: any;
+  billingType?: 'personal' | 'business';
+  businessName?: string;
+  gstin?: string;
+  businessAddress?: string;
+  businessEmail?: string;
+  businessMobile?: string;
+  confirmGstDetails?: boolean;
+  selectedSubCategory?: string | null;
+  agreedRules?: boolean;
+  agreedWaiver?: boolean;
+  consentPromotions?: boolean;
+}
+
+export interface PublicEventRegistrationFormInputClient {
+  name: string;
+  email: string;
+  mobile: string;
+  dob: string;
+  gender: "Male" | "Female" | "Other";
+  bloodGroup: string;
+  tshirtSize: string;
+  emergencyContactNumber: string;
+  address: string;
+  city: string;
+  state: string;
+  pincode: string;
+  country: string;
+  ticketId: string;
+  selectedSubCategory?: string | null;
+  consentPromotions: boolean;
+  agreedRules: boolean;
+  agreedWaiver: boolean;
+  agreedCutoff: boolean;
+  billingType: 'personal' | 'business';
+  businessName?: string | null;
+  gstin?: string | null;
+  businessAddress?: string | null;
+  businessEmail?: string | null;
+  businessMobile?: string | null;
+  businessPrimaryContactName?: string | null;
+  businessPrimaryContactEmail?: string | null;
+  businessPrimaryContactMobile?: string | null;
+  confirmGstDetails?: boolean | null;
+  digitalSignatureName: string;
+  clubId?: string | null;
+  previousTimingCertificateUrl?: string | null;
+}

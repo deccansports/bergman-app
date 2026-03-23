@@ -1,0 +1,22 @@
+{
+	"folders": [
+		{
+			"path": "bmlogin"
+		},
+		{
+			"path": "docs"
+		},
+		{
+			"path": "node_modules"
+		},
+		{
+			"path": "public"
+		},
+		{
+			"path": "src"
+		},
+		{
+			"path": "workspace"
+		}
+	]
+}

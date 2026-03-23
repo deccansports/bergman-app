@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>LiveAthletes Debug Panel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: #020617;
+      color: #e5e7eb;
+      padding: 24px;
+    }
+
+    h1 {
+      color: #22c55e;
+      margin-bottom: 8px;
+    }
+
+    .panel {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 20px;
+      max-width: 1100px;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    input, button {
+      padding: 10px;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      background: #020617;
+      color: #e5e7eb;
+      font-size: 14px;
+    }
+
+    button {
+      background: #22c55e;
+      color: #020617;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #4ade80;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+      font-size: 13px;
+    }
+
+    th, td {
+      border-bottom: 1px solid #334155;
+      padding: 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: #facc15;
+      font-weight: 600;
+      background: #020617;
+      position: sticky;
+      top: 0;
+    }
+
+    tr:hover {
+      background: #020617;
+    }
+
+    .status {
+      font-weight: 700;
+    }
+
+    .oncourse { color: #22c55e; }
+    .finished { color: #38bdf8; }
+    .dnf { color: #ef4444; }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 12px;
+      color: #cbd5f5;
+    }
+  </style>
+</head>
+<body>
+
+<h1>🩺 liveAthletes Debug Panel</h1>
+<p>Read-only diagnostic view (Firestore → events/{eventId}/liveAthletes)</p>
+
+<div class="panel">
+  <div class="controls">
+    <input id="eventId" placeholder="Event ID" value="lHRYw4ORu8pUvfo6bg7l" />
+    <input id="bibFilter" placeholder="Filter by BIB (optional)" />
+    <button onclick="load()">Load</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>BIB</th>
+        <th>Name</th>
+        <th>Status</th>
+        <th>Leg</th>
+        <th>Last Split</th>
+        <th>ETA Next</th>
+        <th>ETA Finish</th>
+        <th>Splits (Debug)</th>
+      </tr>
+    </thead>
+    <tbody id="rows">
+      <tr><td colspan="8">Waiting…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Firebase compat SDK (debug only) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script>
+  let firebaseApp;
+  let firestoreDB;
+
+  async function getFirebaseConfig() {
+    try {
+      const response = await fetch('/api/firebase-config');
+      if (!response.ok) {
+        throw new Error(`Failed to fetch config: ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error("Could not fetch Firebase config from API:", error);
+      // Fallback or display error to user
+      return null;
+    }
+  }
+
+  async function initializeFirebase() {
+    if (firebase.apps.length) {
+      firebaseApp = firebase.app();
+      firestoreDB = firebase.firestore(firebaseApp, 'bmdatabase');
+      return;
+    }
+
+    const config = await getFirebaseConfig();
+    if (config) {
+      firebaseApp = firebase.initializeApp(config);
+      firestoreDB = firebase.firestore(firebaseApp, 'bmdatabase');
+    } else {
+      document.getElementById('rows').innerHTML = '<tr><td colspan="8" class="err">Could not initialize Firebase. Check console.</td></tr>';
+    }
+  }
+
+  function fmt(ts) {
+    if (!ts) return '—';
+    try {
+      return new Date(ts).toLocaleTimeString();
+    } catch {
+      return '—';
+    }
+  }
+
+  function statusClass(s) {
+    if (s === 'Finished') return 'finished';
+    if (s === 'DNF') return 'dnf';
+    return 'oncourse';
+  }
+
+  async function load() {
+    if (!firestoreDB) {
+        await initializeFirebase();
+        if (!firestoreDB) return; // Exit if initialization still fails
+    }
+      
+    const eventId = document.getElementById('eventId').value.trim();
+    const bibFilter = document.getElementById('bibFilter').value.trim();
+    const rows = document.getElementById('rows');
+    rows.innerHTML = '<tr><td colspan="8">Loading…</td></tr>';
+
+    if (!eventId) {
+      rows.innerHTML = '<tr><td colspan="8" class="err">Missing eventId</td></tr>';
+      return;
+    }
+
+    let ref = firestoreDB.collection('events').doc(eventId).collection('liveAthletes');
+    
+    // NOTE: Firestore compat SDK does not support `in` or `!=` queries on document ID directly in `where`.
+    // So filtering by bib will query for that specific document.
+    let query;
+    if (bibFilter) {
+      query = ref.where('bib', '==', bibFilter);
+    } else {
+      query = ref.limit(200);
+    }
+
+    try {
+      const snap = await query.get();
+      if (snap.empty) {
+        rows.innerHTML = '<tr><td colspan="8">No live athletes found for this filter.</td></tr>';
+        return;
+      }
+
+      rows.innerHTML = '';
+      snap.forEach(doc => {
+        const a = doc.data();
+        const tr = document.createElement('tr');
+
+        tr.innerHTML = `
+          <td>${a.bib || '—'}</td>
+          <td>${a.name || '—'}</td>
+          <td class="status ${statusClass(a.status)}">${a.status || '—'}</td>
+          <td>${a.leg || '—'}</td>
+          <td>${a.lastSeenSplit || '—'}</td>
+          <td>${a.etaNextSplitUTC ? new Date(a.etaNextSplitUTC * 1000).toLocaleTimeString() : '—'}</td>
+          <td>${a.etaFinishUTC ? new Date(a.etaFinishUTC * 1000).toLocaleTimeString() : '—'}</td>
+          <td><pre>${JSON.stringify(a.splits || [], null, 2)}</pre></td>
+        `;
+        rows.appendChild(tr);
+      });
+    } catch (e) {
+        console.error(e);
+        rows.innerHTML = '<tr><td colspan="8" class="err">Error fetching data: ' + e.message + '</td></tr>';
+    }
+  }
+  
+  // Initialize on load
+  initializeFirebase();
+</script>
+
+</body>
+</html>

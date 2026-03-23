@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Raw Read Injector – Live Tracking Test</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: #020617;
+      color: #e5e7eb;
+      padding: 32px;
+    }
+    h1 { color: #facc15; margin-bottom: 8px; }
+    .box {
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 20px;
+      max-width: 520px;
+    }
+    label { display: block; margin-top: 16px; font-weight: 600; }
+    input, select, button {
+      width: 100%;
+      padding: 10px;
+      margin-top: 6px;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      background: #020617;
+      color: #e5e7eb;
+      font-size: 14px;
+    }
+    button {
+      background: #facc15;
+      color: #020617;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 20px;
+    }
+    button:hover { background: #fde047; }
+    pre {
+      background: #020617;
+      border: 1px solid #334155;
+      padding: 12px;
+      border-radius: 6px;
+      margin-top: 20px;
+      font-size: 13px;
+      overflow-x: auto;
+    }
+    .ok { color: #22c55e; }
+    .err { color: #ef4444; }
+  </style>
+</head>
+<body>
+
+  <h1>🔧 Raw Read Injector</h1>
+  <p>One-click test for live tracking pipeline</p>
+
+  <div class="box">
+    <label>Event ID</label>
+    <input id="eventId" value="lHRYw4ORu8pUvfo6bg7l" />
+
+    <label>BIB Number</label>
+    <input id="bib" placeholder="1001" />
+
+    <label>Split Code (MUST match backend)</label>
+    <select id="antenna">
+      <option value="SWIM_START">SWIM_START</option>
+      <option value="SWIM_EXIT">SWIM_EXIT</option>
+      <option value="T1_IN">T1_IN</option>
+      <option value="BIKE_12.7">BIKE_12.7</option>
+      <option value="BIKE_27.2">BIKE_27.2</option>
+      <option value="BIKE_55.7">BIKE_55.7</option>
+      <option value="BIKE_FINISH">BIKE_FINISH</option>
+      <option value="T2_OUT">T2_OUT</option>
+      <option value="RUN_5K">RUN_5K</option>
+      <option value="RUN_10K">RUN_10K</option>
+      <option value="FINISH">FINISH</option>
+    </select>
+
+    <button onclick="inject()">🚀 Inject Raw Read</button>
+    <pre id="output">Waiting…</pre>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+  <script>
+    // 🔐 Firebase config (NO settings, NO extras)
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "racehub-ao1fu.firebaseapp.com",
+      projectId: "racehub-ao1fu"
+    };
+
+    // ✅ Initialize ONCE
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+
+    // ✅ Firestore instance ONCE
+    const db = firebase.firestore();
+
+    async function inject() {
+      const out = document.getElementById('output');
+
+      try {
+        const eventId = document.getElementById('eventId').value.trim();
+        const bib = document.getElementById('bib').value.trim();
+        const splitCode = document.getElementById('antenna').value;
+
+        if (!eventId || !bib || !splitCode) {
+          out.innerHTML = '<span class="err">Missing required fields</span>';
+          return;
+        }
+
+        const payload = {
+          eventId,
+          bibNumber: bib,
+          splitCode,
+          source: 'html_injector',
+          timestamp: new Date(),
+          receivedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+
+        await db
+          .collection('rawReads')
+          .doc(eventId)
+          .collection('reads')
+          .add(payload);
+
+        out.innerHTML =
+          '<span class="ok">✔ Raw read injected</span>\n\n' +
+          JSON.stringify(payload, null, 2);
+
+      } catch (e) {
+        console.error(e);
+        out.innerHTML =
+          '<span class="err">✖ Injection failed</span>\n\n' + e.message;
+      }
+    }
+  </script>
+
+</body>
+</html>
