@@ -14,7 +14,7 @@ export async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<
         } catch (error: any) {
             console.warn(`[Zoho Retry] Attempt ${i + 1} failed: ${error.message}`);
             if (i === attempts - 1) throw error;
-            await new Promise(r => setTimeout(r, delay));
+            await new Promise(res => setTimeout(res, delay));
             delay *= 2; 
         }
     }
@@ -74,7 +74,9 @@ export async function zohoFetch(
     return res.data;
   } catch (error: any) {
     // Extract specific Zoho error details for actionable logging
-    const errorData = error.response?.data || error;
+    const errorData = error.response?.data ? 
+        (typeof error.response.data === 'string' ? JSON.parse(error.response.data) : error.response.data) 
+        : error;
     
     // Aggressively search for a descriptive message in Zoho's nested response
     const zohoMsg = errorData?.message || (errorData?.error?.message) || errorData?.error || error.message || "Unknown Zoho Error";
@@ -85,7 +87,7 @@ export async function zohoFetch(
     
     const detailedError = new Error(finalMsg);
     (detailedError as any).zohoCode = zohoCode;
-    (detailedError as any).zohoMessage = zohoMsg;
+    (detailedError as any).zohoMessage = zohoMsg; // Critical for the action caller to see
     throw detailedError;
   }
 }

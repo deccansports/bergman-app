@@ -113,12 +113,11 @@ export async function syncPaymentToZohoAction(eventId: string, participantId: st
 
     if (!invoice) {
         const stateCode = (getStateCode(reg.state) || 'MH').toUpperCase();
-        
+        const isInterstate = stateCode !== "MH";
+        const taxId = isInterstate ? process.env.ZOHO_GST_INTERSTATE_ID : process.env.ZOHO_GST_INTRASTATE_ID;
+
         // Mode A: Detailed B2B Invoice
         if (isB2B) {
-            const isInterstate = stateCode !== "MH";
-            const taxId = isInterstate ? process.env.ZOHO_GST_INTERSTATE_ID : process.env.ZOHO_GST_INTRASTATE_ID;
-
             const payload: any = {
                 customer_id: customerId,
                 reference_number: bookingId,
@@ -135,7 +134,7 @@ export async function syncPaymentToZohoAction(eventId: string, participantId: st
               name: `Race Entry: ${reg.ticketName || 'Registration'}`,
               rate: Number((pricing.base / 100).toFixed(2)),
               quantity: 1,
-              tax_id: taxId,
+              tax_id: taxId || undefined,
               hsn_or_sac: "999652"
             });
 
@@ -144,7 +143,7 @@ export async function syncPaymentToZohoAction(eventId: string, participantId: st
                 name: "Discount Applied",
                 rate: -Number((pricing.discount / 100).toFixed(2)),
                 quantity: 1,
-                tax_id: taxId
+                tax_id: taxId || undefined
               });
             }
 
@@ -153,7 +152,7 @@ export async function syncPaymentToZohoAction(eventId: string, participantId: st
                 name: "Convenience Fee",
                 rate: Number((pricing.platformFeeBase / 100).toFixed(2)),
                 quantity: 1,
-                tax_id: taxId,
+                tax_id: taxId || undefined,
                 hsn_or_sac: "999799"
               });
             }
@@ -163,14 +162,14 @@ export async function syncPaymentToZohoAction(eventId: string, participantId: st
                 name: "Processing Charges",
                 rate: Number((pricing.processingFeeBase / 100).toFixed(2)),
                 quantity: 1,
-                tax_id: taxId,
+                tax_id: taxId || undefined,
                 hsn_or_sac: "998431"
               });
             }
 
             invoice = await createInvoice(payload);
         } 
-        // Mode B: Simple B2C Invoice (Tax Inclusive to prevent mismatches)
+        // Mode B: Standardized B2C Invoice
         else {
             const totalInRupees = Number((pricing.totalPayable / 100).toFixed(2));
             invoice = await createInvoice({
@@ -179,11 +178,13 @@ export async function syncPaymentToZohoAction(eventId: string, participantId: st
                 date: format(new Date(), "yyyy-MM-dd"),
                 gst_treatment: "consumer",
                 place_of_supply: stateCode,
-                is_inclusive_tax: true, 
+                is_inclusive_tax: true, // Use inclusive to avoid B2C rounding errors in UI
                 line_items: [{
                     name: `Registration - ${reg.eventName} (${reg.ticketName || 'Race Entry'})`,
                     rate: totalInRupees,
-                    quantity: 1
+                    quantity: 1,
+                    tax_id: taxId || undefined,
+                    hsn_or_sac: "999652"
                 }]
             });
         }
@@ -224,6 +225,7 @@ export async function syncPaymentToZohoAction(eventId: string, participantId: st
     return { success: true, message: `Synced: ${invoice.invoice_number}` };
 
   } catch (error: any) {
+    // CAPTURE THE DESCRIPTIVE ERROR FROM ZOHO
     const errorMsg = error.zohoMessage || error.message || "Unknown error";
     console.error(`[Zoho Sync Fatal] ID ${participantId}:`, errorMsg);
     await participantRef.update({ zohoSynced: false, zohoSyncError: errorMsg, updatedAt: FieldValue.serverTimestamp() });

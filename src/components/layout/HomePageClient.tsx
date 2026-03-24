@@ -1,4 +1,3 @@
-
 // src/components/layout/HomePageClient.tsx
 "use client";
 
@@ -70,6 +69,8 @@ const HeroSlider = ({ events, sliderItems }: { events: EventCalendarEntry[]; sli
       if (dateToUse && dateToUse !== 'TBD') {
         const dateStr = dateToUse.split('T')[0];
         if (!scheduleMap.has(dateStr)) scheduleMap.set(dateStr, new Set());
+        
+        // Use Ticket Name for descriptive schedule
         scheduleMap.get(dateStr)!.add(t.ticketName);
       }
     });
@@ -94,10 +95,10 @@ const HeroSlider = ({ events, sliderItems }: { events: EventCalendarEntry[]; sli
   };
   const isExternalLink = (e: EventCalendarEntry) => !!e.registrationUrl && !e.customSlug;
 
-  const orangeBtnClass = "bg-orange-600 hover:bg-orange-50 text-white font-black uppercase tracking-widest shadow-xl shadow-orange-600/30 border-none transition-all";
+  const orangeBtnClass = "bg-orange-600 hover:bg-orange-700 text-white font-black uppercase tracking-widest shadow-xl shadow-orange-600/30 border-none transition-all";
 
   return (
-    <section className="relative w-full h-[65vh] md:h-[85vh] overflow-hidden bg-slate-900">
+    <section className="relative w-full h-[85vh] md:h-[85vh] overflow-hidden bg-slate-900">
       <AnimatePresence initial={false}>
         <motion.div
           key={currentItem.src}
@@ -132,7 +133,7 @@ const HeroSlider = ({ events, sliderItems }: { events: EventCalendarEntry[]; sli
         </motion.div>
       </AnimatePresence>
       <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent" />
-      <div className="absolute bottom-0 left-0 right-0 p-4 md:p-8 lg:p-12 text-white text-left">
+      <div className="absolute bottom-0 left-0 right-0 p-6 pb-24 md:pb-8 lg:pb-12 text-white text-left overflow-hidden">
         <div className="container px-4 md:px-6">
           <AnimatePresence mode="wait">
             <motion.div
@@ -146,7 +147,7 @@ const HeroSlider = ({ events, sliderItems }: { events: EventCalendarEntry[]; sli
                 <div className="max-w-4xl text-left">
                   <div className="flex flex-wrap items-center justify-start gap-3 mb-4 text-left">
                     {linkedEvent.isRaceWeekend && (
-                        <Badge className="bg-primary text-orange-500 font-black uppercase tracking-[0.2em] px-4 py-1 border-none shadow-xl text-left">
+                        <Badge className="bg-primary text-orange-500 font-black uppercase tracking-[0.2em] px-4 py-1.5 border-none shadow-xl text-left">
                             Race Weekend
                         </Badge>
                     )}

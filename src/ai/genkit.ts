@@ -1,7 +1,2 @@
-import {genkit} from 'genkit';
-import {googleAI} from '@genkit-ai/google-genai';
-
-export const ai = genkit({
-  plugins: [googleAI()],
-  model: 'googleai/gemini-2.5-flash',
-});
+// This file is deprecated. All AI logic has been moved to src/app/api/ai/chat/route.ts using the direct Gemini API.
+export const ai = null;

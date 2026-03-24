@@ -1,4 +1,3 @@
-
 // src/lib/actions/faqActions.ts
 'use server';
 
@@ -6,10 +5,93 @@ import { getFirestoreInstance } from '@/lib/firebaseAdmin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { revalidatePath } from 'next/cache';
 import type { FaqEntry } from '@/lib/types';
-import { toIsoStringSafe } from '@/lib/utils';
+import { toIsoStringSafe, serializeValue } from '@/lib/utils';
+import { getKV, putKV } from '../cloudflare/kv';
 
 const FAQ_COLLECTION = 'faqs';
 const AI_LOGS_COLLECTION = 'aiLogs';
+
+/**
+ * 🚀 ELITE AI: SYNC WEBSITE CONTENT TO KV KB
+ * Fetches core pages and stores their text content for AI context.
+ */
+export async function syncWebsiteToKVAction(): Promise<{ success: boolean; message: string }> {
+    const actionName = 'syncWebsiteToKVAction';
+    const urls = [
+        "https://bergmantri.com",
+        "https://bergmantri.com/races",
+        "https://bergmantri.com/athlete-rankings",
+        "https://bergmantri.com/rewards",
+        "https://bergmantri.com/shop",
+        "https://bergmantri.com/terms-and-conditions",
+        "https://bergmantri.com/privacy-policy"
+    ];
+
+    try {
+        let syncedCount = 0;
+        for (let i = 0; i < urls.length; i++) {
+            const res = await fetch(urls[i], { next: { revalidate: 3600 } });
+            if (!res.ok) continue;
+            
+            const html = await res.text();
+            // Basic text extraction
+            const cleanText = html
+                .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gm, "")
+                .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gm, "")
+                .replace(/<[^>]*>/g, " ")
+                .replace(/\s+/g, " ")
+                .trim()
+                .slice(0, 8000);
+
+            await putKV(`kb:page:${i}`, {
+                url: urls[i],
+                content: cleanText,
+                syncedAt: new Date().toISOString()
+            }, actionName);
+            syncedCount++;
+        }
+
+        return { success: true, message: `Successfully synced ${syncedCount} pages to the Knowledge Base.` };
+    } catch (e: any) {
+        console.error(`[${actionName}] Error:`, e.message);
+        return { success: false, message: e.message };
+    }
+}
+
+/**
+ * 🔍 SEARCH KNOWLEDGE BASE
+ * Aggregates Website content (KV) and FAQs (Firestore) for AI context.
+ */
+export async function searchKnowledgeBaseAction(_query: string): Promise<string> {
+    const actionName = 'searchKnowledgeBaseAction';
+    try {
+        let combinedContext = "";
+        const adminDb = getFirestoreInstance();
+
+        // 1. Fetch FAQs from Firestore (PRIORITY AUTHORITY)
+        const faqsSnap = await adminDb.collection(FAQ_COLLECTION).get();
+        if (!faqsSnap.empty) {
+            combinedContext += "\n--- OFFICIAL FAQS, RULES & POLICIES ---\n";
+            faqsSnap.forEach(doc => {
+                const data = doc.data();
+                combinedContext += `QUESTION: ${data.question}\nANSWER: ${data.answer}\n\n`;
+            });
+        }
+        
+        // 2. Fetch website content from KV
+        for (let i = 0; i < 7; i++) {
+            const page = await getKV<any>(`kb:page:${i}`, actionName);
+            if (page && page.content) {
+                combinedContext += `\n--- WEBSITE SOURCE: ${page.url} ---\n${page.content}\n`;
+            }
+        }
+        
+        return combinedContext || "No specific matches in official knowledge base.";
+    } catch (e) {
+        console.error("Knowledge base search failed:", e);
+        return "";
+    }
+}
 
 export async function addFaqAction(
   data: { question: string; answer: string }

@@ -1,3 +1,4 @@
+
 # Settings for Backend (on Cloud Run).
 runConfig:
   minInstances: 0
@@ -76,6 +77,29 @@ env:
   # 🔒 Backend Secrets (MUST be available at BUILD and RUNTIME)
   # ==============================
 
+  # Google AI (Genkit)
+  - variable: GOOGLE_GENAI_API_KEY
+    secret: GOOGLE_GENAI_API_KEY
+    availability:
+      - BUILD
+      - RUNTIME
+
+  # Cloudflare KV
+  - variable: CLOUDFLARE_ACCOUNT_ID
+    secret: CLOUDFLARE_ACCOUNT_ID
+    availability:
+      - RUNTIME
+
+  - variable: CLOUDFLARE_KV_NAMESPACE_ID
+    secret: CLOUDFLARE_KV_NAMESPACE_ID
+    availability:
+      - RUNTIME
+
+  - variable: CLOUDFLARE_API_TOKEN
+    secret: CLOUDFLARE_API_TOKEN
+    availability:
+      - RUNTIME
+
   # Razorpay
   - variable: RAZORPAY_KEY_SECRET
     secret: RAZORPAY_KEY_SECRET
@@ -113,119 +137,6 @@ env:
   # Zoho Books
   - variable: ZOHO_CLIENT_ID
     secret: ZOHO_CLIENT_ID
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: ZOHO_CLIENT_SECRET
-    secret: ZOHO_CLIENT_SECRET
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: ZOHO_REFRESH_TOKEN
-    secret: ZOHO_REFRESH_TOKEN
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: ZOHO_ORG_ID
-    secret: ZOHO_ORG_ID
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: ZOHO_API_DOMAIN
-    secret: ZOHO_API_DOMAIN
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: ZOHO_GST_INTRASTATE_ID
-    secret: ZOHO_GST_INTRASTATE_ID
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: ZOHO_GST_INTERSTATE_ID
-    secret: ZOHO_GST_INTERSTATE_ID
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: ZOHO_GST5_INTRASTATE_ID
-    secret: ZOHO_GST5_INTRASTATE_ID
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: ZOHO_GST5_INTERSTATE_ID
-    secret: ZOHO_GST5_INTERSTATE_ID
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: ZOHO_RAZORPAY_CLEARING_ACCOUNT_ID
-    secret: ZOHO_RAZORPAY_CLEARING_ACCOUNT_ID
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: ZOHO_PAYMENT_GATEWAY_EXPENSE_ACCOUNT_ID
-    secret: ZOHO_PAYMENT_GATEWAY_EXPENSE_ACCOUNT_ID
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: STRIPE_CLEARING_ACCOUNT_ID
-    secret: STRIPE_CLEARING_ACCOUNT_ID
-    availability:
-      - BUILD
-      - RUNTIME
-
-
-  # Firebase Admin SDK (Server Only)
-  - variable: FIREBASE_PROJECT_ID
-    secret: FIREBASE_PROJECT_ID
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: FIREBASE_CLIENT_EMAIL
-    secret: FIREBASE_CLIENT_EMAIL
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: FIREBASE_PRIVATE_KEY
-    secret: FIREBASE_PRIVATE_KEY
-    availability:
-      - BUILD
-      - RUNTIME
-
-
-  # Cloudflare KV
-  - variable: CLOUDFLARE_ACCOUNT_ID
-    secret: CLOUDFLARE_ACCOUNT_ID
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: CLOUDFLARE_KV_NAMESPACE_ID
-    secret: CLOUDFLARE_KV_NAMESPACE_ID
-    availability:
-      - BUILD
-      - RUNTIME
-
-  - variable: CLOUDFLARE_API_TOKEN
-    secret: CLOUDFLARE_API_TOKEN
-    availability:
-      - BUILD
-      - RUNTIME
-
-  # Coupon System Secret
-  - variable: SECRET_KEY
-    secret: SECRET_KEY
     availability:
       - BUILD
       - RUNTIME

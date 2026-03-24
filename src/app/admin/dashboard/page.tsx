@@ -1,11 +1,10 @@
-
 // src/app/admin/dashboard/page.tsx
 "use client";
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
-  Loader2, BookOpen, Bike, ShieldAlert, Server, FileText, Satellite, Database, Bug, Megaphone, ShoppingBag, Truck, MessageSquare, LineChart, Award, Trophy, IndianRupee, Warehouse, Mail, KeyRound, MessageCircleQuestion, DatabaseBackup, Repeat, Handshake, ShieldX, Tv, Map, UserPlus, FileClock, Ban, CreditCard, Users2, UtensilsCrossed
+  Loader2, BookOpen, Bike, ShieldAlert, Server, FileText, Satellite, Database, Bug, Megaphone, ShoppingBag, Truck, MessageSquare, LineChart, Award, Trophy, IndianRupee, Warehouse, Mail, KeyRound, MessageCircleQuestion, DatabaseBackup, Repeat, Handshake, ShieldX, Tv, Map, UserPlus, FileClock, Ban, CreditCard, Users2, UtensilsCrossed, Bot
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
@@ -56,6 +55,7 @@ import StoreInventoryTab from '@/components/admin/StoreInventoryTab';
 import StoreOrdersTab from '@/components/admin/StoreOrdersTab';
 import ZohoSyncTab from '@/components/admin/ZohoSyncTab';
 import PaidFoodTab from '@/components/admin/PaidFoodTab';
+import AiInsightsTab from '@/components/admin/AiInsightsTab';
 
 export const dynamic = "force-dynamic";
 
@@ -67,13 +67,16 @@ type AdminSection =
   | 'live_tracking' | 'legacy_athletes' | 'athlete_insights'
   | 'bike_racking' | 'blacklist' | 'finish_led' | 'sponsors' | 'webhooks'
   | 'enquiries' | 'data_sync' | 'kv_analytics' | 'firestore_debug' | 'registration_debug' | 'system_control'
-  | 'announcements' | 'store_inventory' | 'store_orders' | 'zoho_sync' | 'paid_food';
+  | 'announcements' | 'store_inventory' | 'store_orders' | 'zoho_sync' | 'paid_food' | 'ai_insights';
 
 const adminNavItems: { id: AdminSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'registrations', label: 'Registrations & Events', icon: BookOpen },
   { id: 'zoho_sync', label: 'Zoho Sync Tool', icon: CreditCard },
+  { id: 'email_campaigns', label: 'Email Campaigns', icon: Mail },
+  { id: 'whatsapp_campaigns', label: 'WhatsApp Campaigns', icon: MessageSquare },
   { id: 'store_inventory', label: 'Store Catalog', icon: ShoppingBag },
   { id: 'store_orders', label: 'Store Orders', icon: Truck },
+  { id: 'ai_insights', label: 'AI Analytics', icon: Bot },
   { id: 'announcements', label: 'Announcements', icon: Megaphone },
   { id: 'system_control', label: 'System Controls', icon: ShieldAlert },
   { id: 'registration_debug', label: 'Registration Debugs', icon: Bug },
@@ -92,8 +95,6 @@ const adminNavItems: { id: AdminSection; label: string; icon: React.ComponentTyp
   { id: 'accounting', label: 'Accounting', icon: IndianRupee },
   { id: 'sponsors', label: 'Sponsors', icon: Handshake },
   { id: 'paid_food', label: 'Paid Food', icon: UtensilsCrossed },
-  { id: 'email_campaigns', label: 'Email Campaigns', icon: Mail },
-  { id: 'whatsapp_campaigns', label: 'WhatsApp Campaigns', icon: MessageSquare },
   { id: 'webhooks', label: 'Webhook Health', icon: ShieldAlert },
   { id: 'data_sync', label: 'Data Sync', icon: Database },
   { id: 'kv_analytics', label: 'KV Analytics', icon: Database },
@@ -247,6 +248,18 @@ export default function AdminDashboardPage() {
 
         <TabsContent value="zoho_sync" className="mt-4">
           <ZohoSyncTab />
+        </TabsContent>
+
+        <TabsContent value="email_campaigns" className="mt-4">
+          <EmailCampaignsTab />
+        </TabsContent>
+
+        <TabsContent value="whatsapp_campaigns" className="mt-4">
+          <WhatsAppCampaignsTab />
+        </TabsContent>
+
+        <TabsContent value="ai_insights" className="mt-4">
+          <AiInsightsTab />
         </TabsContent>
 
         <TabsContent value="store_inventory" className="mt-4">
