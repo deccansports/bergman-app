@@ -1,0 +1,17 @@
+
+{
+  "placeholderImages": [
+    {
+      "id": "welcome-hero",
+      "description": "Warm and inviting desk setup with a note",
+      "imageUrl": "https://picsum.photos/seed/welcome1/1200/800",
+      "imageHint": "warm workspace"
+    },
+    {
+      "id": "minimal-nature",
+      "description": "Calm morning light in a room",
+      "imageUrl": "https://picsum.photos/seed/calm/800/600",
+      "imageHint": "morning sun"
+    }
+  ]
+}

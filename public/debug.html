@@ -1,0 +1,169 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Bergman Registration Debug Tool</title>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; background-color: #f4f4f9; color: #333; }
+    h2 { color: #1e3a8a; }
+    button { padding: 10px 20px; font-size: 16px; cursor: pointer; background-color: #1e3a8a; color: white; border: none; border-radius: 5px; }
+    button:disabled { background-color: #9ca3af; cursor: not-allowed; }
+    #log { margin-top: 20px; background: #1e293b; color: #94a3b8; padding: 15px; height: 400px; overflow-y: auto; font-family: 'Courier New', Courier, monospace; font-size: 14px; border-radius: 5px; line-height: 1.6; }
+    .log-step { color: #facc15; font-weight: bold; }
+    .log-data { color: #60a5fa; }
+    .log-error { color: #ef4444; font-weight: bold; }
+    .log-success { color: #22c55e; font-weight: bold; }
+    .log-polling { color: #a5b4fc; }
+  </style>
+</head>
+<body>
+
+<h2>🔥 Bergman Registration Flow Debugger</h2>
+<p>This tool simulates a payment to test the entire webhook-based registration finalization flow.</p>
+
+<button id="testBtn" onclick="startTest()">Start Test Payment</button>
+
+<div id="log"></div>
+
+<script>
+const BASE_URL = window.location.origin;
+
+function log(msg, type = '') {
+  const logBox = document.getElementById("log");
+  let colorClass = '';
+  if (type === 'step') colorClass = 'log-step';
+  else if (type === 'data') colorClass = 'log-data';
+  else if (type === 'error') colorClass = 'log-error';
+  else if (type === 'success') colorClass = 'log-success';
+  else if (type === 'polling') colorClass = 'log-polling';
+  
+  logBox.innerHTML += `<span class="${colorClass}">${msg}</span><br>`;
+  logBox.scrollTop = logBox.scrollHeight;
+}
+
+async function startTest() {
+  document.getElementById("testBtn").disabled = true;
+  log("1️⃣ Creating test registration attempt...", 'step');
+
+  const registrationPayload = {
+    eventId: "zZ3gkTtYMQkRnFycRmxy",
+    eventName: "BERGMAN OZAR PUNE 2026",
+    ticketId: "DKWEfIhs3hAjq8FmR0lJ",
+    ticketName: "BERGMAN OLYMPIC TRIATHLON",
+    name: "Webhook Test User " + new Date().toLocaleTimeString(),
+    email: "test." + Date.now() + "@bergmantest.com",
+    mobile: "9999999999",
+    gender: "Male",
+    dob: "1995-01-01",
+    amountPaidPaisa: 10000,
+    pricingBreakdown: {
+      base: 10000, discount: 0, eventGST: 0,
+      platformFeeBase: 0, platformGST: 0,
+      processingFeeBase: 0, processingGST: 0,
+      totalPayable: 10000, currency: "INR", gstRate: 0, version: "debug"
+    }
+  };
+  log("   Payload: " + JSON.stringify(registrationPayload, null, 2), 'data');
+
+  log("2️⃣ Calling createEventTicketOrderAction API endpoint...", 'step');
+
+  try {
+    const res = await fetch(BASE_URL + "/api/debug-create-order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(registrationPayload)
+    });
+    const data = await res.json();
+    
+    if (!data.success || !data.orderId) {
+      log("❌ Order creation failed: " + data.message, 'error');
+      document.getElementById("testBtn").disabled = false;
+      return;
+    }
+
+    log("3️⃣ Razorpay Order Created: " + data.orderId, 'step');
+
+    const options = {
+      key: data.keyId,
+      amount: data.amount,
+      currency: data.currency,
+      name: "Bergman Debug",
+      description: "Webhook Test Payment",
+      order_id: data.orderId,
+      handler: function (response) {
+        log("4️⃣ Razorpay Payment Completed Successfully", 'step');
+        log("   Payment ID: " + response.razorpay_payment_id, 'data');
+        log("   Order ID:   " + response.razorpay_order_id, 'data');
+        log("5️⃣ Waiting for webhook to finalize registration...", 'step');
+        pollRegistrationStatus(data.orderId);
+      },
+      prefill: {
+        name: registrationPayload.name,
+        email: registrationPayload.email,
+        contact: registrationPayload.mobile
+      },
+      theme: { color: "#2962FF" },
+      modal: {
+        ondismiss: function() {
+            log('User closed the payment modal.', 'error');
+            document.getElementById("testBtn").disabled = false;
+        }
+      }
+    };
+
+    const rzp = new Razorpay(options);
+    rzp.on('payment.failed', function (response){
+        log('❌ Payment Failed! Reason: ' + response.error.description, 'error');
+        log('   Razorpay Order ID: ' + response.error.metadata.order_id, 'data');
+        log('   Razorpay Payment ID: ' + response.error.metadata.payment_id, 'data');
+        document.getElementById("testBtn").disabled = false;
+    });
+    rzp.open();
+
+  } catch (err) {
+      log("❌ CRITICAL ERROR during order creation: " + err.message, 'error');
+      document.getElementById("testBtn").disabled = false;
+  }
+}
+
+function pollRegistrationStatus(orderId) {
+  let attempts = 0;
+  log(`6️⃣ Starting to poll status for Order ID: ${orderId}`, 'step');
+
+  const interval = setInterval(async () => {
+    attempts++;
+    log(`   Polling attempt #${attempts}...`, 'polling');
+
+    try {
+        const res = await fetch(BASE_URL + "/api/debug-registration-status?orderId=" + orderId);
+        const data = await res.json();
+
+        if (data.status === "Completed") {
+          log("✅ Registration Finalized Successfully!", 'success');
+          log("   Booking ID: " + data.bookingId, 'data');
+          clearInterval(interval);
+          document.getElementById("testBtn").disabled = false;
+        } else if (data.status === "Failed") {
+          log(`❌ Registration Failed! Reason: ${data.message}`, 'error');
+          clearInterval(interval);
+          document.getElementById("testBtn").disabled = false;
+        }
+
+        if (attempts >= 20 && data.status !== "Completed") {
+          log("⚠️ Polling timeout. Webhook might not be firing or registration failed silently.", 'error');
+          clearInterval(interval);
+          document.getElementById("testBtn").disabled = false;
+        }
+    } catch(err) {
+        log("❌ Polling failed with an error: " + err.message, 'error');
+        clearInterval(interval);
+        document.getElementById("testBtn").disabled = false;
+    }
+
+  }, 3000);
+}
+</script>
+
+</body>
+</html>

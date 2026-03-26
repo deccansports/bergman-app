@@ -1,0 +1,14 @@
+{
+  "event": "payment.captured",
+  "payload": {
+    "payment": {
+      "entity": {
+        "id": "pay_TEST12345",
+        "order_id": "order_SGStaw4RnlTqLa",
+        "amount": 132443,
+        "currency": "INR",
+        "status": "captured"
+      }
+    }
+  }
+}

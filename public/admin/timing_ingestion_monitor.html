@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Bergman – Live Timing Ingestion Monitor</title>
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<style>
+body {
+  margin:0;
+  background:#020617;
+  color:#e5e7eb;
+  font-family: Arial, Helvetica, sans-serif;
+}
+.header {
+  padding:20px 30px;
+  background:#020617;
+  border-bottom:2px solid #dc2626;
+}
+.header h1 {
+  margin:0;
+  color:#ef4444;
+  font-size:28px;
+}
+.header p {
+  margin:6px 0 0;
+  color:#94a3b8;
+}
+.stats {
+  display:flex;
+  gap:20px;
+  padding:20px 30px;
+}
+.card {
+  background:#020617;
+  border:1px solid #1f2937;
+  border-radius:12px;
+  padding:16px 20px;
+  min-width:200px;
+}
+.card h3 {
+  margin:0;
+  color:#38bdf8;
+  font-size:16px;
+}
+.card .value {
+  margin-top:10px;
+  font-size:28px;
+  color:#22c55e;
+  font-weight:bold;
+}
+.table-wrap {
+  padding:0 30px 40px;
+}
+table {
+  width:100%;
+  border-collapse:collapse;
+  margin-top:10px;
+}
+th, td {
+  padding:12px;
+  border-bottom:1px solid #1f2937;
+  text-align:left;
+}
+th {
+  color:#f87171;
+  font-size:14px;
+}
+tr:hover {
+  background:#020617;
+}
+.badge {
+  background:#dc2626;
+  color:white;
+  padding:4px 10px;
+  border-radius:999px;
+  font-size:12px;
+}
+.empty {
+  padding:40px;
+  text-align:center;
+  color:#94a3b8;
+  font-size:18px;
+}
+.footer {
+  padding:16px;
+  text-align:center;
+  color:#64748b;
+  font-size:13px;
+}
+</style>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+</head>
+
+<body>
+
+<div class="header">
+  <h1>📡 Live Timing Data Ingestion</h1>
+  <p>Append-only raw reads from timing partner (audit safe)</p>
+</div>
+
+<div class="stats">
+  <div class="card">
+    <h3>Event ID</h3>
+    <div class="value" id="eventId">—</div>
+  </div>
+  <div class="card">
+    <h3>Raw Reads (Live)</h3>
+    <div class="value" id="count">0</div>
+  </div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Bib</th>
+        <th>Split</th>
+        <th>Timestamp</th>
+        <th>Source</th>
+      </tr>
+    </thead>
+    <tbody id="rows">
+      <tr>
+        <td colspan="4" class="empty">
+          Waiting for live timing data…
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="footer">
+  Bergman Timing Platform • Raw timing reads are never overwritten
+</div>
+
+<script>
+/* ===============================
+   CONFIG – values already in env
+   =============================== */
+const firebaseConfig = {
+    apiKey: "YOUR_KEY", // This will be replaced by the build process
+    authDomain: "YOUR_PROJECT.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+};
+
+firebase.initializeApp(firebaseConfig);
+
+const db = firebase.firestore();
+
+// Function to get eventId from URL
+function getEventIdFromUrl() {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('eventId');
+}
+
+const EVENT_ID = getEventIdFromUrl();
+
+if (!EVENT_ID) {
+    document.getElementById("eventId").innerText = "Not Set";
+    document.getElementById("rows").innerHTML = `
+        <tr>
+            <td colspan="4" class="empty">
+                ERROR: No Event ID provided in the URL.
+                <br>Please add "?eventId=YOUR_EVENT_ID" to the end of the URL.
+            </td>
+        </tr>
+    `;
+} else {
+    document.getElementById("eventId").innerText = EVENT_ID;
+
+    db.collection("events").doc(EVENT_ID).collection("rawReads")
+      .orderBy("receivedAt", "desc")
+      .limit(40)
+      .onSnapshot(snapshot => {
+
+        const rows = document.getElementById("rows");
+        rows.innerHTML = "";
+
+        document.getElementById("count").innerText = snapshot.size;
+
+        if (snapshot.empty) {
+          rows.innerHTML = `
+            <tr>
+              <td colspan="4" class="empty">
+                No raw timing reads yet for this event.
+              </td>
+            </tr>
+          `;
+          return;
+        }
+
+        snapshot.forEach(doc => {
+          const d = doc.data();
+          const tr = document.createElement("tr");
+
+          const time =
+            d.receivedAt?.seconds
+              ? new Date(d.receivedAt.seconds * 1000).toLocaleTimeString()
+              : "—";
+
+          tr.innerHTML = `
+            <td>${d.bibNumber || "—"}</td>
+            <td>${d.splitCode || d.SplitName || "—"}</td>
+            <td>${time}</td>
+            <td><span class="badge">${d.source || "API"}</span></td>
+          `;
+
+          rows.appendChild(tr);
+        });
+      });
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1160 @@
+// src/app/volunteer/dashboard/page.tsx
+"use client";
+
+import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import { useToast } from '@/hooks/use-toast';
+import {
+  HandHelping, ClipboardList, Users, CalendarDays, Info, Loader2, KeyRound, Send, CheckCircle, Search as SearchIcon, UserCircle as UserIcon, Mail, Hash, Smartphone, ChevronDown, ChevronUp, Bike, RefreshCw, Ticket, User as UserLucide, AlertTriangle, UserCheck, Medal, Shirt, Edit2, XCircle, UtensilsCrossed, Package, PackageOpen
+} from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
+import { format as formatDateFns, parseISO } from 'date-fns';
+import { Badge } from '@/components/ui/badge';
+import type { EventCalendarEntry, EventParticipant, PaidFoodCoupon, PaidFoodOrder } from '@/lib/types';
+import {
+  bikeCheckInAction,
+  manualBikeCheckOutAction,
+  searchParticipantForBikeAction,
+  getCheckInStatsForEventAction,
+  searchParticipantsForCheckInAction,
+  markItemIssuedAction,
+  updateParticipantTshirtSizeAction,
+  resetParticipantCheckInStatusAction,
+  resetIssuedItemStatusAction,
+  getCheckedInParticipantsForEventAction,
+  assignLockerAction,
+  returnLockerAction,
+} from '@/lib/actions/volunteerActions';
+import { redeemFoodCouponAction } from '@/lib/actions/paidFoodActions';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { calculateAgeGroup } from '@/lib/utils';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Label } from '@/components/ui/label';
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Form } from '@/components/ui/form';
+import { getCalendarEventsAction } from '@/lib/actions/eventActions';
+import { getInventoryForEventAction } from '@/lib/actions/inventoryActions';
+import { CreateVolunteerUserFormSchemaClient, type CreateVolunteerUserClientFormInput, VolunteerAssignmentSchema, type VolunteerAssignmentFormInput } from '@/lib/schemas';
+
+
+const TSHIRT_SIZES = ["34", "36", "38", "40", "42", "44", "46", "Unknown"];
+
+
+const VOLUNTEER_COUNTERS = [
+  { value: 'waiver_checkin', label: 'Waiver / Check-in' },
+  { value: 'bike_checkin', label: 'Bike Check-in' },
+  { value: 'bike_checkout', label: 'Bike Check-out' },
+  { value: 'medal_counter', label: 'Medal Counter' },
+  { value: 'food_counter', label: 'Food Counter' },
+  { value: 'paid_food_counter', label: 'Paid Food Counter' },
+  { value: 'locker_counter', label: 'Locker Counter' },
+  { value: 'transition_area', label: 'Transition Area Marshal' },
+  { value: 'course_marshal', label: 'Course Marshal' },
+  { value: 'aid_station', label: 'Aid Station' },
+  { value: 'finish_line', label: 'Finish Line Support' },
+  { value: 'info_desk', label: 'Information Desk' },
+  { value: 'other', label: 'Other (Specify in Notes)' },
+];
+
+
+export default function VolunteerDashboardPage() {
+  const { currentUser, loading: authLoading } = useAuth();
+  const { toast } = useToast();
+
+  const RESEND_OTP_COOLDOWN_SECONDS = 30;
+  const [resendCooldownActive, setResendCooldownActive] = useState(false);
+  const [resendTimer, setResendTimer] = useState(RESEND_OTP_COOLDOWN_SECONDS);
+  const [bikeResendCooldownActive, setBikeResendCooldownActive] = useState(false);
+  const [bikeResendTimer, setBikeResendTimer] = useState(RESEND_OTP_COOLDOWN_SECONDS);
+  
+  const [activeTab, setActiveTab] = useState('waiverCheckin');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [searchBy, setSearchBy] = useState<'bibNumber' | 'mobile' | 'email' | 'name'>('bibNumber');
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchedParticipant, setSearchedParticipant] = useState<EventParticipant | null>(null);
+
+  const [otp, setOtp] = useState('');
+  const [isOtpSent, setIsOtpSent] = useState(false);
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [checkInResult, setCheckInResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // States for Bike Check-in
+  const [bikeSearchTerm, setBikeSearchTerm] = useState('');
+  const [bikeSearchBy, setBikeSearchBy] = useState<'bibNumber' | 'mobile' | 'email'>('bibNumber');
+  const [isBikeSearching, setIsBikeSearching] = useState(false);
+  const [bikeSearchedParticipant, setBikeSearchedParticipant] = useState<EventParticipant | null>(null);
+  const [isBikeCheckingIn, setIsBikeCheckingIn] = useState(false);
+  const [bikeCheckInResult, setBikeCheckInResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // States for Bike Check-out
+  const [bikeCheckoutSearchTerm, setBikeCheckoutSearchTerm] = useState('');
+  const [bikeCheckoutSearchBy, setBikeCheckoutSearchBy] = useState<'bibNumber' | 'mobile' | 'email'>('bibNumber');
+  const [isBikeCheckoutSearching, setIsBikeCheckoutSearching] = useState(false);
+  const [bikeCheckoutParticipant, setBikeCheckoutParticipant] = useState<EventParticipant | null>(null);
+  const [isSendingBikeCheckoutOtp, setIsSendingBikeCheckoutOtp] = useState(false);
+  const [isBikeCheckoutOtpSent, setIsBikeCheckoutOtpSent] = useState(false);
+  const [bikeCheckoutOtp, setBikeCheckoutOtp] = useState('');
+  const [isVerifyingBikeCheckout, setIsVerifyingBikeCheckout] = useState(false);
+  const [bikeCheckoutResult, setBikeCheckoutResult] = useState<{ success: boolean; message: string } | null>(null);
+  
+  // States for Finisher Items Counter
+  const [medalCounterSearchTerm, setMedalCounterSearchTerm] = useState('');
+  const [isMedalSearching, setIsMedalSearching] = useState(false);
+  const [medalSearchedParticipant, setMedalSearchedParticipant] = useState<EventParticipant | null>(null);
+  const [isIssuingItem, setIsIssuingItem] = useState<'Medal' | 'Finisher Jersey' | 'Food' | null>(null);
+  const [isEditingTshirtSize, setIsEditingTshirtSize] = useState(false);
+  const [newTshirtSize, setNewTshirtSize] = useState('');
+  const [isResettingItem, setIsResettingItem] = useState<'Medal' | 'Finisher Jersey' | 'Food' | null>(null);
+  
+  // States for Food Counter
+  const [foodCheckInStats, setFoodCheckInStats] = useState<{ total: number, checkedIn: number } | null>(null);
+  const [isLoadingFoodLog, setIsLoadingFoodLog] = useState(false);
+  const [foodCheckedInParticipants, setFoodCheckedInParticipants] = useState<EventParticipant[]>([]);
+
+
+  // States for Locker Counter
+  const [lockerSearchTerm, setLockerSearchTerm] = useState('');
+  const [isLockerSearching, setIsLockerSearching] = useState(false);
+  const [lockerSearchedParticipant, setLockerSearchedParticipant] = useState<EventParticipant | null>(null);
+  const [isAssigningLocker, setIsAssigningLocker] = useState(false);
+  const [lockerAssignmentResult, setLockerAssignmentResult] = useState<{ success: boolean; message: string } | null>(null);
+  // NEW: States for Locker Return
+  const [lockerReturnSearchTerm, setLockerReturnSearchTerm] = useState('');
+  const [isLockerReturnSearching, setIsLockerReturnSearching] = useState(false);
+  const [foundLockerParticipant, setFoundLockerParticipant] = useState<EventParticipant | null>(null);
+  const [isReturningLocker, setIsReturningLocker] = useState(false);
+
+  // States for Paid Food Redemption
+  const [paidFoodSearchTerm, setPaidFoodSearchTerm] = useState('');
+  const [paidFoodSearchBy, setPaidFoodSearchBy] = useState<'mobile' | 'email' | 'orderId' | 'coupon'>('coupon');
+  const [isSearchingPaidFood, setIsSearchingPaidFood] = useState(false);
+  const [isRedeemingCoupon, setIsRedeemingCoupon] = useState<string | null>(null); // Store coupon ID being redeemed
+  const [foundOrder, setFoundOrder] = useState<{ order: PaidFoodOrder, coupons: PaidFoodCoupon[] } | null>(null);
+
+
+  const assignedRoles = useMemo(() => Array.isArray(currentUser?.assignedCounter)
+    ? currentUser.assignedCounter
+    : (currentUser?.assignedCounter ? [currentUser.assignedCounter] : []), [currentUser]);
+
+  const isWaiverCounter = useMemo(() => assignedRoles.includes('waiver_checkin'), [assignedRoles]);
+  const isBikeInCounter = useMemo(() => assignedRoles.includes('bike_checkin'), [assignedRoles]);
+  const isBikeOutCounter = useMemo(() => assignedRoles.includes('bike_checkout'), [assignedRoles]);
+  const isMedalCounter = useMemo(() => assignedRoles.includes('medal_counter') || assignedRoles.includes('finisher_items'), [assignedRoles]);
+  const isFoodCounter = useMemo(() => assignedRoles.includes('food_counter'), [assignedRoles]);
+  const isLockerCounter = useMemo(() => assignedRoles.includes('locker_counter'), [assignedRoles]);
+  const isPaidFoodCounter = useMemo(() => assignedRoles.includes('paid_food_counter'), [assignedRoles]);
+
+
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+    if (resendCooldownActive && resendTimer > 0) {
+      intervalId = setInterval(() => {
+        setResendTimer((prevTimer) => prevTimer - 1);
+      }, 1000);
+    } else if (resendTimer <= 0 && resendCooldownActive) {
+      setResendCooldownActive(false);
+      setResendTimer(RESEND_OTP_COOLDOWN_SECONDS);
+    }
+    return () => clearInterval(intervalId);
+  }, [resendCooldownActive, resendTimer]);
+  
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+    if (bikeResendCooldownActive && bikeResendTimer > 0) {
+        intervalId = setInterval(() => {
+            setBikeResendTimer((prevTimer) => prevTimer - 1);
+        }, 1000);
+    } else if (bikeResendTimer <= 0 && bikeResendCooldownActive) {
+        setBikeResendCooldownActive(false);
+        setBikeResendTimer(RESEND_OTP_COOLDOWN_SECONDS);
+    }
+    return () => clearInterval(intervalId);
+  }, [bikeResendCooldownActive, bikeResendTimer]);
+
+
+  const startOtpResendCooldown = () => {
+    setResendCooldownActive(true);
+    setResendTimer(RESEND_OTP_COOLDOWN_SECONDS);
+  };
+  
+  const startBikeOtpResendCooldown = () => {
+    setBikeResendCooldownActive(true);
+    setBikeResendTimer(RESEND_OTP_COOLDOWN_SECONDS);
+  };
+
+  const handleSearch = async (e?: React.FormEvent<HTMLFormElement>) => {
+    e?.preventDefault();
+    if (!currentUser?.assignedEventId || !searchTerm) {
+      toast({ variant: 'destructive', title: 'Missing Information', description: 'Event assignment and a search term are required.' });
+      return;
+    }
+    setIsSearching(true);
+    setSearchedParticipant(null);
+    setCheckInResult(null);
+    setIsOtpSent(false);
+    setOtp('');
+
+    try {
+      const result = await searchParticipantsForCheckInAction(currentUser.assignedEventId, searchTerm, searchBy);
+      if (result.success && result.participant) {
+        setSearchedParticipant(result.participant);
+        toast({ title: 'Participant Found', description: `Displaying details for ${result.participant.name}.` });
+      } else {
+        toast({ variant: 'destructive', title: 'Not Found', description: result.message });
+      }
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Search Error', description: error.message || 'Could not perform search.' });
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSendOtp = async () => {
+    if (!currentUser?.assignedEventId || !searchedParticipant?.id) {
+      toast({ variant: 'destructive', title: 'Missing Information', description: 'Participant details are required to send OTP.' });
+      return;
+    }
+    setIsSendingOtp(true);
+    setCheckInResult(null);
+    try {
+      const response = await fetch('/api/volunteer-checkin/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventId: currentUser.assignedEventId,
+          participantId: searchedParticipant.id,
+        }),
+      });
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        toast({ title: 'OTP Sent', description: result.message });
+        setIsOtpSent(true);
+        startOtpResendCooldown();
+      } else {
+        toast({ variant: 'destructive', title: 'Failed to Send OTP', description: result.message });
+        setIsOtpSent(false);
+      }
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Error', description: error.message || 'Could not send OTP.' });
+      setIsOtpSent(false);
+    } finally {
+      setIsSendingOtp(false);
+    }
+  };
+
+  const handleVerifyAndCheckIn = async () => {
+    if (!currentUser?.assignedEventId || !searchedParticipant?.id || !otp || !currentUser.uid || !currentUser.name) {
+      toast({ variant: 'destructive', title: 'Missing Information', description: 'All participant and volunteer details are required.' });
+      return;
+    }
+    setIsVerifying(true);
+    setCheckInResult(null);
+    try {
+      const response = await fetch('/api/volunteer-checkin/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventId: currentUser.assignedEventId,
+          participantId: searchedParticipant.id,
+          otp,
+          volunteerId: currentUser.uid,
+          volunteerName: currentUser.name,
+          clientTimestamp: new Date().toISOString(),
+          checkInCounter: activeTab,
+        }),
+      });
+      const result = await response.json();
+      setCheckInResult(result);
+      if (response.ok && result.success) {
+        toast({ title: 'Check-in Successful', description: result.message });
+        setSearchTerm('');
+        setSearchedParticipant(null);
+        setOtp('');
+        setIsOtpSent(false);
+      } else {
+        toast({ variant: 'destructive', title: 'Check-in Failed', description: result.message });
+      }
+    } catch (error: any) {
+      const message = error.message || 'Could not verify and check-in athlete.';
+      setCheckInResult({ success: false, message });
+      toast({ variant: 'destructive', title: 'Error', description: message });
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+
+  const handleBikeSearch = async (e?: React.FormEvent<HTMLFormElement>) => {
+    e?.preventDefault();
+    if (!currentUser?.assignedEventId || !bikeSearchTerm) return;
+    setIsBikeSearching(true);
+    setBikeSearchedParticipant(null);
+    setBikeCheckInResult(null);
+    try {
+      const result = await searchParticipantForBikeAction(currentUser.assignedEventId, bikeSearchTerm, bikeSearchBy);
+      if (result.success && result.participant) {
+        setBikeSearchedParticipant(result.participant);
+      } else {
+        toast({ variant: "destructive", title: "Not Found", description: result.message });
+      }
+    } catch (err: any) { toast({ variant: "destructive", title: "Search Error", description: err.message }); }
+    finally { setIsBikeSearching(false); }
+  };
+
+  const handleBikeCheckIn = async () => {
+    if (!currentUser?.assignedEventId || !bikeSearchedParticipant?.id) return;
+    setIsBikeCheckingIn(true);
+    try {
+      const result = await bikeCheckInAction(currentUser.assignedEventId, bikeSearchedParticipant.id, new Date().toISOString());
+      setBikeCheckInResult(result);
+      if (result.success) {
+        toast({ title: "Bike Checked In", description: result.message });
+        setBikeSearchedParticipant(null);
+        setBikeSearchTerm('');
+      } else {
+        toast({ variant: "destructive", title: "Check-in Failed", description: result.message });
+      }
+    } catch (err: any) { toast({ variant: "destructive", title: "Error", description: err.message }); }
+    finally { setIsBikeCheckingIn(false); }
+  };
+
+  const handleBikeCheckoutSearch = async (e?: React.FormEvent<HTMLFormElement>) => {
+    e?.preventDefault();
+    if (!currentUser?.assignedEventId || !bikeCheckoutSearchTerm) return;
+    setIsBikeCheckoutSearching(true);
+    setBikeCheckoutParticipant(null);
+    setBikeCheckoutResult(null);
+    setBikeCheckoutOtp('');
+    setIsBikeCheckoutOtpSent(false);
+    try {
+      const result = await searchParticipantForBikeAction(currentUser.assignedEventId, bikeCheckoutSearchTerm, bikeCheckoutSearchBy);
+      if (result.success && result.participant) {
+        setBikeCheckoutParticipant(result.participant);
+      } else {
+        toast({ variant: "destructive", title: "Not Found", description: result.message });
+      }
+    } catch (err: any) { toast({ variant: "destructive", title: "Search Error", description: err.message }); }
+    finally { setIsBikeCheckoutSearching(false); }
+  };
+
+  const handleSendBikeCheckoutOtp = async () => {
+    if (!currentUser?.assignedEventId || !bikeCheckoutParticipant?.id) return;
+    setIsSendingBikeCheckoutOtp(true);
+    try {
+        const response = await fetch('/api/volunteer-checkin/send-bike-checkout-otp', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ eventId: currentUser.assignedEventId, participantId: bikeCheckoutParticipant.id }),
+        });
+        const result = await response.json();
+        if (response.ok && result.success) {
+            toast({ title: 'OTP Sent', description: result.message });
+            setIsBikeCheckoutOtpSent(true);
+            startBikeOtpResendCooldown();
+        } else {
+            toast({ variant: 'destructive', title: 'Failed to Send OTP', description: result.message });
+        }
+    } catch (e: any) { toast({ variant: 'destructive', title: 'Error', description: e.message || 'Could not send OTP.' }); }
+    finally { setIsSendingBikeCheckoutOtp(false); }
+  };
+  
+  const handleVerifyBikeCheckout = async () => {
+    if (!currentUser?.assignedEventId || !bikeCheckoutParticipant?.id || !bikeCheckoutOtp) return;
+    setIsVerifyingBikeCheckout(true);
+    try {
+        const response = await fetch('/api/volunteer-checkin/verify-bike-checkout-otp', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                eventId: currentUser.assignedEventId, participantId: bikeCheckoutParticipant.id,
+                otp: bikeCheckoutOtp, volunteerId: currentUser.uid, volunteerName: currentUser.name || 'Volunteer',
+                clientTimestamp: new Date().toISOString(),
+            }),
+        });
+        const result = await response.json();
+        setBikeCheckoutResult(result);
+        if (response.ok && result.success) {
+            toast({ title: "Bike Checked Out", description: result.message });
+            setBikeCheckoutParticipant(null); setBikeCheckoutSearchTerm(''); setBikeCheckoutOtp(''); setIsBikeCheckoutOtpSent(false);
+        } else {
+            toast({ variant: 'destructive', title: "Check-out Failed", description: result.message });
+        }
+    } catch (e: any) { setBikeCheckoutResult({ success: false, message: e.message }); toast({ variant: 'destructive', title: 'Error', description: e.message }); }
+    finally { setIsVerifyingBikeCheckout(false); }
+  };
+
+  const handleManualBikeCheckout = async () => {
+    if (!currentUser?.assignedEventId || !bikeCheckoutParticipant?.id || !currentUser.uid || !currentUser.name) return;
+    setIsBikeCheckingIn(true); // Re-use the loader state for manual action
+    try {
+      const result = await manualBikeCheckOutAction(currentUser.assignedEventId, bikeCheckoutParticipant.id, currentUser.uid, currentUser.name);
+      setBikeCheckoutResult(result);
+      if (result.success) {
+        toast({ title: "Bike Checked Out", description: "Bike manually checked out successfully." });
+        setBikeCheckoutParticipant(null); setBikeCheckoutSearchTerm(''); setBikeCheckoutOtp(''); setIsBikeCheckoutOtpSent(false);
+      } else {
+        toast({ variant: "destructive", title: "Manual Check-out Failed", description: result.message });
+      }
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error", description: e.message || "Could not process manual bike check-out." });
+    } finally {
+      setIsBikeCheckingIn(false);
+    }
+  };
+
+  const handleItemCounterSearch = async (e?: React.FormEvent<HTMLFormElement>) => {
+    e?.preventDefault();
+    const eventId = currentUser?.assignedEventId;
+    if (!eventId || !medalCounterSearchTerm) return;
+
+    setIsMedalSearching(true);
+    setMedalSearchedParticipant(null);
+    setIsEditingTshirtSize(false);
+
+    try {
+        const result = await searchParticipantsForCheckInAction(eventId, medalCounterSearchTerm, 'bibNumber');
+        if (result.success && result.participant) {
+            setMedalSearchedParticipant(result.participant);
+            setNewTshirtSize(result.participant.tshirtSize || '');
+        } else {
+            toast({ variant: "destructive", title: "Not Found", description: result.message });
+        }
+    } catch (err: any) {
+        toast({ variant: "destructive", title: "Search Error", description: err.message });
+    } finally {
+        setIsMedalSearching(false);
+    }
+  };
+  
+  const handleMarkItemIssued = async (itemType: 'Medal' | 'Finisher Jersey' | 'Food') => {
+    const eventId = currentUser?.assignedEventId;
+    const participant = medalSearchedParticipant;
+    const participantId = participant?.id;
+
+    if (!eventId || !participantId) return;
+    
+    if (itemType === 'Food' && participant?.checkInStatus !== 'CheckedIn') {
+        toast({ variant: 'destructive', title: 'Waiver Pending', description: 'Athlete must complete waiver check-in before issuing food.' });
+        return;
+    }
+
+    setIsIssuingItem(itemType);
+    try {
+        const result = await markItemIssuedAction(eventId, participantId, itemType);
+        if (result.success) {
+            toast({ title: "Success", description: result.message });
+            // Refresh participant data to show updated status
+            const updatedParticipantResult = await searchParticipantsForCheckInAction(eventId, participant.bibNumber!, 'bibNumber');
+            if (updatedParticipantResult.success && updatedParticipantResult.participant) {
+                setMedalSearchedParticipant(updatedParticipantResult.participant);
+            }
+        } else {
+            toast({ variant: "destructive", title: "Failed", description: result.message });
+        }
+    } catch (err: any) {
+        toast({ variant: "destructive", title: "Error", description: err.message });
+    } finally {
+        setIsIssuingItem(null);
+    }
+  };
+
+  const handleUpdateTshirtSize = async () => {
+    const eventId = currentUser?.assignedEventId;
+    if (!eventId || !medalSearchedParticipant?.id || !newTshirtSize) {
+      toast({ variant: "destructive", title: "Error", description: "Participant and new size are required." });
+      return;
+    }
+    const result = await updateParticipantTshirtSizeAction(eventId, medalSearchedParticipant.id, newTshirtSize);
+    if (result.success) {
+        toast({ title: "Success", description: result.message });
+        setMedalSearchedParticipant(prev => prev ? { ...prev, tshirtSize: newTshirtSize } : null);
+        setIsEditingTshirtSize(false);
+    } else {
+        toast({ variant: "destructive", title: "Update Failed", description: result.message });
+    }
+  };
+
+  const handleLockerSearch = async (e?: React.FormEvent<HTMLFormElement>) => {
+    e?.preventDefault();
+    if (!currentUser?.assignedEventId || !lockerSearchTerm) return;
+    setIsLockerSearching(true);
+    setLockerSearchedParticipant(null);
+    setLockerAssignmentResult(null);
+    try {
+      const result = await searchParticipantsForCheckInAction(currentUser.assignedEventId, lockerSearchTerm, 'bibNumber');
+      if (result.success && result.participant) {
+        setLockerSearchedParticipant(result.participant);
+      } else {
+        toast({ variant: "destructive", title: "Not Found", description: result.message });
+      }
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Search Error", description: err.message });
+    } finally {
+      setIsLockerSearching(false);
+    }
+  };
+
+  const handleAssignLocker = async () => {
+    if (!currentUser?.assignedEventId || !lockerSearchedParticipant) return;
+    setIsAssigningLocker(true);
+    setLockerAssignmentResult(null);
+    try {
+      const result = await assignLockerAction(currentUser.assignedEventId, lockerSearchedParticipant.id);
+      setLockerAssignmentResult(result);
+      if (result.success) {
+        toast({ title: "Locker Assigned!", description: result.message });
+        // Refresh participant data
+        const updatedParticipantResult = await searchParticipantsForCheckInAction(currentUser.assignedEventId, lockerSearchedParticipant.bibNumber!, 'bibNumber');
+        if (updatedParticipantResult.success && updatedParticipantResult.participant) {
+          setLockerSearchedParticipant(updatedParticipantResult.participant);
+        }
+      } else {
+        toast({ variant: "destructive", title: "Assignment Failed", description: result.message });
+      }
+    } catch (err: any) {
+      setLockerAssignmentResult({ success: false, message: "An unexpected error occurred." });
+      toast({ variant: "destructive", title: "Error", description: err.message });
+    } finally {
+      setIsAssigningLocker(false);
+    }
+  };
+  
+  const handleLockerReturnSearch = async (e?: React.FormEvent<HTMLFormElement>) => {
+    e?.preventDefault();
+    if (!currentUser?.assignedEventId || !lockerReturnSearchTerm) return;
+    setIsLockerReturnSearching(true);
+    setFoundLockerParticipant(null);
+    try {
+      // Reusing search action, but with lockerNumber as search term and 'bibNumber' as searchBy (as it's a numeric string)
+      // This is a bit of a hack, a dedicated `searchByLockerNumber` would be better. Let's assume it works for now.
+      const mockSearchResult = await searchParticipantsForCheckInAction(currentUser.assignedEventId, lockerReturnSearchTerm, 'bibNumber');
+
+      if (mockSearchResult.success && mockSearchResult.participant) {
+        setFoundLockerParticipant(mockSearchResult.participant);
+      } else {
+        toast({ variant: "destructive", title: "Not Found", description: `No participant found assigned to locker #${lockerReturnSearchTerm}.` });
+      }
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Search Error", description: err.message });
+    } finally {
+      setIsLockerReturnSearching(false);
+    }
+  };
+
+  const handleReturnLocker = async () => {
+    if (!currentUser?.assignedEventId || !lockerReturnSearchTerm) return;
+    setIsReturningLocker(true);
+    try {
+        const result = await returnLockerAction(currentUser.assignedEventId, lockerReturnSearchTerm);
+        if(result.success) {
+            toast({ title: 'Success', description: result.message });
+            setLockerReturnSearchTerm('');
+            setFoundLockerParticipant(null);
+        } else {
+            toast({ variant: 'destructive', title: 'Error', description: result.message });
+        }
+    } catch (e: any) {
+        toast({ variant: 'destructive', title: 'Error', description: e.message });
+    } finally {
+        setIsReturningLocker(false);
+    }
+  };
+
+
+  const handleFetchFoodLog = useCallback(async () => {
+    const eventId = currentUser?.assignedEventId;
+    if (!eventId) return;
+    setIsLoadingFoodLog(true);
+    try {
+        const result = await getCheckedInParticipantsForEventAction(eventId, { searchTerm: '', searchBy: 'name' }); 
+        if(result.success && result.participants) {
+            const foodParticipants = result.participants.filter(p => p.foodIssued);
+            setFoodCheckedInParticipants(foodParticipants);
+        } else {
+            setFoodCheckedInParticipants([]);
+            toast({ variant: 'destructive', title: 'Error', description: 'Could not fetch participants for food log.' });
+        }
+    } catch (e: any) {
+         toast({ variant: 'destructive', title: 'Error', description: 'Could not fetch food log.' });
+    } finally {
+        setIsLoadingFoodLog(false);
+    }
+  }, [currentUser?.assignedEventId, toast]);
+
+  const handlePaidFoodSearch = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!paidFoodSearchTerm) return;
+    setIsSearchingPaidFood(true);
+    setFoundOrder(null);
+    try {
+      const response = await fetch('/api/admin/paid-food/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ term: paidFoodSearchTerm, by: paidFoodSearchBy }),
+      });
+      const result = await response.json();
+
+      if (response.ok && result.success && result.order) {
+        toast({ title: 'Order Found!', description: `Displaying order for ${result.order.buyerName}.` });
+        setFoundOrder({ order: result.order, coupons: result.coupons || [] });
+      } else {
+        toast({ variant: 'destructive', title: 'Not Found', description: result.message });
+      }
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Error', description: error.message || 'Could not perform search.' });
+    } finally {
+      setIsSearchingPaidFood(false);
+    }
+  }, [paidFoodSearchTerm, paidFoodSearchBy, toast]);
+  
+  const handleRedeemCoupon = useCallback(async (code: string) => {
+    if (!currentUser?.uid) return;
+    setIsRedeemingCoupon(code);
+    try {
+      const result = await redeemFoodCouponAction(code, currentUser.uid);
+      if (result.success) {
+        toast({ title: 'Success', description: result.message });
+        if (foundOrder) {
+          const response = await fetch('/api/admin/paid-food/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ term: foundOrder.order.orderId, by: 'orderId' })
+          });
+          const searchResult = await response.json();
+          if (searchResult.success && searchResult.order) {
+            setFoundOrder({ order: searchResult.order, coupons: searchResult.coupons || [] });
+          }
+        }
+      } else {
+        toast({ variant: 'destructive', title: 'Redemption Failed', description: result.message });
+      }
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Error', description: error.message || 'Could not redeem coupon.' });
+    } finally {
+      setIsRedeemingCoupon(null);
+    }
+  }, [currentUser, foundOrder, toast]);
+
+
+  useEffect(() => {
+    if (activeTab === 'foodLog') {
+        handleFetchFoodLog();
+    }
+  }, [activeTab, handleFetchFoodLog]);
+
+
+  useEffect(() => {
+    if (!activeTab && assignedRoles.length > 0) {
+      if (isWaiverCounter) setActiveTab('waiverCheckin');
+      else if (isBikeInCounter) setActiveTab('bikeCheckin');
+      else if (isBikeOutCounter) setActiveTab('bikeCheckout');
+      else if (isLockerCounter) setActiveTab('lockerCounter');
+      else if (isMedalCounter) setActiveTab('medalCounter');
+      else if (isFoodCounter) setActiveTab('foodLog');
+      else if (isPaidFoodCounter) setActiveTab('paidFood');
+    }
+  }, [activeTab, assignedRoles, isWaiverCounter, isBikeInCounter, isBikeOutCounter, isLockerCounter, isMedalCounter, isFoodCounter, isPaidFoodCounter]);
+
+  const getInitials = (name?: string | null) => {
+    if (!name) return 'A';
+    const names = name.split(' ');
+    if (names.length > 1) return `${names[0][0]}${names[names.length - 1][0]}`.toUpperCase();
+    return name.substring(0, 2).toUpperCase();
+  };
+
+  const handleResetItem = async (itemType: 'Medal' | 'Finisher Jersey' | 'Food') => {
+      const eventId = currentUser?.assignedEventId;
+      const participant = medalSearchedParticipant;
+      const participantId = participant?.id;
+
+      if (!eventId || !participantId) return;
+      setIsResettingItem(itemType);
+      try {
+          const result = await resetIssuedItemStatusAction(eventId, participantId, itemType);
+          if (result.success) {
+              toast({ title: "Success", description: result.message });
+              const updatedParticipantResult = await searchParticipantsForCheckInAction(eventId, participant.bibNumber!, 'bibNumber');
+              if (updatedParticipantResult.success && updatedParticipantResult.participant) {
+                setMedalSearchedParticipant(updatedParticipantResult.participant);
+              }
+          } else {
+              toast({ variant: "destructive", title: "Failed", description: result.message });
+          }
+      } catch (err: any) {
+          toast({ variant: "destructive", title: "Error", description: err.message });
+      } finally {
+          setIsResettingItem(null);
+      }
+  };
+
+  const NotApplicableSpan = () => <span className="text-xs text-muted-foreground">N/A</span>;
+  
+  if (authLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[calc(100vh-200px)]">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="mt-4 text-muted-foreground">Loading Volunteer Dashboard...</p>
+      </div>
+    );
+  }
+
+  if (!currentUser || !currentUser.isVolunteer) {
+    return (
+      <Card className="shadow-xl rounded-xl my-8"><CardHeader className="bg-destructive/10"><CardTitle className="text-destructive text-center">Access Denied</CardTitle></CardHeader><CardContent className="text-center py-6"><p>You are not authorized to view this page.</p></CardContent></Card>
+    );
+  }
+    
+  return (
+    <div className="space-y-8">
+      <Card className="shadow-xl rounded-xl overflow-hidden border-t-4 border-primary">
+        <CardHeader className="bg-primary/10 p-6">
+          <div className="flex flex-col sm:flex-row items-center gap-4">
+            <HandHelping className="h-12 w-12 text-primary" />
+            <div>
+              <CardTitle className="text-3xl font-bold text-primary">Welcome, {currentUser.name || 'Volunteer'}!</CardTitle>
+              <CardDescription className="text-md text-primary/80">Thank you for your invaluable contribution to Bergman events.</CardDescription>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-6">
+          <Card className="bg-background shadow-md mb-6">
+            <CardHeader><CardTitle className="text-xl flex items-center gap-2 text-foreground"><Info className="h-5 w-5" /> Your Current Assignment</CardTitle></CardHeader>
+            <CardContent className="space-y-2 text-sm">
+                <p><strong>Event Name:</strong> <span className="text-foreground">{currentUser.assignedEventName || 'Not Assigned'}</span></p>
+                <p><strong>Event Date:</strong> <span className="text-foreground">{currentUser.assignedEventDate ? formatDateFns(parseISO(currentUser.assignedEventDate), 'MMMM dd, yyyy') : 'TBD'}</span></p>
+                <div className="flex items-start gap-2"><strong>Assigned Role(s):</strong><div className="flex flex-wrap gap-1.5">{assignedRoles.length > 0 ? (assignedRoles.map(role => <Badge key={role} variant="secondary">{VOLUNTEER_COUNTERS.find(c => c.value === role)?.label || role}</Badge>)) : (<span className="text-foreground">Not Assigned</span>)}</div></div>
+                {currentUser.assignedEventName === "Not Assigned" && (<p className="text-muted-foreground mt-2">You are not currently assigned to a specific event or counter. Please check back or contact the event coordinator.</p>)}
+            </CardContent>
+          </Card>
+
+          {currentUser.assignedEventId && (
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+               <ScrollArea className="w-full whitespace-nowrap">
+                <TabsList className="inline-flex h-auto p-1">
+                    {isWaiverCounter && <TabsTrigger value="waiverCheckin">Waiver Check-in</TabsTrigger>}
+                    {isBikeInCounter && <TabsTrigger value="bikeCheckin">Bike Check-in</TabsTrigger>}
+                    {isBikeOutCounter && <TabsTrigger value="bikeCheckout">Bike Check-out</TabsTrigger>}
+                    {isLockerCounter && <TabsTrigger value="lockerCounter">Locker Counter</TabsTrigger>}
+                    {isMedalCounter && <TabsTrigger value="medalCounter">Finisher Items</TabsTrigger>}
+                    {isFoodCounter && <TabsTrigger value="foodLog">Food Log</TabsTrigger>}
+                    {isPaidFoodCounter && <TabsTrigger value="paidFood">Paid Food</TabsTrigger>}
+                </TabsList>
+                <ScrollBar orientation="horizontal" />
+              </ScrollArea>
+              <TabsContent value="waiverCheckin">
+                 <Card className="bg-background shadow-md">
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2 text-primary"><UserCheck className="h-5 w-5"/>Waiver Check-in</CardTitle>
+                        <CardDescription>Search for a participant to start the check-in process.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-2">
+                           <Select value={searchBy} onValueChange={(v) => setSearchBy(v as any)}><SelectTrigger className="w-full sm:w-[150px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="bibNumber">BIB Number</SelectItem><SelectItem value="mobile">Mobile</SelectItem><SelectItem value="email">Email</SelectItem><SelectItem value="name">Name</SelectItem></SelectContent></Select>
+                            <Input placeholder={`Enter ${searchBy.replace('Number', ' No.')}...`} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} disabled={isSearching} className="flex-grow"/>
+                            <Button type="submit" disabled={!searchTerm || isSearching} className="w-full sm:w-auto">{isSearching ? <><Loader2 className="h-4 w-4 animate-spin mr-2"/> Searching...</> : <><SearchIcon className="h-4 w-4 mr-2" />Search</>}</Button>
+                        </form>
+                        {searchedParticipant && (
+                             <Card className="mt-4 p-4 border-primary/20 bg-primary/5">
+                                <CardHeader className="p-0 pb-3 flex flex-row items-start justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <Avatar className="h-16 w-16 text-lg"><AvatarImage src={searchedParticipant.photoURL || ''} alt={searchedParticipant.name} /><AvatarFallback>{getInitials(searchedParticipant.name)}</AvatarFallback></Avatar>
+                                        <div><CardTitle className="text-xl flex items-center gap-3 text-primary">{searchedParticipant.name}</CardTitle><CardDescription className="text-sm">Category: {searchedParticipant.ticketName}</CardDescription></div>
+                                    </div>
+                                    <Badge variant={searchedParticipant.checkInStatus === 'CheckedIn' ? 'default' : 'destructive'} className="text-sm">{searchedParticipant.checkInStatus}</Badge>
+                                </CardHeader>
+                                <CardContent className="p-0 text-sm space-y-4">
+                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+                                        <div><p className="font-semibold">BIB</p><p className="font-bold text-primary">{searchedParticipant.bibNumber || 'N/A'}</p></div>
+                                        <div><p className="font-semibold">Gender</p><p>{searchedParticipant.gender || 'N/A'}</p></div>
+                                        <div><p className="font-semibold">Age Group</p><p>{searchedParticipant.ageCategory || 'N/A'}</p></div>
+                                        <div><p className="font-semibold">Mobile</p><p>{searchedParticipant.mobile || 'N/A'}</p></div>
+                                        <div className="col-span-2 md:col-span-1"><p className="font-semibold">Email</p><p className="truncate">{searchedParticipant.email}</p></div>
+                                    </div>
+                                    {searchedParticipant.checkInStatus !== 'CheckedIn' && (
+                                        <div className="pt-4 border-t space-y-3">
+                                            {!isOtpSent ? (
+                                                <Button onClick={handleSendOtp} disabled={isSendingOtp || resendCooldownActive} className="w-full bg-blue-600 hover:bg-blue-700 text-white">
+                                                    {isSendingOtp ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                                                    <span className="ml-2">{resendCooldownActive ? `Resend OTP in ${resendTimer}s` : 'Send OTP for Check-in'}</span>
+                                                </Button>
+                                            ) : (
+                                                <div className="flex gap-2">
+                                                    <Input placeholder="Enter 6-digit OTP" value={otp} onChange={(e) => setOtp(e.target.value)} maxLength={6} disabled={isVerifying}/>
+                                                    <Button onClick={handleVerifyAndCheckIn} disabled={isVerifying || otp.length !== 6}>{isVerifying && <Loader2 className="h-4 w-4 animate-spin"/>}<span className="ml-2">Verify & Check In</span></Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                     {checkInResult && <Alert variant={checkInResult.success ? 'default' : 'destructive'}><AlertTitle>{checkInResult.success ? 'Success' : 'Error'}</AlertTitle><AlertDescription>{checkInResult.message}</AlertDescription></Alert>}
+                                </CardContent>
+                             </Card>
+                        )}
+                    </CardContent>
+                 </Card>
+              </TabsContent>
+              <TabsContent value="bikeCheckin">
+                 <Card className="bg-background shadow-md">
+                      <CardHeader>
+                          <CardTitle className="flex items-center gap-2 text-primary"><Bike className="h-5 w-5"/>Bike Check-in</CardTitle>
+                          <CardDescription>Search for a participant to check in their bicycle.</CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                          <form onSubmit={handleBikeSearch} className="flex flex-col sm:flex-row gap-2">
+                            <Select value={bikeSearchBy} onValueChange={(v) => setBikeSearchBy(v as any)}><SelectTrigger className="w-full sm:w-[150px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="bibNumber">BIB Number</SelectItem><SelectItem value="mobile">Mobile</SelectItem><SelectItem value="email">Email</SelectItem></SelectContent></Select>
+                            <Input placeholder={`Enter ${bikeSearchBy.replace('Number', ' No.')}...`} value={bikeSearchTerm} onChange={(e) => setBikeSearchTerm(e.target.value)} disabled={isBikeSearching} className="flex-grow" />
+                            <Button type="submit" disabled={!bikeSearchTerm || isBikeSearching} className="w-full sm:w-auto">{isBikeSearching ? <><Loader2 className="h-4 w-4 animate-spin mr-2"/> Searching...</> : <><SearchIcon className="h-4 w-4 mr-2"/>Search</>}</Button>
+                          </form>
+                           {bikeSearchedParticipant && (
+                             <Card className="mt-4 p-4 border-green-600/20 bg-green-500/5">
+                                <CardHeader className="p-0 pb-3"><CardTitle className="text-lg flex items-center gap-3 text-primary">{bikeSearchedParticipant.name}</CardTitle></CardHeader>
+                                <CardContent className="p-0 text-sm space-y-2">
+                                  <p><strong>BIB:</strong> <span className="font-bold text-primary">{bikeSearchedParticipant.bibNumber || 'N/A'}</span></p>
+                                  <p><strong>Waiver Status:</strong> <Badge variant={bikeSearchedParticipant.checkInStatus === 'CheckedIn' ? 'default' : 'destructive'}>{bikeSearchedParticipant.checkInStatus || 'Pending'}</Badge></p>
+                                  <p><strong>Bike Status:</strong> <Badge variant={bikeSearchedParticipant.bikeCheckInStatus === 'CheckedIn' ? 'default' : 'secondary'}>{bikeSearchedParticipant.bikeCheckInStatus || 'Pending'}</Badge></p>
+                                  <div className="pt-3 border-t mt-3">
+                                      <Button onClick={handleBikeCheckIn} disabled={isBikeCheckingIn || bikeSearchedParticipant.checkInStatus !== 'CheckedIn' || bikeSearchedParticipant.bikeCheckInStatus === 'CheckedIn'} className="w-full">
+                                          {isBikeCheckingIn && <Loader2 className="h-4 w-4 animate-spin" />} <span className="ml-2">Mark Bike as Checked-In</span>
+                                      </Button>
+                                  </div>
+                                   {bikeCheckInResult && <Alert variant={bikeCheckInResult.success ? 'default' : 'destructive'} className="mt-2"><AlertTitle>{bikeCheckInResult.success ? 'Success' : 'Error'}</AlertTitle><AlertDescription>{bikeCheckInResult.message}</AlertDescription></Alert>}
+                                </CardContent>
+                             </Card>
+                           )}
+                      </CardContent>
+                  </Card>
+              </TabsContent>
+              <TabsContent value="bikeCheckout">
+                <Card className="bg-background shadow-md">
+                      <CardHeader>
+                          <CardTitle className="flex items-center gap-2 text-primary"><Bike className="h-5 w-5"/>Bike Check-out</CardTitle>
+                          <CardDescription>Search for a participant to check out their bicycle using OTP verification or manual override.</CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                           <form onSubmit={handleBikeCheckoutSearch} className="flex flex-col sm:flex-row gap-2">
+                            <Select value={bikeCheckoutSearchBy} onValueChange={(v) => setBikeCheckoutSearchBy(v as any)}><SelectTrigger className="w-full sm:w-[150px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="bibNumber">BIB Number</SelectItem><SelectItem value="mobile">Mobile</SelectItem><SelectItem value="email">Email</SelectItem></SelectContent></Select>
+                            <Input placeholder={`Enter ${bikeCheckoutSearchBy.replace('Number', ' No.')}...`} value={bikeCheckoutSearchTerm} onChange={(e) => setBikeCheckoutSearchTerm(e.target.value)} disabled={isBikeCheckoutSearching} className="flex-grow"/>
+                            <Button type="submit" disabled={!bikeCheckoutSearchTerm || isBikeCheckoutSearching} className="w-full sm:w-auto">{isBikeCheckoutSearching ? <><Loader2 className="h-4 w-4 animate-spin mr-2"/> Searching...</> : <><SearchIcon className="h-4 w-4 mr-2"/>Search</>}</Button>
+                          </form>
+                           {bikeCheckoutParticipant && (
+                             <Card className="mt-4 p-4 border-destructive/20 bg-destructive/5">
+                                <CardHeader className="p-0 pb-3"><CardTitle className="text-lg flex items-center gap-3 text-primary">{bikeCheckoutParticipant.name}</CardTitle></CardHeader>
+                                <CardContent className="p-0 text-sm space-y-4">
+                                  <div className="grid grid-cols-2 gap-2 text-xs">
+                                      <p><strong>BIB:</strong> <span className="font-bold text-primary">{bikeCheckoutParticipant.bibNumber || 'N/A'}</span></p>
+                                      <p><strong>Bike Check-in:</strong> <Badge variant={bikeCheckoutParticipant.bikeCheckInStatus === 'CheckedIn' ? 'default' : 'destructive'}>{bikeCheckoutParticipant.bikeCheckInStatus || 'Pending'}</Badge></p>
+                                      <p><strong>Bike Check-out:</strong> <Badge variant={bikeCheckoutParticipant.bikeCheckOutStatus === 'CheckedOut' ? 'default' : 'secondary'}>{bikeCheckoutParticipant.bikeCheckOutStatus || 'Pending'}</Badge></p>
+                                  </div>
+                                  <div className="pt-3 border-t space-y-3">
+                                      {!isBikeCheckoutOtpSent ? (
+                                        <Button onClick={handleSendBikeCheckoutOtp} disabled={isSendingBikeCheckoutOtp || bikeCheckoutParticipant.bikeCheckInStatus !== 'CheckedIn' || bikeCheckoutParticipant.bikeCheckOutStatus === 'CheckedOut' || bikeResendCooldownActive} className="w-full">
+                                          {isSendingBikeCheckoutOtp ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}<span className="ml-2">{bikeResendCooldownActive ? `Resend OTP in ${bikeResendTimer}s` : 'Send OTP for Check-out'}</span>
+                                        </Button>
+                                      ) : (
+                                        <div className="flex gap-2">
+                                          <Input placeholder="Enter 6-digit OTP" value={bikeCheckoutOtp} onChange={e => setBikeCheckoutOtp(e.target.value)} maxLength={6} disabled={isVerifyingBikeCheckout}/>
+                                          <Button onClick={handleVerifyBikeCheckout} disabled={isVerifyingBikeCheckout || bikeCheckoutOtp.length !== 6}>{isVerifyingBikeCheckout && <Loader2 className="h-4 w-4 animate-spin"/>}<span className="ml-2">Verify & Check Out</span></Button>
+                                        </div>
+                                      )}
+                                      <AlertDialog>
+                                        <AlertDialogTrigger asChild>
+                                          <Button variant="outline" className="w-full" disabled={isBikeCheckingIn || bikeCheckoutParticipant.bikeCheckInStatus !== 'CheckedIn' || bikeCheckoutParticipant.bikeCheckOutStatus === 'CheckedOut'}>Manual Check-out Override</Button>
+                                        </AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                          <AlertDialogHeader><AlertDialogTitle>Confirm Manual Override</AlertDialogTitle><AlertDialogDescription>Manually check out {bikeCheckoutParticipant.name}&apos;s bike? This should only be used if OTP is not working.</AlertDialogDescription></AlertDialogHeader>
+                                          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleManualBikeCheckout}>Confirm Override</AlertDialogAction></AlertDialogFooter>
+                                        </AlertDialogContent>
+                                      </AlertDialog>
+                                  </div>
+                                  {bikeCheckoutResult && <Alert variant={bikeCheckoutResult.success ? 'default' : 'destructive'} className="mt-2 text-xs"><AlertTitle>{bikeCheckoutResult.success ? 'Success' : 'Error'}</AlertTitle><AlertDescription>{bikeCheckoutResult.message}</AlertDescription></Alert>}
+                                </CardContent>
+                             </Card>
+                           )}
+                      </CardContent>
+                  </Card>
+              </TabsContent>
+               <TabsContent value="lockerCounter">
+                <div className="space-y-4">
+                  <Card className="bg-background shadow-md">
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-primary"><Package className="h-5 w-5" />Locker Allocation</CardTitle>
+                      <CardDescription>Search for an athlete by BIB to assign a locker. The locker number is private to the athlete.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <form onSubmit={handleLockerSearch} className="flex gap-2">
+                          <Input placeholder="Enter athlete's BIB Number..." value={lockerSearchTerm} onChange={(e) => setLockerSearchTerm(e.target.value)} disabled={isLockerSearching} />
+                          <Button type="submit" disabled={!lockerSearchTerm || isLockerSearching} className="min-w-[120px]">{isLockerSearching ? <><Loader2 className="h-4 w-4 animate-spin"/> Searching...</> : <><SearchIcon className="h-4 w-4"/><span className="ml-2">Search</span></> }</Button>
+                      </form>
+                       {lockerSearchedParticipant && (
+                        <Card className="mt-4 p-4 border-primary/20 bg-primary/5">
+                          <CardHeader className="p-0 pb-3"><CardTitle className="text-lg flex items-center gap-3 text-primary">{lockerSearchedParticipant.name}</CardTitle></CardHeader>
+                          <CardContent className="p-0 text-sm space-y-2">
+                              <div><strong>BIB:</strong> <span className="font-bold text-primary">{lockerSearchedParticipant.bibNumber || 'N/A'}</span></div>
+                              <div><strong>Waiver Status:</strong> <Badge variant={lockerSearchedParticipant.checkInStatus === 'CheckedIn' ? 'default' : 'destructive'}>{lockerSearchedParticipant.checkInStatus || 'Pending'}</Badge></div>
+                              <div><strong>Locker Number:</strong> {lockerSearchedParticipant.lockerNumber ? <Badge variant="default" className="text-base font-mono">ASSIGNED</Badge> : <Badge variant="secondary">Not Assigned</Badge>}</div>
+                              <div className="pt-3 border-t mt-3">
+                                  <Button onClick={handleAssignLocker} disabled={isAssigningLocker || !!lockerSearchedParticipant.lockerNumber || lockerSearchedParticipant.checkInStatus !== 'CheckedIn'} className="w-full">
+                                      {isAssigningLocker ? <Loader2 className="h-4 w-4 animate-spin"/> : <KeyRound className="h-4 w-4"/>}
+                                      <span className="ml-2">{lockerSearchedParticipant.lockerNumber ? "Locker Already Assigned" : "Generate & Assign Locker"}</span>
+                                  </Button>
+                              </div>
+                               {lockerSearchedParticipant.checkInStatus !== 'CheckedIn' && (
+                                  <Alert variant="destructive" className="mt-4 text-xs">
+                                    <AlertTriangle className="h-4 w-4" />
+                                    <AlertTitle>Waiver Pending</AlertTitle>
+                                    <AlertDescription>
+                                      The athlete must complete the main waiver check-in before a locker can be assigned.
+                                    </AlertDescription>
+                                  </Alert>
+                                )}
+                          </CardContent>
+                        </Card>
+                      )}
+                      {lockerAssignmentResult && <Alert variant={lockerAssignmentResult.success ? 'default' : 'destructive'}><AlertTitle>{lockerAssignmentResult.success ? 'Success' : 'Error'}</AlertTitle><AlertDescription>{lockerAssignmentResult.message}</AlertDescription></Alert>}
+                    </CardContent>
+                  </Card>
+                   <Card className="bg-background shadow-md">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2 text-blue-600"><PackageOpen className="h-5 w-5" /> Locker Return</CardTitle>
+                            <CardDescription>Enter the locker number provided by the athlete to verify and complete the handover.</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <form onSubmit={(e) => { e.preventDefault(); handleReturnLocker(); }} className="flex gap-2">
+                                <Input placeholder="Enter 4-digit Locker Number..." value={lockerReturnSearchTerm} onChange={(e) => setLockerReturnSearchTerm(e.target.value)} maxLength={4} disabled={isReturningLocker} />
+                                <Button type="submit" disabled={!lockerReturnSearchTerm || isReturningLocker} className="min-w-[120px] bg-blue-600 hover:bg-blue-700">
+                                    {isReturningLocker ? <Loader2 className="animate-spin h-4 w-4"/> : <PackageOpen className="h-4 w-4"/>}
+                                    <span className="ml-2">Return</span>
+                                </Button>
+                            </form>
+                        </CardContent>
+                    </Card>
+                </div>
+              </TabsContent>
+              <TabsContent value="medalCounter">
+                <Card className="bg-background shadow-md">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-primary"><Medal className="h-5 w-5" />Finisher Items</CardTitle>
+                    <CardDescription>Search for a finisher by BIB to issue items like medals and jerseys.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                      <form onSubmit={handleItemCounterSearch} className="flex gap-2">
+                          <Input placeholder="Enter athlete's BIB Number..." value={medalCounterSearchTerm} onChange={(e) => setMedalCounterSearchTerm(e.target.value)} disabled={isMedalSearching} />
+                          <Button type="submit" disabled={!medalCounterSearchTerm || isMedalSearching} className="min-w-[120px]">
+                            {isMedalSearching ? <><Loader2 className="h-4 w-4 animate-spin" /></> : <><SearchIcon className="h-4 w-4" /><span className="ml-2">Search</span></>}
+                          </Button>
+                      </form>
+                    {medalSearchedParticipant && (
+                      <Card className="mt-4 p-4 border-primary/20 bg-primary/5">
+                        <CardHeader className="p-0 pb-3"><CardTitle className="text-lg flex items-center gap-3 text-primary">{medalSearchedParticipant.name}</CardTitle></CardHeader>
+                        <CardContent className="p-0 text-sm">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+                                <div><p className="text-xs font-semibold text-muted-foreground">BIB</p><p className="font-bold text-primary">{medalSearchedParticipant.bibNumber || 'N/A'}</p></div>
+                                <div><p className="text-xs font-semibold text-muted-foreground">Ticket</p><p>{medalSearchedParticipant.ticketName || 'N/A'}</p></div>
+                                <div className="md:col-span-2">
+                                  <p className="text-xs font-semibold text-muted-foreground mb-1">T-Shirt Size</p>
+                                  {isEditingTshirtSize ? (
+                                    <div className="flex items-center gap-2">
+                                      <Select value={newTshirtSize} onValueChange={setNewTshirtSize}>
+                                        <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                        <SelectContent>{TSHIRT_SIZES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                                      </Select>
+                                      <Button size="xs" onClick={handleUpdateTshirtSize}><CheckCircle className="h-3.5 w-3.5"/> </Button>
+                                      <Button size="xs" variant="ghost" onClick={() => setIsEditingTshirtSize(false)}><XCircle className="h-3.5 w-3.5"/></Button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-2">
+                                      <p className="font-bold text-base">{medalSearchedParticipant.tshirtSize || 'N/A'}</p>
+                                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsEditingTshirtSize(true)}><Edit2 className="h-3.5 w-3.5 text-blue-600" /></Button>
+                                    </div>
+                                  )}
+                                </div>
+                                <div>
+                                    <p className="text-xs font-semibold text-muted-foreground">Waiver Status</p>
+                                    <div><Badge variant={medalSearchedParticipant.checkInStatus === 'CheckedIn' ? 'default' : 'destructive'}>{medalSearchedParticipant.checkInStatus || 'Pending'}</Badge></div>
+                                </div>
+                                <div><p className="text-xs font-semibold text-muted-foreground">Race Status</p><div><Badge variant={medalSearchedParticipant.status?.toLowerCase().includes('finish') ? 'default' : 'secondary'}>{medalSearchedParticipant.status || 'Unknown'}</Badge></div></div>
+                                <div><p className="text-xs font-semibold text-muted-foreground">Medal Status</p><div><Badge variant={medalSearchedParticipant.medalIssued ? 'default' : 'secondary'}>{medalSearchedParticipant.medalIssued ? 'Issued' : 'Not Issued'}</Badge></div></div>
+                                <div><p className="text-xs font-semibold text-muted-foreground">Finisher Jersey</p><div><Badge variant={!medalSearchedParticipant.isEligibleForFinisherJersey ? 'secondary' : medalSearchedParticipant.finisherJerseyIssued ? 'default' : 'secondary'}>
+                                  {!medalSearchedParticipant.isEligibleForFinisherJersey ? 'Not Eligible' : medalSearchedParticipant.finisherJerseyIssued ? 'Issued' : 'Not Issued'}
+                                </Badge></div></div>
+                            </div>
+                            {medalSearchedParticipant.checkInStatus !== 'CheckedIn' && (<Alert variant="destructive" className="mt-4 text-xs"><AlertTriangle className="h-4 w-4" /><AlertTitle>Waiver Pending</AlertTitle><AlertDescription>Athlete must complete waiver check-in before items can be issued.</AlertDescription></Alert>)}
+                            <div className="mt-4 pt-4 border-t flex flex-col md:flex-row gap-2">
+                                <Button className="flex-1" onClick={() => handleMarkItemIssued('Medal')} disabled={isIssuingItem === 'Medal' || medalSearchedParticipant.medalIssued || medalSearchedParticipant.checkInStatus !== 'CheckedIn'}>{isIssuingItem === 'Medal' ? <Loader2 className="animate-spin" /> : <Medal className="h-4 w-4" />}<span className="ml-2">{medalSearchedParticipant.medalIssued ? 'Medal Issued' : 'Mark Medal Issued'}</span></Button>
+                                <Button className="flex-1" onClick={() => handleMarkItemIssued('Finisher Jersey')} disabled={isIssuingItem === 'Finisher Jersey' || !medalSearchedParticipant.isEligibleForFinisherJersey || medalSearchedParticipant.finisherJerseyIssued || medalSearchedParticipant.checkInStatus !== 'CheckedIn'}>{isIssuingItem === 'Finisher Jersey' ? <Loader2 className="animate-spin" /> : <Shirt className="h-4 w-4" />}<span className="ml-2">{medalSearchedParticipant.finisherJerseyIssued ? 'Jersey Issued' : 'Mark Finisher Jersey Issued'}</span></Button>
+                            </div>
+                            {(medalSearchedParticipant.medalIssued || medalSearchedParticipant.finisherJerseyIssued) && (<div className="mt-4 pt-4 border-t flex flex-col md:flex-row gap-2">
+                                <Button className="flex-1" variant="outline" size="sm" onClick={() => handleResetItem('Medal')} disabled={!medalSearchedParticipant.medalIssued || !!isResettingItem}>{isResettingItem === 'Medal' ? <Loader2 className="animate-spin" /> : <RefreshCw className="h-4 w-4" />}<span className="ml-2">Reset Medal</span></Button>
+                                   <Button className="flex-1" variant="outline" size="sm" onClick={() => handleResetItem('Finisher Jersey')} disabled={!medalSearchedParticipant.finisherJerseyIssued || !!isResettingItem}>{isResettingItem === 'Finisher Jersey' ? <Loader2 className="animate-spin" /> : <RefreshCw className="h-4 w-4" />}<span className="ml-2">Reset Jersey</span></Button>
+                              </div>)}
+                        </CardContent>
+                      </Card>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+              <TabsContent value="foodLog">
+                  <Card className="bg-background shadow-md">
+                      <CardHeader>
+                          <CardTitle className="flex items-center gap-2 text-primary"><UtensilsCrossed className="h-5 w-5" />Food Counter</CardTitle>
+                          <CardDescription>Search for an athlete by BIB number to manage food plate issuance. Uses your assigned event.</CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                          <form onSubmit={handleItemCounterSearch} className="flex gap-2">
+                              <Input placeholder="Enter athlete's BIB Number..." value={medalCounterSearchTerm} onChange={(e) => setMedalCounterSearchTerm(e.target.value)} disabled={isMedalSearching} />
+                              <Button type="submit" disabled={!medalCounterSearchTerm || isMedalSearching} className="min-w-[120px]">
+                                  {isMedalSearching ? <><Loader2 className="h-4 w-4 animate-spin" /></> : <><SearchIcon className="h-4 w-4" /><span className="ml-2">Search</span></>}
+                              </Button>
+                          </form>
+                          {medalSearchedParticipant && (
+                              <Card className="mt-4 p-4 border-primary/20 bg-primary/5">
+                                  <CardHeader className="p-0 pb-3">
+                                      <CardTitle className="text-lg flex items-center gap-3 text-primary">{medalSearchedParticipant.name}</CardTitle>
+                                  </CardHeader>
+                                  <CardContent className="p-0 text-sm">
+                                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+                                          <div><p className="text-xs font-semibold text-muted-foreground">BIB</p><p className="font-bold text-primary">{medalSearchedParticipant.bibNumber || 'N/A'}</p></div>
+                                          <div><p className="text-xs font-semibold text-muted-foreground">Ticket</p><p>{medalSearchedParticipant.ticketName || 'N/A'}</p></div>
+                                          <div>
+                                              <p className="text-xs font-semibold text-muted-foreground">Food Status</p>
+                                              <div><Badge variant={medalSearchedParticipant.foodIssued ? 'default' : 'secondary'}>{medalSearchedParticipant.foodIssued ? 'Issued' : 'Not Issued'}</Badge></div>
+                                          </div>
+                                          <div>
+                                              <p className="text-xs font-semibold text-muted-foreground">Waiver Status</p>
+                                              <div><Badge variant={medalSearchedParticipant.checkInStatus === 'CheckedIn' ? 'default' : 'destructive'}>{medalSearchedParticipant.checkInStatus || 'Pending'}</Badge></div>
+                                          </div>
+                                      </div>
+                                      {medalSearchedParticipant.checkInStatus !== 'CheckedIn' && (
+                                          <Alert variant="destructive" className="mt-4 text-xs">
+                                              <AlertTriangle className="h-4 w-4" />
+                                              <AlertTitle>Waiver Pending</AlertTitle>
+                                              <AlertDescription>
+                                                  Athlete must complete waiver check-in before food can be issued.
+                                              </AlertDescription>
+                                          </Alert>
+                                      )}
+                                      <div className="mt-4 pt-4 border-t flex flex-col md:flex-row gap-2">
+                                          <Button className="flex-1" onClick={() => handleMarkItemIssued('Food')} disabled={isIssuingItem === 'Food' || medalSearchedParticipant.foodIssued}>
+                                              {isIssuingItem === 'Food' ? <Loader2 className="animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                                              <span className="ml-2">{medalSearchedParticipant.foodIssued ? 'Food Plate Issued' : 'Mark as Issued'}</span>
+                                          </Button>
+                                          {medalSearchedParticipant.foodIssued && (
+                                              <Button className="flex-1" variant="outline" size="sm" onClick={() => handleResetItem('Food')} disabled={!medalSearchedParticipant.foodIssued || !!isResettingItem}>
+                                                  {isResettingItem === 'Food' ? <Loader2 className="animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                                                  <span className="ml-2">Reset Food Status</span>
+                                              </Button>
+                                          )}
+                                      </div>
+                                  </CardContent>
+                              </Card>
+                          )}
+                      </CardContent>
+                  </Card>
+              </TabsContent>
+               <TabsContent value="paidFood">
+                 <Card className="bg-background shadow-md">
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2 text-green-600"><UtensilsCrossed className="h-5 w-5"/>Paid Food Redemption</CardTitle>
+                        <CardDescription>Search for an order by mobile, email, or order ID, or enter a specific coupon code.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <form onSubmit={handlePaidFoodSearch} className="flex flex-col sm:flex-row gap-2">
+                            <Select value={paidFoodSearchBy} onValueChange={(v) => setPaidFoodSearchBy(v as any)}>
+                                <SelectTrigger className="w-full sm:w-[150px]"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="coupon">4-Digit Code</SelectItem>
+                                    <SelectItem value="mobile">Mobile Number</SelectItem>
+                                    <SelectItem value="email">Email</SelectItem>
+                                    <SelectItem value="orderId">Order ID</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <Input
+                                placeholder={`Enter ${paidFoodSearchBy}...`}
+                                value={paidFoodSearchTerm}
+                                onChange={(e) => setPaidFoodSearchTerm(e.target.value)}
+                                disabled={isSearchingPaidFood}
+                                maxLength={paidFoodSearchBy === 'coupon' ? 4 : undefined}
+                            />
+                            <Button type="submit" disabled={isSearchingPaidFood || !paidFoodSearchTerm}>
+                                {isSearchingPaidFood ? <Loader2 className="h-4 w-4 animate-spin"/> : <SearchIcon className="h-4 w-4" />}
+                                <span className="ml-2">Find</span>
+                            </Button>
+                        </form>
+                        {foundOrder && (
+                            <Card className="mt-4 p-4 border-green-500/20 bg-green-500/5">
+                                <CardHeader className="p-0 pb-3">
+                                    <CardTitle className="text-lg flex items-center gap-3 text-green-700">Order Found</CardTitle>
+                                    <CardDescription>
+                                        Order for <span className="font-semibold">{foundOrder.order.buyerName}</span> ({foundOrder.order.buyerMobile})
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="p-0 text-sm space-y-3">
+                                    {foundOrder.coupons.map(coupon => (
+                                        <div key={coupon.id} className="p-3 border rounded-md bg-white">
+                                            <div className="flex justify-between items-start">
+                                                <div>
+                                                    <p className="font-semibold text-base">{coupon.itemName}</p>
+                                                </div>
+                                                <Badge variant={coupon.status === 'REDEEMED' ? 'destructive' : 'default'} className={coupon.status === 'REDEEMED' ? '' : 'bg-green-600'}>
+                                                    {coupon.status}
+                                                </Badge>
+                                            </div>
+                                            {coupon.status === 'ISSUED' && (
+                                                <div className="mt-2 pt-2 border-t flex flex-wrap gap-2">
+                                                    <Button key={coupon.id} size="sm" onClick={() => handleRedeemCoupon(coupon.id)} disabled={isRedeemingCoupon === coupon.id} className="text-xs">
+                                                        {isRedeemingCoupon === coupon.id ? <Loader2 className="animate-spin h-4 w-4"/> : `Redeem (${coupon.id})`}
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </CardContent>
+                            </Card>
+                        )}
+                    </CardContent>
+                 </Card>
+              </TabsContent>
+            </Tabs>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+```
+- `src/lib/types.ts`: I will also update the types to include the new properties. I will add `liveDataSource` to `EventCalendarEntry`, `courseMaps` to `TicketDefinition` and add the `AthleteCardData`, `RaceStatus`, `SegmentLeg`, and `SplitInfo` types for the live tracking feature. Finally I'll make the `openDate` and `closeDate` on `TicketDefinition` optional.
+
+<file>
+  <path>src/lib/types.ts</path>
+  <content>
+    ...
+  </content>
+</file>
+
+<file>
+  <path>src/lib/actions/clubActions.ts</path>
+  <content>
+    ...
+  </content>
+</file>
+
+I am confident that these changes will resolve all the reported issues. I apologize again for the numerous errors in my previous attempts.

@@ -1,0 +1,116 @@
+
+{
+  "entities": {
+    "StoreProduct": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "StoreProduct",
+      "type": "object",
+      "description": "Represents a product in the Bergman store with GST and HSN compliance.",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "description": "Display name of the product" },
+        "slug": { "type": "string", "description": "URL friendly identifier" },
+        "description": { "type": "string", "description": "Product details and specs" },
+        "priceIncludingGST": { "type": "number", "description": "Total selling price" },
+        "comparePrice": { "type": "number", "description": "Original price for strike-through" },
+        "currency": { "type": "string", "default": "INR" },
+        "images": { "type": "array", "items": { "type": "string" } },
+        "category": { "type": "string" },
+        "sizes": { "type": "array", "items": { "type": "string" } },
+        "stock": { "type": "number", "description": "Current units in warehouse" },
+        "lowStockThreshold": { "type": "number", "default": 5 },
+        "hsnCode": { "type": "string", "description": "GST HSN classification code" },
+        "gstPercent": { "type": "number", "description": "GST rate (e.g., 5, 12, 18)" },
+        "isActive": { "type": "boolean", "default": true },
+        "order": { "type": "number" },
+        "isBestseller": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "slug", "priceIncludingGST", "hsnCode", "gstPercent", "stock"]
+    },
+    "StoreOrder": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "StoreOrder",
+      "type": "object",
+      "description": "Represents a confirmed customer purchase from the store.",
+      "properties": {
+        "id": { "type": "string" },
+        "orderId": { "type": "string", "description": "Readable order ID" },
+        "userId": { "type": "string", "description": "Reference to the athlete profile" },
+        "customerName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "mobile": { "type": "string" },
+        "shippingAddress": { "type": "string" },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "pincode": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["Pending", "Paid", "Processing", "Shipped", "Delivered", "Cancelled"] },
+        "trackingId": { "type": "string" },
+        "courierPartner": { "type": "string" },
+        "trackingUrl": { "type": "string" },
+        "razorpayOrderId": { "type": "string" },
+        "paymentId": { "type": "string" },
+        "invoiceId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "StoreCoupon": {
+      "title": "StoreCoupon",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "type": { "type": "string", "enum": ["percentage", "fixed"] },
+        "value": { "type": "number" },
+        "usageLimit": { "type": "number" },
+        "usedCount": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "minCartValue": { "type": "number" }
+      }
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/products/{productId}",
+        "definition": {
+          "entityName": "StoreProduct",
+          "schema": { "$ref": "#/backend/entities/StoreProduct" },
+          "description": "Public product catalog."
+        }
+      },
+      {
+        "path": "/storeOrders/{orderId}",
+        "definition": {
+          "entityName": "StoreOrder",
+          "schema": { "$ref": "#/backend/entities/StoreOrder" },
+          "description": "Store orders managed centrally."
+        }
+      },
+      {
+        "path": "/storeCoupons/{couponId}",
+        "definition": {
+          "entityName": "StoreCoupon",
+          "schema": { "$ref": "#/backend/entities/StoreCoupon" },
+          "description": "Store discount coupons."
+        }
+      },
+      {
+        "path": "/storeSettings/shipping",
+        "definition": {
+          "schema": { "type": "object" },
+          "description": "Global store configuration."
+        }
+      }
+    ],
+    "reasoning": "Standardized store collections at root level for global management, with user-facing read access secured by attribute and ownership checks."
+  }
+}

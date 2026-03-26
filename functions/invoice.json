@@ -1,0 +1,11 @@
+{
+  "customer_id": "834747000000758001",
+  "date": "2026-01-18",
+  "reference_number": "BMINV-BOOKING-ID-UNIQUE",
+  "line_items": [
+    {
+      "item_id": "834747000000710074",
+      "quantity": 1
+    }
+  ]
+}
