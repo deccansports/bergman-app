@@ -1,8 +1,8 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
-/node_modules
-/.pnp
+# ==============================
+# 🔥 DEPENDENCIES
+# ==============================
+node_modules/
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -10,36 +10,86 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
+# ==============================
+# 🔥 NEXT.JS BUILD
+# ==============================
+.next/
+out/
+build/
 
-# next.js
-/.next/
-/out/
+# ==============================
+# 🔥 ENV & SECRETS (CRITICAL)
+# ==============================
+.env
+.env.*
+!.env.example
 
-# production
-/build
+# 🔥 NEVER COMMIT THIS
+serviceAccountKey.json
+*.key.json
+firebase-admin*.json
 
-# misc
-.DS_Store
-*.pem
-
-# debug
+# ==============================
+# 🔥 LOGS
+# ==============================
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
+pnpm-debug.log*
 
-# vercel
+# ==============================
+# 🔥 CACHE / TEMP
+# ==============================
+.cache/
+.tmp/
+.temp/
+.modified
+heavy_files.txt
+
+# ==============================
+# 🔥 OS FILES
+# ==============================
+.DS_Store
+Thumbs.db
+
+# ==============================
+# 🔥 BINARY / LOCAL FILES
+# ==============================
+*.deb
+*.exe
+*.dmg
+cloudflared
+
+# ==============================
+# 🔥 FIREBASE
+# ==============================
+.firebase/
+firebase-debug.log
+firestore-debug.log
+storage-debug.log
+
+# ==============================
+# 🔥 VERCEL / DEPLOY
+# ==============================
 .vercel
 
-# typescript
+# ==============================
+# 🔥 TYPESCRIPT
+# ==============================
 *.tsbuildinfo
 next-env.d.ts
 
-.genkit/*
-.env*
+# ==============================
+# 🔥 GENKIT / AI
+# ==============================
+.genkit/
 
-# firebase
-firebase-debug.log
-firestore-debug.log
+# ==============================
+# 🔥 OPTIONAL (REMOVE IF NEEDED)
+# ==============================
+# multi-project junk (your repo has these)
+racehub/
+bergman-athlete-hub/
+snapshot/
+workspace/
