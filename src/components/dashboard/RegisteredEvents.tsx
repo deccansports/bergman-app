@@ -27,17 +27,35 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 
 function EventsSkeleton() {
   return (
-    <Card className="shadow-lg">
-      <CardHeader>
-        <Skeleton className="h-8 w-3/4" />
-        <Skeleton className="h-4 w-1/2" />
-      </CardHeader>
-      <CardContent>
-        <div className="flex justify-center items-center py-10">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+    <div className="bg-gradient-to-br from-slate-900 via-[#1d3557] to-slate-900 border border-white/10 rounded-2xl shadow-2xl p-6">
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-full bg-white/10 animate-pulse" />
+          <div className="space-y-2">
+            <div className="h-5 w-48 bg-white/10 animate-pulse rounded" />
+            <div className="h-3 w-32 bg-white/10 animate-pulse rounded" />
+          </div>
         </div>
-      </CardContent>
-    </Card>
+        <div className="h-7 w-20 bg-white/10 animate-pulse rounded-full" />
+      </div>
+      {[1, 2].map((i) => (
+        <div key={i} className="mb-4 bg-white/5 border border-white/10 rounded-xl p-4">
+          <div className="flex gap-3">
+            <div className="w-1 rounded-full bg-white/10 animate-pulse flex-shrink-0" />
+            <div className="flex-1 space-y-2">
+              <div className="h-5 w-56 bg-white/10 animate-pulse rounded" />
+              <div className="h-3 w-40 bg-white/10 animate-pulse rounded" />
+              <div className="h-10 w-16 bg-white/10 animate-pulse rounded mt-2" />
+              <div className="flex gap-2 mt-2">
+                {[1, 2, 3].map((j) => (
+                  <div key={j} className="h-8 w-14 bg-white/10 animate-pulse rounded-full" />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -163,108 +181,214 @@ export default function RegisteredEvents() {
   };
 
   if (isLoading) return <EventsSkeleton />;
-  
+
+  if (error) {
+    return (
+      <div className="bg-gradient-to-br from-slate-900 via-[#1d3557] to-slate-900 border border-red-500/40 rounded-2xl shadow-2xl p-8 text-left w-full">
+        <div className="flex items-center gap-3 mb-2">
+          <XCircle className="h-6 w-6 text-red-400" />
+          <p className="text-white font-black uppercase tracking-tight text-lg">Failed to Load Registrations</p>
+        </div>
+        <p className="text-white/60 text-sm">{error}</p>
+        <Button onClick={fetchRegisteredEvents} className="mt-4 bg-[#e63946] hover:bg-[#c1121f] text-white font-black uppercase tracking-widest rounded-full px-6">
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
   if (upcomingRegistrations.length === 0) {
     return (
-      <Card className="shadow-lg border-primary/20 bg-primary/5 text-left w-full">
-        <CardHeader>
-          <CardTitle className="text-2xl font-bold tracking-tight text-primary flex items-center gap-2">
-            <ClipboardList className="h-6 w-6" />
-            Your Upcoming Registrations
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center py-10">
-            <CalendarSearch className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-lg font-semibold text-muted-foreground">No Upcoming Registrations Found</p>
-            <p className="text-sm text-muted-foreground mt-1">Ready for your next challenge? Explore our races.</p>
-            <Button asChild className="mt-4">
-              <Link href="/races">View Upcoming Races</Link>
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="bg-gradient-to-br from-slate-900 via-[#1d3557] to-slate-900 border border-white/10 rounded-2xl shadow-2xl p-12 text-center w-full">
+        <div className="text-6xl mb-4">🏃</div>
+        <p className="text-white font-black uppercase italic tracking-tight text-2xl mb-2">No Upcoming Races</p>
+        <p className="text-white/50 text-sm mb-6">Ready for your next challenge? Explore our events.</p>
+        <Button asChild className="bg-[#e63946] hover:bg-[#c1121f] text-white font-black uppercase tracking-widest rounded-full px-6">
+          <Link href="/races">Find Your Race →</Link>
+        </Button>
+      </div>
     );
   }
 
   return (
     <>
-      <Card className="shadow-lg border-primary/20 bg-blue-50/30 text-left w-full border-none">
-        <CardHeader>
-          <CardTitle className="text-2xl font-bold tracking-tight text-primary flex items-center gap-2">
-            <ClipboardList className="h-6 w-6" />
-            Your Upcoming Registrations
-          </CardTitle>
-          <CardDescription>
-            Manage your active registrations for upcoming events. Past races can be found in your Race History and My Orders.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-            <div className="overflow-x-auto rounded-xl border bg-background shadow-sm">
-              <Table>
-                <TableHeader className="bg-muted/50">
-                  <TableRow className="h-12 border-b text-[10px] font-black uppercase tracking-widest">
-                    <TableHead className="pl-6">Event Name</TableHead>
-                    <TableHead>Event Date</TableHead>
-                    <TableHead>Your Ticket</TableHead>
-                    <TableHead>BIB NO</TableHead>
-                    <TableHead className="text-right pr-6">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {upcomingRegistrations.map((event) => {
-                    const hasCourseMaps = !!event.ticketDefinitions?.some(td => 
-                      td.courseMaps?.swimGpxUrl || td.courseMaps?.bikeGpxUrl || td.courseMaps?.runGpxUrl || td.courseMaps?.run1GpxUrl || td.courseMaps?.run2GpxUrl
-                    );
+      <div className="relative bg-gradient-to-br from-slate-900 via-[#1d3557] to-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden w-full text-left">
+        {/* Diagonal sport-line SVG background pattern */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background:
+              'repeating-linear-gradient(135deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 20px)',
+          }}
+        />
 
-                    return (
-                      <TableRow key={event.participantId} className="h-16 hover:bg-muted/30 transition-colors border-border/50 text-xs">
-                          <TableCell className="pl-6 font-black uppercase tracking-tight text-foreground">{event.eventName}</TableCell>
-                          <TableCell className="font-bold text-slate-500">
-                            {event.eventDate ? format(parseISO(event.eventDate), 'dd MMM yyyy') : 'TBD'}
-                          </TableCell>
-                          <TableCell className="font-black uppercase text-[10px] text-primary">{event.ticketName}</TableCell>
-                          <TableCell className="font-mono text-lg font-black text-primary italic">
-                            {event.athleteBibNumber || 'TBD'}
-                          </TableCell>
-                          <TableCell className="text-right pr-6">
-                            <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                                <Button variant="outline" size="xs" className="h-8 rounded-lg font-black uppercase text-[9px] tracking-widest gap-1.5 border-border/50" onClick={() => handleViewRegistration(event)}>
-                                    <Eye className="h-3 w-3" /> View
-                                </Button>
-                                {hasCourseMaps && (
-                                    <Button variant="outline" size="xs" className="h-8 rounded-lg font-black uppercase text-[9px] tracking-widest gap-1.5 text-sky-600 border-sky-200 hover:bg-sky-50" onClick={() => handleOpenCourseMapModal(event)}>
-                                        <Map className="h-3 w-3" /> Map
-                                    </Button>
-                                )}
-                                {event.canBeDeferred && (
-                                    <Button variant="outline" size="xs" className="h-8 rounded-lg font-black uppercase text-[9px] tracking-widest gap-1.5 text-orange-600 border-orange-200 hover:bg-orange-50" onClick={() => handleOpenDeferralModal(event)}>
-                                        <RotateCcw className="h-3 w-3" /> Defer
-                                    </Button>
-                                )}
-                                {event.canBeCancelled && (
-                                    <Button variant="outline" size="xs" className="h-8 rounded-lg font-black uppercase text-[9px] tracking-widest gap-1.5 text-red-600 border-red-200 hover:bg-red-50" onClick={() => handleOpenCancellationModal(event)} disabled={!!event.previousDeferralDetails || !(event.amountPaidPaisa && event.amountPaidPaisa > 0)}>
-                                        <XCircle className="h-3 w-3" /> Cancel
-                                    </Button>
-                                )}
-                                {event.canChangeCategory && (
-                                    <Button variant="outline" size="xs" className="h-8 rounded-lg font-black uppercase text-[9px] tracking-widest gap-1.5 text-purple-600 border-purple-200 hover:bg-purple-50" onClick={() => handleOpenCategoryChangeModal(event)}>
-                                        <RepeatIcon className="h-3 w-3" /> Change
-                                    </Button>
-                                )}
-                                <Button asChild variant="ghost" size="xs" className="h-8 rounded-lg font-black uppercase text-[9px] tracking-widest gap-1.5 hover:bg-muted/50">
-                                    <Link href={`/races/${event.customSlug || event.eventId}`}><Info className="h-3 w-3" /> Info</Link>
-                                </Button>
-                            </div>
-                          </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+        {/* Header */}
+        <div className="relative flex items-center justify-between px-6 pt-6 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#e63946] shadow-lg flex-shrink-0">
+              <ClipboardList className="h-6 w-6 text-white" />
             </div>
-        </CardContent>
-      </Card>
+            <div>
+              <p className="text-white font-black uppercase italic tracking-tight text-xl leading-tight">
+                Your Registrations
+              </p>
+              <p className="text-white/60 text-xs uppercase tracking-widest">
+                Manage your active race entries
+              </p>
+            </div>
+          </div>
+          <div className="flex-shrink-0 rounded-full bg-[#e63946] px-3 py-1 text-xs font-black uppercase tracking-widest text-white shadow">
+            {upcomingRegistrations.length} Active
+          </div>
+        </div>
+
+        {/* Registration cards */}
+        <div className="relative px-6 pb-6 space-y-3">
+          {upcomingRegistrations.map((event) => {
+            const hasCourseMaps = !!event.ticketDefinitions?.some(
+              (td) =>
+                td.courseMaps?.swimGpxUrl ||
+                td.courseMaps?.bikeGpxUrl ||
+                td.courseMaps?.runGpxUrl ||
+                td.courseMaps?.run1GpxUrl ||
+                td.courseMaps?.run2GpxUrl
+            );
+
+            const statusColor =
+              event.ticketStatus === 'Active'
+                ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                : event.ticketStatus === 'Confirmed'
+                ? 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+                : event.ticketStatus === 'Pending'
+                ? 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                : 'bg-white/10 text-white/50 border-white/20';
+
+            return (
+              <div
+                key={event.participantId}
+                className="flex gap-3 bg-white/5 border border-white/10 rounded-xl p-4 hover:bg-white/10 hover:border-orange-500/40 transition-all"
+              >
+                {/* Left accent bar */}
+                <div className="w-1 rounded-full bg-gradient-to-b from-orange-500 to-red-600 flex-shrink-0" />
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  {/* Event name + status */}
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <p className="text-white font-black uppercase tracking-tight text-base leading-tight">
+                      {event.eventName}
+                    </p>
+                    <span
+                      className={cn(
+                        'flex-shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-widest',
+                        statusColor
+                      )}
+                    >
+                      {event.ticketStatus || 'Unknown'}
+                    </span>
+                  </div>
+
+                  {/* Date · Ticket */}
+                  <p className="text-white/60 text-xs uppercase tracking-widest mb-3">
+                    {event.eventDate
+                      ? format(parseISO(event.eventDate), 'dd MMM yyyy')
+                      : 'TBD'}{' '}
+                    · {event.ticketName}
+                  </p>
+
+                  {/* BIB + Booking ID */}
+                  <div className="flex items-end gap-5 mb-3">
+                    <div>
+                      <p className="text-[9px] text-white/40 uppercase tracking-widest mb-0.5">
+                        Bib
+                      </p>
+                      <p className="text-4xl font-black text-orange-400 italic leading-none">
+                        {event.athleteBibNumber || 'TBD'}
+                      </p>
+                    </div>
+                    {event.bookingId && (
+                      <div className="pb-0.5">
+                        <p className="text-[9px] text-white/40 uppercase tracking-widest mb-0.5">
+                          Booking
+                        </p>
+                        <p className="font-mono text-white/40 text-xs">
+                          {event.bookingId}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action buttons */}
+                  <div className="flex flex-wrap gap-1.5">
+                    <Button
+                      size="xs"
+                      className="h-8 rounded-full px-3 text-[9px] font-black uppercase tracking-widest gap-1.5 bg-slate-700 hover:bg-slate-600 text-white border-0"
+                      onClick={() => handleViewRegistration(event)}
+                    >
+                      <Eye className="h-3 w-3" />
+                      <span className="hidden md:inline">View</span>
+                    </Button>
+                    {hasCourseMaps && (
+                      <Button
+                        size="xs"
+                        className="h-8 rounded-full px-3 text-[9px] font-black uppercase tracking-widest gap-1.5 bg-sky-700 hover:bg-sky-600 text-white border-0"
+                        onClick={() => handleOpenCourseMapModal(event)}
+                      >
+                        <Map className="h-3 w-3" />
+                        <span className="hidden md:inline">Map</span>
+                      </Button>
+                    )}
+                    {event.canBeDeferred && (
+                      <Button
+                        size="xs"
+                        className="h-8 rounded-full px-3 text-[9px] font-black uppercase tracking-widest gap-1.5 bg-orange-700 hover:bg-orange-600 text-white border-0"
+                        onClick={() => handleOpenDeferralModal(event)}
+                      >
+                        <RotateCcw className="h-3 w-3" />
+                        <span className="hidden md:inline">Defer</span>
+                      </Button>
+                    )}
+                    {event.canBeCancelled && (
+                      <Button
+                        size="xs"
+                        className="h-8 rounded-full px-3 text-[9px] font-black uppercase tracking-widest gap-1.5 bg-red-700 hover:bg-red-600 text-white border-0"
+                        onClick={() => handleOpenCancellationModal(event)}
+                        disabled={
+                          !!event.previousDeferralDetails ||
+                          !(event.amountPaidPaisa && event.amountPaidPaisa > 0)
+                        }
+                      >
+                        <XCircle className="h-3 w-3" />
+                        <span className="hidden md:inline">Cancel</span>
+                      </Button>
+                    )}
+                    {event.canChangeCategory && (
+                      <Button
+                        size="xs"
+                        className="h-8 rounded-full px-3 text-[9px] font-black uppercase tracking-widest gap-1.5 bg-purple-700 hover:bg-purple-600 text-white border-0"
+                        onClick={() => handleOpenCategoryChangeModal(event)}
+                      >
+                        <RepeatIcon className="h-3 w-3" />
+                        <span className="hidden md:inline">Change</span>
+                      </Button>
+                    )}
+                    <Button
+                      asChild
+                      size="xs"
+                      className="h-8 rounded-full px-3 text-[9px] font-black uppercase tracking-widest gap-1.5 bg-white/10 hover:bg-white/20 text-white border-0"
+                    >
+                      <Link href={`/races/${event.customSlug || event.eventId}`}>
+                        <Info className="h-3 w-3" />
+                        <span className="hidden md:inline">Info</span>
+                      </Link>
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
       
       {cancellationTargetEvent && currentUser && (
         <CancellationRequestModal isOpen={isCancellationModalOpen} onClose={() => setIsCancellationModalOpen(false)} eventDetail={cancellationTargetEvent} athleteUid={currentUser.uid} athleteEmail={currentUser.email || ''} onCancellationSuccess={() => handleActionSuccess('cancellation')} />
