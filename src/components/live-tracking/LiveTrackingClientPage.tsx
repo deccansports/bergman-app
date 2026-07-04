@@ -627,6 +627,7 @@ export default function LiveTrackingClientPage({ initialEventDetails, isPastEven
           return {
             eventId: payload.eventId || eventDetails.id,
             source: timingPayload.source || payload.source,
+            splitsEnabledForAthleteDashboard: Boolean(payload?.splitsEnabledForAthleteDashboard ?? timingPayload?.splitsEnabledForAthleteDashboard),
             course: {
               legs: Array.isArray(timingPayload?.course?.legs) ? timingPayload.course.legs : Array.isArray(timingPayload.legs) ? timingPayload.legs : [],
               timingPoints: Array.isArray(timingPayload?.course?.timingPoints) ? timingPayload.course.timingPoints : Array.isArray(timingPayload.timingPoints) ? timingPayload.timingPoints : [],

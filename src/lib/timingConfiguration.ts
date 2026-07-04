@@ -82,6 +82,7 @@ export type ResolvedTimingConfiguration = {
   provider?: string | null;
   updatedAt?: string | number | null;
   meta?: AnyRecord | null;
+  splitsEnabledForAthleteDashboard?: boolean;
 };
 
 const LEG_ALIASES: Array<{ test: RegExp; value: string }> = [

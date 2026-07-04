@@ -425,6 +425,8 @@ export default function LiveTrackingHub() {
   const [eventUuidTestResult, setEventUuidTestResult] = useState<any>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [contestMappingMappedCount, setContestMappingMappedCount] = useState<number | null>(null);
+  const [contestMappingLoading, setContestMappingLoading] = useState(false);
   const eventUuidTestAbortRef = useRef<AbortController | null>(null);
   const eventUuidTestInFlightRef = useRef(false);
   const lockedApiBaseUrl = DEFAULT_API_BASE_URL;
@@ -829,6 +831,28 @@ export default function LiveTrackingHub() {
 
     return () => clearInterval(interval);
   }, [bergmanEventId, fdbImportJobId, loadCourseConfig, loadFdbMetadata, loadSelectedEventCounts, loadStatus]);
+
+  useEffect(() => {
+    const eventId = bergmanEventId.trim();
+    if (!eventId) {
+      setContestMappingMappedCount(null);
+      return;
+    }
+    let cancelled = false;
+    setContestMappingLoading(true);
+    fetch(`/api/live/contest-mapping-view/${encodeURIComponent(eventId)}`, { cache: 'no-store' })
+      .then((res) => res.json().catch(() => null))
+      .then((data) => {
+        if (cancelled) return;
+        const mapped = Array.isArray(data?.importedContests)
+          ? data.importedContests.filter((r: any) => r?.status === 'mapped').length
+          : null;
+        setContestMappingMappedCount(mapped);
+      })
+      .catch(() => { if (!cancelled) setContestMappingMappedCount(null); })
+      .finally(() => { if (!cancelled) setContestMappingLoading(false); });
+    return () => { cancelled = true; };
+  }, [bergmanEventId]);
 
   useEffect(() => {
     if (fdbImportJobId || fdbImportStatus !== 'processing' || !bergmanEventId.trim()) return;
@@ -1952,10 +1976,15 @@ export default function LiveTrackingHub() {
                   { label: 'Event link extracted', ok: Boolean(fdbMetadata?.database?.localEventUuid || fdbImportSummary?.detected?.eventUuid) },
                   { label: 'KV built', ok: Boolean(fdbImportSummary?.validation?.complete) },
                   { label: 'Participants imported', ok: Number(fdbImportSummary?.counts?.participants || fdbMetadata?.database?.participants || 0) > 0 },
+                  { label: 'Split mapping', ok: Number(contestMappingMappedCount ?? 0) > 0, loading: contestMappingLoading },
                 ].map((item) => (
                   <div key={item.label} className="flex items-center justify-between gap-3 rounded-lg border p-3">
                     <span className="font-medium">{item.label}</span>
-                    <Badge variant={item.ok ? 'default' : 'secondary'}>{item.ok ? 'Ready' : 'Pending'}</Badge>
+                    {(item as any).loading ? (
+                      <Badge variant="secondary"><Loader2 className="mr-1 h-3 w-3 animate-spin inline" />Checking…</Badge>
+                    ) : (
+                      <Badge variant={item.ok ? 'default' : 'secondary'}>{item.ok ? 'Ready' : 'Pending'}</Badge>
+                    )}
                   </div>
                 ))}
 

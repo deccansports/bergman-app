@@ -1829,15 +1829,19 @@ export default function AthleteLiveModalPro({
                 )}
 
                 <div className="w-full max-w-full min-w-0 space-y-3 pt-2">
-                  <h3 className="font-semibold text-base sm:text-lg text-yellow-300">Splits Summary</h3>
-                  <DynamicSplitSummaryTable
-                    athlete={detailParticipant}
-                    timingConfiguration={timingConfiguration}
-                    participant={participantsByBib[String(detailParticipant?.bib || '').trim()] || detailParticipant || null}
-                    participantsByBib={participantsByBib}
-                    ticketDef={resolvedTicketDef}
-                    isLoading={!detailReady}
-                  />
+                  {timingConfiguration?.splitsEnabledForAthleteDashboard ? (
+                    <>
+                      <h3 className="font-semibold text-base sm:text-lg text-yellow-300">Splits Summary</h3>
+                      <DynamicSplitSummaryTable
+                        athlete={detailParticipant}
+                        timingConfiguration={timingConfiguration}
+                        participant={participantsByBib[String(detailParticipant?.bib || '').trim()] || detailParticipant || null}
+                        participantsByBib={participantsByBib}
+                        ticketDef={resolvedTicketDef}
+                        isLoading={!detailReady}
+                      />
+                    </>
+                  ) : null}
                 </div>
                 </>
                 )}

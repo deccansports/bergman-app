@@ -144,6 +144,11 @@ async function loadTimingConfigurationSnapshot(eventId: string) {
   return getKV<any>(`live:event:${eventId}:timingConfiguration`, 'contest-mapping-view').catch(() => null);
 }
 
+async function loadSplitsDashboardEnabled(eventId: string): Promise<boolean> {
+  const flag = await getKV<any>(`event:${eventId}:splits:dashboard:enabled`, 'contest-mapping-view').catch(() => null);
+  return Boolean(flag?.enabled);
+}
+
 function buildTimingCountLookup(snapshot: any) {
   const raw = snapshot?.timingConfiguration || snapshot?.timings || snapshot || {};
   const byUuid: Record<string, { splitCount: number; timingPointCount: number }> = {};
@@ -284,11 +289,12 @@ export async function GET(_req: NextRequest, { params }: { params: { eventId: st
       return NextResponse.json({ success: false, message: 'eventId is required' }, { status: 400 });
     }
 
-    const [{ source: contestRows, liveIndex, eventIndex, importSummary }, savedMapping, bergman, timingSnapshot] = await Promise.all([
+    const [{ source: contestRows, liveIndex, eventIndex, importSummary }, savedMapping, bergman, timingSnapshot, splitsEnabledForAthleteDashboard] = await Promise.all([
       loadContestIndex(eventId),
       loadContestMapping(eventId),
       loadBergmanContestData(eventId),
       loadTimingConfigurationSnapshot(eventId),
+      loadSplitsDashboardEnabled(eventId),
     ]);
 
     const importedContests = normalizeContestRows(contestRows);
@@ -435,10 +441,10 @@ export async function GET(_req: NextRequest, { params }: { params: { eventId: st
     const mappedCount = mappedRows.filter((row: any) => row.status === 'mapped').length;
     const unmappedCount = importedCount - mappedCount;
     const lastImported = normalize((existing as any)?.lastImportedAt || (liveIndex as any)?.updatedAt || (eventIndex as any)?.updatedAt || null) || null;
-    const eventTimingPointCount = Array.isArray(timingConfiguration?.timingPoints)
-      ? timingConfiguration.timingPoints.length
-      : Array.isArray((timingConfiguration as any)?.course?.timingPoints)
-        ? (timingConfiguration as any).course.timingPoints.length
+    const eventTimingPointCount = Array.isArray(timingSnapshot?.timingPoints)
+      ? timingSnapshot.timingPoints.length
+      : Array.isArray((timingSnapshot as any)?.course?.timingPoints)
+        ? (timingSnapshot as any).course.timingPoints.length
         : 0;
     const totalMappedTimingPoints = importedContests.reduce((sum: number, row: any) => sum + Number(row?.timingPointCount || 0), 0);
 
@@ -476,6 +482,7 @@ export async function GET(_req: NextRequest, { params }: { params: { eventId: st
       bergmanContestOptions: bergman.bergmanOptions,
       mapping: mappingByUuid,
       suggestions,
+      splitsEnabledForAthleteDashboard,
       diagnostics: {
         importedCount,
         mappedCount,
@@ -578,10 +585,21 @@ export async function PUT(req: NextRequest, { params }: { params: { eventId: str
       source: 'contest-mapping-view',
     };
 
-    await putKV(`live:event:${eventId}:contest:mapping`, payload, 'contest-mapping-view');
-    await getFirestoreInstance().collection('events').doc(eventId).collection('liveTracking').doc('contestMapping').set(payload, { merge: true });
+    const mappedCount = Object.keys(mappingObject).length;
+    const splitsDashboardFlag = {
+      enabled: mappedCount > 0,
+      mappedCount,
+      updatedAt: new Date().toISOString(),
+      updatedBy: normalize(body?.updatedBy || 'admin-ui') || 'admin-ui',
+    };
 
-    return NextResponse.json({ success: true, mapping: mappingObject, count: Object.keys(mappingObject).length, payload });
+    await Promise.all([
+      putKV(`live:event:${eventId}:contest:mapping`, payload, 'contest-mapping-view'),
+      getFirestoreInstance().collection('events').doc(eventId).collection('liveTracking').doc('contestMapping').set(payload, { merge: true }),
+      putKV(`event:${eventId}:splits:dashboard:enabled`, splitsDashboardFlag, 'contest-mapping-view'),
+    ]);
+
+    return NextResponse.json({ success: true, mapping: mappingObject, count: Object.keys(mappingObject).length, splitsEnabledForAthleteDashboard: mappedCount > 0, payload });
   } catch (error) {
     return NextResponse.json({ success: false, message: error instanceof Error ? error.message : 'Failed to save contest mapping' }, { status: 500 });
   }

@@ -72,6 +72,7 @@ export function ContestMappingPanel({ eventId }: { eventId: string; connectionId
   const [rows, setRows] = useState<ContestMappingRow[]>([]);
   const [bergmanOptions, setBergmanOptions] = useState<BergmanOption[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [splitsEnabledForAthleteDashboard, setSplitsEnabledForAthleteDashboard] = useState<boolean | null>(null);
 
   const optionLookup = useMemo(() => new Map(bergmanOptions.map((option) => [option.bergmanContestId, option])), [bergmanOptions]);
 
@@ -142,6 +143,7 @@ export function ContestMappingPanel({ eventId }: { eventId: string; connectionId
         selectedBergmanContestName: normalize(row.selectedBergmanContestName || row.bergmanContestName || '' ) || null,
       })));
       setBergmanOptions(Array.isArray(data.bergmanContestOptions) ? data.bergmanContestOptions : []);
+      setSplitsEnabledForAthleteDashboard(typeof data.splitsEnabledForAthleteDashboard === 'boolean' ? data.splitsEnabledForAthleteDashboard : null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load contest mapping view');
     } finally {
@@ -269,6 +271,9 @@ export function ContestMappingPanel({ eventId }: { eventId: string; connectionId
         throw new Error(data?.message || 'Failed to save contest mappings');
       }
       toast({ title: 'Saved', description: `Stored ${String(data.count || 0)} contest mappings.` });
+      if (typeof data.splitsEnabledForAthleteDashboard === 'boolean') {
+        setSplitsEnabledForAthleteDashboard(data.splitsEnabledForAthleteDashboard);
+      }
       await loadView();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save contest mappings';
@@ -309,6 +314,21 @@ export function ContestMappingPanel({ eventId }: { eventId: string; connectionId
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+        {splitsEnabledForAthleteDashboard === true ? (
+          <Alert>
+            <CheckCircle2 className="h-4 w-4" />
+            <AlertDescription>
+              Splits are <strong>enabled</strong> on the athlete dashboard. Athletes can see their split breakdowns in the live tracking modal.
+            </AlertDescription>
+          </Alert>
+        ) : splitsEnabledForAthleteDashboard === false ? (
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              Splits are <strong>not yet enabled</strong> on the athlete dashboard. Map at least one contest and save to enable split visibility for athletes.
+            </AlertDescription>
           </Alert>
         ) : null}
         <div className="flex gap-2">

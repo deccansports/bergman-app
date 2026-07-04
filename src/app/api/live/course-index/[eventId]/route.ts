@@ -16,18 +16,28 @@ export async function GET(_req: NextRequest, { params }: { params: { eventId: st
       return NextResponse.json({ success: false, message: 'eventId is required' }, { status: 400 });
     }
 
-    const courseIndex = await getKV<any>(`live:event:${eventId}:course:index`, 'api-live-course-index')
-      || await getKV<any>(`event:${eventId}:course:index`, 'api-live-course-index');
+    const [courseIndex, splitsDashboardFlag] = await Promise.all([
+      (getKV<any>(`live:event:${eventId}:course:index`, 'api-live-course-index')
+        .then((v) => v || getKV<any>(`event:${eventId}:course:index`, 'api-live-course-index'))),
+      getKV<any>(`event:${eventId}:splits:dashboard:enabled`, 'api-live-course-index').catch(() => null),
+    ]);
 
     if (!courseIndex) {
       return NextResponse.json({ success: false, eventId, message: 'Course index not found' }, { status: 404 });
     }
 
+    const timingConfiguration = buildTimingConfigurationFromCourseIndex(courseIndex);
+    const splitsEnabledForAthleteDashboard = Boolean(splitsDashboardFlag?.enabled);
+
     return NextResponse.json({
       success: true,
       eventId,
       courseIndex,
-      timingConfiguration: buildTimingConfigurationFromCourseIndex(courseIndex),
+      splitsEnabledForAthleteDashboard,
+      timingConfiguration: {
+        ...timingConfiguration,
+        splitsEnabledForAthleteDashboard,
+      },
     });
   } catch (error) {
     return NextResponse.json({ success: false, message: error instanceof Error ? error.message : 'Failed to load course index' }, { status: 500 });
