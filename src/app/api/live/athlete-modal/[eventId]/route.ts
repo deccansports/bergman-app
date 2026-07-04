@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getKV } from '@/lib/cloudflare/kv';
 import { loadParticipantPublicView } from '@/lib/liveTrackingParticipantStore';
 import { canAccessPrivateLiveTracking, getParticipantLiveTrackingPrivacy, resolveLiveTrackingAccess } from '@/lib/liveTrackingPrivacy';
+import { applySplitMappingToCourseIndex, getEnabledSplitSet, loadSplitMapping } from '@/lib/live-tracking/splitMapping';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -268,10 +269,16 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
     console.log('[AthleteModal] timingParticipant loaded', { eventId, resolvedBookingId: resolved.bookingId || null, loaded: Boolean(resolved.participant) });
     console.log('[AthleteModal] participantLive loaded', { eventId, resolvedBookingId: resolved.bookingId || null, loaded: Boolean(resolved.participantLive) });
 
-    const courseIndex = await getKV<any>(`live:event:${eventId}:course:index`, 'api-live-athlete-modal');
-    if (!courseIndex || typeof courseIndex !== 'object') {
+    const rawCourseIndex = await getKV<any>(`live:event:${eventId}:course:index`, 'api-live-athlete-modal');
+    if (!rawCourseIndex || typeof rawCourseIndex !== 'object') {
       return NextResponse.json({ success: false, eventId, message: 'Course configuration missing' }, { status: 500 });
     }
+
+    // Only expose splits that an admin has explicitly mapped to the athlete
+    // dashboard. Contests without a saved split mapping surface no splits at all.
+    const splitMapping = await loadSplitMapping(eventId).catch(() => null);
+    const enabledSplitSet = getEnabledSplitSet(splitMapping, resolved.contestUuid);
+    const courseIndex = applySplitMappingToCourseIndex(rawCourseIndex, splitMapping);
 
     const contestContext = extractContestRelatedRows(resolved.contestUuid, courseIndex);
     if (!contestContext?.contest) {
@@ -279,6 +286,11 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
     }
 
     const timingConfiguration = buildTimingConfigurationFromCourseIndex(courseIndex);
+    const splitDashboard = {
+      configured: enabledSplitSet !== null,
+      enabledCount: enabledSplitSet ? enabledSplitSet.size : 0,
+      visibleSplitCount: Array.isArray(contestContext?.splits) ? contestContext.splits.length : 0,
+    };
     const courseSummary = summarizeContestCourse(contestContext.contest);
     const timingStarted = Boolean(
       resolved?.participantLive?.startTime
@@ -334,6 +346,7 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
       contestDefinition: contestContext.contest,
       timingConfiguration,
       courseIndex,
+      splitDashboard,
     });
   } catch (error) {
     return NextResponse.json({ success: false, message: error instanceof Error ? error.message : 'Failed to resolve athlete modal context' }, { status: 500 });

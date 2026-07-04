@@ -19,6 +19,7 @@ import DynamicSplitSummaryTable from './DynamicSplitSummaryTable';
 import { useTimingConfigurationContext } from './TimingConfigurationContext';
 import { fetchJsonCached } from '@/lib/liveTrackingRequestCache';
 import { buildSplitModalModel } from './split-modal/utils';
+import { filterTimingConfigurationSplits, getEnabledSplitSet, normalizeSplitMapping, type SplitMapping } from '@/lib/live-tracking/splitMappingShared';
 
 // ============================================
 // TYPES
@@ -493,6 +494,7 @@ export default function AthleteLiveModalPro({
   const [hydratedDetailAthlete, setHydratedDetailAthlete] = useState<LiveAthlete | null>(null);
   const [timingConfiguration, setTimingConfiguration] = useState<ResolvedTimingConfiguration | null>(null);
   const [isTimingConfigurationLoading, setIsTimingConfigurationLoading] = useState(false);
+  const [splitMapping, setSplitMapping] = useState<SplitMapping | null>(null);
   const [isDetailHydrating, setIsDetailHydrating] = useState(false);
   const [participantsByBib, setParticipantsByBib] = useState<Record<string, any>>({});
   const prevPos = useRef<{ lat: number; lng: number } | null>(null);
@@ -660,6 +662,29 @@ export default function AthleteLiveModalPro({
       : null;
     return contest || null;
   }, [activeDetailAthlete, splitModel?.participantProfile?.contestUuid, splitModel?.participantProfile?.contestName, timingConfiguration]);
+
+  // Timing configuration restricted to only the splits the admin mapped to the
+  // athlete dashboard. Used exclusively for the "Splits Summary" section.
+  const dashboardTimingConfiguration = useMemo(
+    () => filterTimingConfigurationSplits(timingConfiguration, splitMapping) ?? null,
+    [timingConfiguration, splitMapping],
+  );
+
+  const dashboardContestUuid = useMemo(() => String(
+    (activeDetailAthlete as any)?.contestUuid
+    || (activeDetailAthlete as any)?.contest_uuid
+    || splitModel?.participantProfile?.contestUuid
+    || (resolvedContest as any)?.contestUuid
+    || (resolvedContest as any)?.uuid
+    || '',
+  ).trim(), [activeDetailAthlete, splitModel?.participantProfile?.contestUuid, resolvedContest]);
+
+  // Only reveal the splits section once the admin has enabled at least one split
+  // for this contest. Missing mapping (null) keeps the section hidden entirely.
+  const dashboardSplitsAllowed = useMemo(() => {
+    const enabled = getEnabledSplitSet(splitMapping, dashboardContestUuid);
+    return enabled !== null && enabled.size > 0;
+  }, [splitMapping, dashboardContestUuid]);
 
   useEffect(() => {
     athleteRef.current = athlete;
@@ -1080,6 +1105,31 @@ export default function AthleteLiveModalPro({
       window.clearInterval(refreshTimer);
     };
   }, [open, eventId, bookingId, timingConfigurationProp, timingConfigurationContext?.timingConfiguration, timingConfiguration]);
+
+  // Load the admin-configured split → athlete-dashboard mapping. Splits are only
+  // ever shown in the modal when the admin has explicitly mapped them.
+  useEffect(() => {
+    if (!open || !eventId) return;
+    let cancelled = false;
+    const loadSplitMapping = async () => {
+      try {
+        const response = await fetch(`/api/live/split-mapping/${encodeURIComponent(eventId)}`, { cache: 'no-store' });
+        const payload = await response.json().catch(() => null);
+        if (cancelled) return;
+        if (!response.ok || !payload?.success) {
+          setSplitMapping(null);
+          return;
+        }
+        setSplitMapping(payload?.mapping ? normalizeSplitMapping(eventId, payload.mapping) : { eventId, contests: {} });
+      } catch {
+        if (!cancelled) setSplitMapping(null);
+      }
+    };
+    void loadSplitMapping();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, eventId]);
 
   // ============================================
   // 🔥 AUTO FETCH (REALTIME) - For live mode
@@ -1828,17 +1878,19 @@ export default function AthleteLiveModalPro({
                   </Card>
                 )}
 
-                <div className="w-full max-w-full min-w-0 space-y-3 pt-2">
-                  <h3 className="font-semibold text-base sm:text-lg text-yellow-300">Splits Summary</h3>
-                  <DynamicSplitSummaryTable
-                    athlete={detailParticipant}
-                    timingConfiguration={timingConfiguration}
-                    participant={participantsByBib[String(detailParticipant?.bib || '').trim()] || detailParticipant || null}
-                    participantsByBib={participantsByBib}
-                    ticketDef={resolvedTicketDef}
-                    isLoading={!detailReady}
-                  />
-                </div>
+                {dashboardSplitsAllowed ? (
+                  <div className="w-full max-w-full min-w-0 space-y-3 pt-2">
+                    <h3 className="font-semibold text-base sm:text-lg text-yellow-300">Splits Summary</h3>
+                    <DynamicSplitSummaryTable
+                      athlete={detailParticipant}
+                      timingConfiguration={dashboardTimingConfiguration}
+                      participant={participantsByBib[String(detailParticipant?.bib || '').trim()] || detailParticipant || null}
+                      participantsByBib={participantsByBib}
+                      ticketDef={resolvedTicketDef}
+                      isLoading={!detailReady}
+                    />
+                  </div>
+                ) : null}
                 </>
                 )}
                 </div>

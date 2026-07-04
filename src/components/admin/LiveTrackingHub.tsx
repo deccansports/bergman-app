@@ -13,6 +13,7 @@ import LiveTrackingAdminTab from '@/components/admin/LiveTrackingAdminTab';
 import FeibotSyncRebuildCard from '@/components/admin/FeibotSyncRebuildCard';
 import FeibotCredentialCards from '@/components/admin/FeibotCredentialCards';
 import { ContestMappingPanel } from '@/components/admin/ContestMappingPanel';
+import { SplitMappingPanel } from '@/components/admin/SplitMappingPanel';
 import CourseMapDialog from '@/components/events/CourseMapDialog';
 import { updateTicketDefinitionAction } from '@/lib/actions/ticketActions';
 import { fetchJsonCached, invalidateJsonCache } from '@/lib/liveTrackingRequestCache';
@@ -428,6 +429,36 @@ export default function LiveTrackingHub() {
   const eventUuidTestAbortRef = useRef<AbortController | null>(null);
   const eventUuidTestInFlightRef = useRef(false);
   const lockedApiBaseUrl = DEFAULT_API_BASE_URL;
+  const [splitMappingSummary, setSplitMappingSummary] = useState<{ mappedContestCount: number; contestCount: number } | null>(null);
+
+  useEffect(() => {
+    const id = bergmanEventId.trim();
+    if (!id) {
+      setSplitMappingSummary(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/live/split-mapping/${encodeURIComponent(id)}`, { cache: 'no-store' });
+        const data = await response.json().catch(() => null);
+        if (cancelled) return;
+        if (!response.ok || !data?.success) {
+          setSplitMappingSummary(null);
+          return;
+        }
+        setSplitMappingSummary({
+          mappedContestCount: Number(data?.diagnostics?.mappedContestCount || 0),
+          contestCount: Number(data?.diagnostics?.contestCount || 0),
+        });
+      } catch {
+        if (!cancelled) setSplitMappingSummary(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [bergmanEventId]);
 
   const selectedEvent = useMemo(
     () => events.find((event) => event.event_uuid === selectedEventUuid) || null,
@@ -1952,10 +1983,11 @@ export default function LiveTrackingHub() {
                   { label: 'Event link extracted', ok: Boolean(fdbMetadata?.database?.localEventUuid || fdbImportSummary?.detected?.eventUuid) },
                   { label: 'KV built', ok: Boolean(fdbImportSummary?.validation?.complete) },
                   { label: 'Participants imported', ok: Number(fdbImportSummary?.counts?.participants || fdbMetadata?.database?.participants || 0) > 0 },
+                  { label: 'Athlete dashboard splits mapped', ok: Boolean(splitMappingSummary && splitMappingSummary.mappedContestCount > 0), optional: true },
                 ].map((item) => (
                   <div key={item.label} className="flex items-center justify-between gap-3 rounded-lg border p-3">
                     <span className="font-medium">{item.label}</span>
-                    <Badge variant={item.ok ? 'default' : 'secondary'}>{item.ok ? 'Ready' : 'Pending'}</Badge>
+                    <Badge variant={item.ok ? 'default' : 'secondary'}>{item.ok ? 'Ready' : (item as { optional?: boolean }).optional ? 'Optional' : 'Pending'}</Badge>
                   </div>
                 ))}
 
@@ -2169,7 +2201,10 @@ export default function LiveTrackingHub() {
           </Card>
 
           {bergmanEventId.trim() ? (
-            <ContestMappingPanel eventId={bergmanEventId.trim()} />
+            <>
+              <ContestMappingPanel eventId={bergmanEventId.trim()} />
+              <SplitMappingPanel eventId={bergmanEventId.trim()} />
+            </>
           ) : (
             <Card>
               <CardHeader className="py-3">

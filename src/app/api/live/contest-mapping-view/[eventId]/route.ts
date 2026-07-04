@@ -292,6 +292,7 @@ export async function GET(_req: NextRequest, { params }: { params: { eventId: st
     ]);
 
     const importedContests = normalizeContestRows(contestRows);
+    const timingConfiguration = (timingSnapshot as any)?.timingConfiguration || (timingSnapshot as any)?.timings || timingSnapshot || {};
     const timingLookup = buildTimingCountLookup(timingSnapshot || {});
     const mappingByUuid: Record<string, any> = {};
     const suggestions: Record<string, any> = {};
