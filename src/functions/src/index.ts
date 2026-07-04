@@ -6,6 +6,14 @@ import { FieldValue } from "firebase-admin/firestore";
 import { sendFeedbackCouponEmail } from "./auth/brevoService";
 import { sendFeedbackCouponWhatsApp } from "./auth/aisensyService";
 export { processWhatsAppCampaign } from "./whatsapp/processCampaign";
+export {
+  syncParticipantGlobal,
+  incrementParticipantCount,
+  getParticipants,
+  getTicketDefinitions,
+  getRaceResult,
+  createRegistration,
+} from "./optimizedParticipantsLayer";
 
 // This is the hardcoded Event ID for "BERGMAN OZAR PUNE 2026"
 const EVENT_ID = "zZ3gkTtYMQkRnFycRmxy";
@@ -21,7 +29,7 @@ function generateRandomString(length: number): string {
 
 export const generateFeedbackCoupon = onRequest(
   {
-    secrets: ["SECRET_KEY", "BREVO_API_KEY", "AISENSY_API_KEY"],
+    secrets: ["SECRET_KEY", "BERGTECHNO_EMAIL_API_KEY", "AISENSY_API_KEY"],
     cors: true,
   },
   async (req, res) => {
@@ -62,7 +70,7 @@ export const generateFeedbackCoupon = onRequest(
         try {
           await sendFeedbackCouponEmail(lowerEmail, name, existingCoupon);
         } catch (e: any) {
-          functions.logger.error("Brevo email failed:", e.message);
+          functions.logger.error("BergTechno email failed:", e.message);
         }
       
         try {
@@ -113,7 +121,7 @@ export const generateFeedbackCoupon = onRequest(
       try {
         await sendFeedbackCouponEmail(lowerEmail, name, couponCode);
       } catch (e: any) {
-        functions.logger.error("Brevo email failed:", e.message, e.stack);
+        functions.logger.error("BergTechno email failed:", e.message, e.stack);
       }
 
       try {

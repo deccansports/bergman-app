@@ -144,24 +144,24 @@ function ClubRankingsDisplay() {
   };
 
   return (
-    <div className="container mx-auto py-8 px-4 text-left">
+    <div className="container mx-auto py-8 px-4 text-center">
         <Card className="shadow-xl rounded-xl overflow-hidden border-t-4 border-primary">
           <CardHeader className="bg-primary/5 text-center">
             <div className="flex justify-center items-center gap-3">
               <Trophy className="h-12 w-12 text-primary" />
-              <div className="flex flex-col items-start text-left">
-                <CardTitle className="text-3xl font-black uppercase italic tracking-tighter text-primary text-left">Club Rankings {rankingYearToDisplay}</CardTitle>
-                <CardDescription className="text-lg font-bold text-muted-foreground text-left">Global Season Standings</CardDescription>
+              <div className="flex flex-col items-center text-center">
+                <CardTitle className="text-3xl font-black uppercase italic tracking-tighter text-primary text-center">Club Rankings {rankingYearToDisplay}</CardTitle>
+                <CardDescription className="text-lg font-bold text-muted-foreground text-center">Global Season Standings</CardDescription>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="p-4 md:p-6 text-left">
-            <div className="flex flex-col sm:flex-row gap-4 mb-8 items-center text-left">
+          <CardContent className="p-4 md:p-6 text-center">
+            <div className="flex flex-col sm:flex-row gap-4 mb-8 items-center justify-center text-center">
               <Select value={selectedYear} onValueChange={setSelectedYear} disabled={loading}>
                 <SelectTrigger className="w-full sm:w-[180px] h-11 rounded-xl font-bold"><CalendarDays className="mr-2 h-4 w-4 text-primary"/><SelectValue placeholder="Select Year"/></SelectTrigger>
                 <SelectContent>{availableYears.map(year => (<SelectItem key={year} value={year}>{year} Season</SelectItem>))}</SelectContent>
               </Select>
-              <div className="relative w-full sm:flex-1 text-left">
+              <div className="relative w-full sm:flex-1 text-center">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input type="search" placeholder="Search club name, coach or location..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10 w-full h-11 rounded-xl border-none bg-muted/30 font-bold" disabled={loading} />
               </div>
@@ -199,9 +199,9 @@ function ClubRankingsDisplay() {
                                    <div className="absolute inset-0 bg-black/10 group-hover/podium:bg-black/20 transition-colors duration-300" />
                                    <CardHeader className="relative pt-8 pb-4 items-center text-white text-center">
                                        <div className={cn("absolute -top-6 -right-6 w-20 h-20 rounded-full flex items-center justify-center font-black text-5xl opacity-20", rank === 1 && "text-yellow-900", rank === 2 && "text-slate-900", rank === 3 && "text-amber-900")}>{rank}</div>
-                                       <Avatar className="w-24 h-24 border-4 border-white/50 shadow-2xl bg-white/90">
-                                           <AvatarImage src={validLogo || undefined} alt={club.clubName} className="object-contain p-2" />
-                                           <AvatarFallback className="text-2xl bg-slate-100 text-slate-400"><Building /></AvatarFallback>
+                                         <Avatar className="w-24 h-24 !rounded-2xl border-4 border-white/60 shadow-2xl bg-white/95">
+                                           <AvatarImage src={validLogo || undefined} alt={club.clubName} className="object-contain p-3" />
+                                           <AvatarFallback className="!rounded-2xl text-2xl bg-slate-100 text-slate-400"><Building /></AvatarFallback>
                                        </Avatar>
                                        <CardTitle className="text-xl mt-4 text-white font-black uppercase tracking-tight leading-tight group-hover:text-white transition-colors text-left">{getCountryFlagEmoji(club.country)} {club.clubName}</CardTitle>
                                        <CardDescription className="text-white/80 font-bold uppercase text-[10px] tracking-[0.2em] flex flex-col gap-1 items-center">
@@ -277,9 +277,9 @@ function ClubRankingsDisplay() {
                               )}
                             </TableCell>
                             <TableCell className="p-2 text-center">
-                                <Avatar className="h-10 w-10 border bg-white shadow-sm">
-                                    <AvatarImage src={validLogo || undefined} className="object-contain p-1" />
-                                    <AvatarFallback className="text-xs bg-muted"><Building /></AvatarFallback>
+                              <Avatar className="h-12 w-12 !rounded-xl border border-border/60 bg-white shadow-sm">
+                                <AvatarImage src={validLogo || undefined} className="object-contain p-1.5" />
+                                <AvatarFallback className="!rounded-xl text-xs bg-muted"><Building /></AvatarFallback>
                                 </Avatar>
                             </TableCell>
                             <TableCell onClick={() => handleToggleAccordion(club.clubId)} className="text-left">

@@ -473,13 +473,20 @@ export async function sendStoreOrderConfirmedWhatsApp(params: {
     mobile: string;
     customer_name: string;
     order_id: string;
+  product_summary: string;
     total_amount: number;
-    invoice_number: string;
+  shipping_address: string;
     invoice_url: string;
     invoice_filename: string;
 }): Promise<{ success: boolean; message: string; }> {
-    const templateParams = [params.customer_name, "Bergman Store", params.invoice_number];
-    const campaignName = config.aisensy.storeOrderConfirmedCampaignName; 
+  const templateParams = [
+    params.customer_name || 'Athlete',
+    params.order_id || 'N/A',
+    params.product_summary || 'Bergman merchandise',
+    String(Number(params.total_amount || 0).toFixed(2)),
+    params.shipping_address || 'N/A',
+  ];
+  const campaignName = config.aisensy.storeOrderConfirmedCampaignName;
     const media = { filename: params.invoice_filename, url: params.invoice_url };
     return sendAiSensyMessage(
         params.mobile,
@@ -488,19 +495,29 @@ export async function sendStoreOrderConfirmedWhatsApp(params: {
         'Bergman Store Order Confirmation',
         'sendStoreOrderConfirmedWhatsApp',
         "BERGMAN 2",
-        media
+    media,
+    null,
+    { FirstName: params.customer_name || 'user' }
     );
 }
 
 export async function sendStoreOrderShippedWhatsApp(params: {
     mobile: string;
     customer_name: string;
+  product_summary: string;
     order_id: string;
+  tracking_id: string;
     courier_name: string;
-    tracking_id: string;
     tracking_url: string;
 }): Promise<{ success: boolean; message: string; }> {
-    const templateParams = [params.customer_name, params.order_id, params.courier_name, params.tracking_id, params.tracking_url];
+  const templateParams = [
+    params.customer_name || 'Athlete',
+    params.product_summary || 'Bergman merchandise',
+    params.order_id || 'N/A',
+    params.tracking_id || 'N/A',
+    params.courier_name || 'N/A',
+    params.tracking_url || 'N/A',
+  ];
     return sendAiSensyMessage(
         params.mobile,
         config.aisensy.storeOrderShippedCampaignName,

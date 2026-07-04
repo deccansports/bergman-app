@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getEventDetailsWithTicketsAction } from '@/lib/actions/eventActions';
 import { validateApiKey } from '@/lib/apiAuth';
+import { isTicketHidden } from '@/lib/utils';
 
 export async function GET(
   request: NextRequest,
@@ -18,8 +19,13 @@ export async function GET(
   }
 
   const result = await getEventDetailsWithTicketsAction(eventId);
-  if (result.success) {
-    return NextResponse.json({ success: true, event: result.event });
+  if (result.success && result.event) {
+    // Filter out hidden tickets from public API response
+    const publicEvent = {
+      ...result.event,
+      ticketDefinitions: (result.event.ticketDefinitions || []).filter(ticket => !isTicketHidden(ticket)),
+    };
+    return NextResponse.json({ success: true, event: publicEvent });
   } else {
     return NextResponse.json({ success: false, message: result.message }, { status: 404 });
   }

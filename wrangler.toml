@@ -1,0 +1,66 @@
+name = "bmlogin"
+main = "worker.js"
+
+# Compatibility flags for Workers runtime
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# KV Namespaces for data storage
+kv_namespaces = [
+  { binding = "BERGMAN_KV", id = "99a9e5b2f3d24e88990cddb7b56aa59d", preview_id = "99a9e5b2f3d24e88990cddb7b56aa59d" }
+]
+
+# Deployment configuration
+account_id = "ea57b19262c26aeea60b9ff00bfcba2d"
+workers_dev = true
+
+[vars]
+ENVIRONMENT = "production"
+API_BASE_URL = "https://bergmantri.com"
+CLOUDFLARE_ACCOUNT_ID = "ea57b19262c26aeea60b9ff00bfcba2d"
+CLOUDFLARE_STREAM_CUSTOMER_CODE = ""
+
+# Cron Triggers for scheduled jobs
+[triggers]
+crons = [
+  "30 4 * * *", # Birthday campaign - Daily at 10:00 IST (04:30 UTC)
+  "35 4 * * *"  # Backup cron at 10:05 IST (04:35 UTC) in case first one fails
+]
+
+# Environment-specific configurations
+[env.production]
+name = "bmlogin"
+kv_namespaces = [
+  { binding = "BERGMAN_KV", id = "99a9e5b2f3d24e88990cddb7b56aa59d", preview_id = "99a9e5b2f3d24e88990cddb7b56aa59d" }
+]
+[env.production.vars]
+ENVIRONMENT = "production"
+API_BASE_URL = "https://bergmantri.com"
+CLOUDFLARE_ACCOUNT_ID = "ea57b19262c26aeea60b9ff00bfcba2d"
+CLOUDFLARE_STREAM_CUSTOMER_CODE = ""
+
+[env.staging]
+name = "bergman-triathlon-worker-staging"
+kv_namespaces = [
+  { binding = "BERGMAN_KV", id = "bergman-kv-staging", preview_id = "bergman-kv-staging-preview" }
+]
+[env.staging.vars]
+ENVIRONMENT = "staging"
+API_BASE_URL = "https://staging.bergman.live"
+
+[env.development]
+name = "bergman-triathlon-worker-dev"
+kv_namespaces = [
+  { binding = "BERGMAN_KV", id = "bergman-kv-dev", preview_id = "bergman-kv-dev-preview" }
+]
+[env.development.vars]
+ENVIRONMENT = "development"
+API_BASE_URL = "http://localhost:3000"
+
+# Observability
+[observability]
+enabled = true
+
+# Limits
+[limits]
+cpu_ms = 300000

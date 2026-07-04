@@ -6,12 +6,15 @@ import { v4 as uuidv4 } from 'uuid';
 
 const JOBS_COLLECTION = 'backgroundJobs';
 
-interface Job {
+export interface Job {
   id: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   progress: number;
   results: any[];
   message?: string;
+  stage?: string;
+  syncCount?: number;        // How many items synced
+  totalCount?: number;       // Total items to sync
   createdAt: any; // Can be Date or FieldValue
   updatedAt: any; // Can be Date or FieldValue
 }
@@ -34,7 +37,7 @@ export async function startJob(): Promise<{ jobId: string }> {
   return { jobId };
 }
 
-export async function updateJobProgress(jobId: string, updates: Partial<Omit<Job, 'id' | 'createdAt'>>) {
+export async function updateJobProgress(jobId: string, updates: Partial<Job> & { id?: never; createdAt?: never; }) {
   try {
     const adminDb = getFirestoreInstance();
     const jobRef = adminDb.collection(JOBS_COLLECTION).doc(jobId);

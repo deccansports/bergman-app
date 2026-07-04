@@ -47,6 +47,7 @@ interface MetricChange {
   improved: boolean;
   icon?: React.ElementType;
   message?: string;
+  messageClassName?: string;
   isPB: boolean;
 }
 
@@ -259,6 +260,14 @@ export function YearlyProgressReport({
         currentData.changeAvgChipTime = calculateChange(avgChipTime, prevAvgChipTime, true, true);
         currentData.changeRacesFinished = calculateChange(currentData.racesFinished, previousYearStats.finishedCount, false, false);
         currentData.changeRacesDNF = calculateChange(currentData.racesDNF, previousYearStats.dnfCount, true, false);
+
+        const hasNotRacedInEitherYear = currentData.racesFinished === 0 && previousYearStats.finishedCount === 0;
+        if (hasNotRacedInEitherYear) {
+          const notRacedMessage = "You have not raced yet. If you're registered for an upcoming race, train hard and finish strong!";
+          currentData.changeRacesFinished = { value: '—', improved: true, isPB: false, message: notRacedMessage, messageClassName: 'text-red-600 font-medium' };
+          currentData.changeRacesDNF = { value: '—', improved: true, isPB: false, message: notRacedMessage, messageClassName: 'text-red-600 font-medium' };
+        }
+
         if (currentData.racesDNF === 0 && (previousYearStats.dnfCount > 0 || currentData.changeRacesDNF?.value === "No Change")) {
             currentData.changeRacesDNF = { ...currentData.changeRacesDNF, improved: true, message: "Excellent, 0 DNFs!", icon: CheckCircle2, isPB: false };
         }
@@ -433,7 +442,7 @@ export function YearlyProgressReport({
                         ) : (
                           "N/A"
                         )}
-                         {typeof changeData === 'object' && changeData?.message && <p className="text-xs text-muted-foreground mt-0.5">{changeData.message}</p>}
+                         {typeof changeData === 'object' && changeData?.message && <p className={cn("text-xs text-muted-foreground mt-0.5", changeData.messageClassName)}>{changeData.message}</p>}
                       </TableCell>
                     </TableRow>
                   );

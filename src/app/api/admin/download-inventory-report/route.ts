@@ -6,8 +6,14 @@ import { getParticipantsForEventAction } from '@/lib/actions/participantActions'
 import type { EventParticipant, EventCalendarEntry, TicketDefinition, EventInventory } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 const getEventData = async (eventId: string) => {
+    // Safety check for Firebase configuration
+    if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+        throw new Error('Firebase not configured');
+    }
+    
     const adminDb = getFirestoreInstance();
     const eventDocRef = adminDb.collection('events').doc(eventId);
     const eventDoc = await eventDocRef.get();

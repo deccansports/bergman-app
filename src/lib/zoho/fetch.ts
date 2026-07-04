@@ -1,6 +1,6 @@
 // src/lib/zoho/fetch.ts
 import axios from "axios";
-import { getZohoAccessToken } from "./token";
+import { getZohoAccessToken, clearZohoTokenCache } from "./token";
 
 /**
  * Standardized retry helper for Zoho operations with exponential backoff.
@@ -31,18 +31,18 @@ export async function zohoFetch(
     params?: any;
   } = {}
 ) {
-  const token = await getZohoAccessToken();
-  const zohoApiDomain = process.env.ZOHO_API_DOMAIN;
-  const orgId = process.env.ZOHO_ORG_ID || "60013782026";
-
-  if (!zohoApiDomain) {
-    throw new Error("Zoho API domain is not configured (ZOHO_API_DOMAIN).");
-  }
-
-  const url = `${zohoApiDomain}/books/v3${path}`;
-  const isPdfRequest = options.params?.accept === 'pdf';
-
   try {
+    const token = await getZohoAccessToken();
+    const zohoApiDomain = process.env.ZOHO_API_DOMAIN;
+    const orgId = process.env.ZOHO_ORG_ID || "60013782026";
+
+    if (!zohoApiDomain) {
+      throw new Error("Zoho API domain is not configured (ZOHO_API_DOMAIN).");
+    }
+
+    const url = `${zohoApiDomain}/books/v3${path}`;
+    const isPdfRequest = options.params?.accept === 'pdf';
+
     const res = await axios({
       url,
       method: options.method ?? "GET",
@@ -57,6 +57,7 @@ export async function zohoFetch(
       },
       data: options.body,
       responseType: isPdfRequest ? 'arraybuffer' : 'json',
+      timeout: 10000 // 10 second timeout
     });
     
     if (isPdfRequest) return Buffer.from(res.data);
@@ -78,6 +79,24 @@ export async function zohoFetch(
     // Aggressively search for a descriptive message in Zoho's nested response
     const zohoMsg = errorData?.message || (errorData?.error?.message) || errorData?.error || error.message || "Unknown Zoho Error";
     const zohoCode = errorData?.code || error.response?.status || "Unknown Code";
+
+    // Special handling for token / authentication errors
+    const isTokenError =
+      error.message?.includes('token refresh') ||
+      error.message?.includes('refresh token') ||
+      error.message?.includes('Re-authorize') ||
+      error.message?.includes('re-authorize') ||
+      error.message?.includes('OAuth credentials not configured') ||
+      error.message?.includes('access token missing') ||
+      error.message?.includes('rate-limited');
+    if (isTokenError) {
+      clearZohoTokenCache(); // evict bad/stale token from cache
+      console.error('[Zoho Auth Failed] Token error detected:', error.message);
+      const authError = new Error(`Zoho authentication failed: ${error.message}`);
+      (authError as any).zohoCode = 'AUTH_FAILED';
+      (authError as any).zohoMessage = error.message;
+      throw authError;
+    }
 
     const finalMsg = `Zoho Error ${zohoCode}: ${zohoMsg}`;
     console.error(`[Zoho API Response Error] Path: ${path}, Status: ${error.response?.status}, Msg: ${zohoMsg}`);

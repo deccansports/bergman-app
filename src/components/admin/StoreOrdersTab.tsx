@@ -1,7 +1,7 @@
 // src/components/admin/StoreOrdersTab.tsx
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { 
   getStoreOrdersAction, 
@@ -64,23 +64,59 @@ export default function StoreOrdersTab() {
   const [trackingData, setTrackingData] = useState({ trackingId: '', courierPartner: '', trackingUrl: '' });
   const [isSubmitting, setIsSubmitting] = useState<string | null>(null);
 
-  const loadData = async () => {
+  const calculateStatsFromOrders = (ordersData: StoreOrder[]) => {
+    const normalizeAmount = (value: unknown): number => {
+      const parsed = typeof value === 'string'
+        ? Number(value.replace(/[^0-9.-]/g, ''))
+        : Number(value);
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const paidLike = (status: unknown) => ['paid', 'processing', 'shipped', 'delivered'].includes(String(status || '').trim().toLowerCase());
+
+    const paidOrders = ordersData.filter((o) => paidLike(o.status));
+    const totalRevenue = paidOrders.reduce((sum, o: any) => sum + normalizeAmount(o.totalAmount), 0);
+    const totalGst = paidOrders.reduce((sum, o: any) => sum + normalizeAmount(o.gstAmount), 0);
+    const totalOrders = paidOrders.length;
+
+    return {
+      totalRevenue,
+      totalGst,
+      totalOrders,
+      avgOrderValue: totalOrders > 0 ? totalRevenue / totalOrders : 0,
+    };
+  };
+
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [oRes, aRes] = await Promise.all([
         getStoreOrdersAction(),
         getStoreAnalyticsAction()
       ]);
-      if (oRes.success) setOrders(oRes.orders || []);
-      if (aRes.success) setAnalytics(aRes.stats);
+      const loadedOrders = oRes.success ? (oRes.orders || []) : [];
+
+      if (oRes.success) {
+        setOrders(loadedOrders);
+      } else {
+        toast({ variant: 'destructive', title: 'Orders load failed', description: oRes.message || 'Could not load store orders.' });
+      }
+
+      if (aRes.success) {
+        setAnalytics(aRes.stats);
+      } else if (loadedOrders.length > 0) {
+        setAnalytics(calculateStatsFromOrders(loadedOrders));
+      } else {
+        setAnalytics({ totalRevenue: 0, totalOrders: 0, avgOrderValue: 0, totalGst: 0 });
+      }
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
   const handleStatusChange = async (order: StoreOrder, status: string) => {
     if (status === 'Shipped') {

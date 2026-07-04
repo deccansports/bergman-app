@@ -5,7 +5,7 @@ import React from 'react';
 import { useCart } from '@/context/StoreCartContext';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ShoppingBag, ArrowLeft, Trash2, Plus, Minus, ArrowRight, Package, CreditCard, ShieldCheck } from 'lucide-react';
+import { ShoppingBag, ArrowLeft, Trash2, Plus, Minus, ArrowRight, Package, CreditCard, ShieldCheck, Star } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Separator } from '@/components/ui/separator';
@@ -59,7 +59,14 @@ export default function CartPage() {
                 <div className="flex-grow flex flex-col justify-between py-1 text-left">
                   <div className="space-y-1 text-left">
                     <div className="flex justify-between items-start text-left">
-                      <h3 className="font-black text-lg sm:text-xl uppercase tracking-tight leading-tight text-left pr-4">{item.name}</h3>
+                      <div className="pr-4">
+                        <h3 className="font-black text-lg sm:text-xl uppercase tracking-tight leading-tight text-left">{item.name}</h3>
+                        {item.isBestseller && (
+                          <Badge className="mt-2 bg-amber-500 hover:bg-amber-600 text-[9px] h-5 px-2 uppercase font-black tracking-widest border-none">
+                            <Star className="mr-1 h-3 w-3 fill-white" /> Bestseller
+                          </Badge>
+                        )}
+                      </div>
                       <p className="font-black text-xl italic text-primary tracking-tighter">₹{item.salePrice * item.quantity}</p>
                     </div>
                     <div className="flex items-center gap-3 pt-2 text-left">

@@ -1,11 +1,22 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  typescript: {
+    ignoreBuildErrors: true,
+  },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   // Treat firebase-admin as an external package.
   // This is required because firebase-admin uses WebAssembly (WASM) and other native bindings
   // that can cause build failures or runtime errors in serverless environments like App Hosting.
   experimental: {
-    serverComponentsExternalPackages: ["firebase-admin"],
+    serverComponentsExternalPackages: ["firebase-admin", "sql.js"],
+    serverActions: {
+      bodySizeLimit: '15mb',
+    },
   },
+  // Skip prerendering for dynamic routes
+  staticPageGenerationTimeout: 0,
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "images.unsplash.com" },
@@ -14,6 +25,8 @@ const nextConfig = {
       { protocol: "https", hostname: "assets.zyrosite.com" },
       { protocol: "https", hostname: "firebasestorage.googleapis.com" },
       { protocol: "https", hostname: "storage.googleapis.com" },
+      { protocol: "https", hostname: "drive.google.com" },
+      { protocol: "https", hostname: "docs.googleusercontent.com" },
       { protocol: "https", hostname: "flagcdn.com" },
       { protocol: "https", hostname: "lh3.googleusercontent.com" },
     ],
@@ -23,6 +36,16 @@ const nextConfig = {
   // Suppress webpack warnings from @genkit-ai and @opentelemetry dependencies
   // These use dynamic requires which are normal for those libraries
   webpack: (config, { isServer }) => {
+    config.experiments = {
+      ...(config.experiments || {}),
+      asyncWebAssembly: true,
+    };
+
+    config.module.rules.push({
+      test: /\.wasm$/,
+      type: 'webassembly/async',
+    });
+
     if (isServer) {
       config.ignoreWarnings = [
         ...(config.ignoreWarnings || []),

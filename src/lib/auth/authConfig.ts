@@ -1,8 +1,10 @@
 // src/lib/auth/authConfig.ts
 
-// Brevo Configuration
-const brevoSenderEmail = process.env.BREVO_SENDER_EMAIL || 'info@bergmantri.com';
-const brevoSenderName = process.env.BREVO_SENDER_NAME || 'Bergman Triathlon';
+// Email provider template configuration.
+// NOTE: `brevo` key is retained for backward compatibility so existing template
+// references and IDs remain unchanged.
+const brevoSenderEmail = process.env.BERGTECHNO_SENDER_EMAIL || process.env.BREVO_SENDER_EMAIL || 'info@bergmantri.com';
+const brevoSenderName = process.env.BERGTECHNO_SENDER_NAME || process.env.BREVO_SENDER_NAME || 'Bergman Triathlon';
 
 export const authOtpConfig = {
   brevo: {
@@ -38,10 +40,13 @@ export const authOtpConfig = {
     contactEnquiryAckTemplateId: 246,
     contactEnquiryAdminTemplateId: 247,
     feedbackCouponTemplateId: 250,
+    birthdayCampaignTemplateId: 257,
     storeOrderShippedTemplateId: 251,
     storeOrderConfirmedTemplateId: 252,
     storeAdminOrderAlertTemplateId: 253,
+    invoiceEmailTemplateId: 256, // Registration / Deferral / Category-change invoice email
     yearlyRecapTemplateId_new: 226, // Fallback
+    waiverCheckedInUsaTemplateId: 259, // USA Event Waiver Check-in Email with Waiver & Refund Policy
   },
   aisensy: {
     otpCampaignName: 'otp1',
@@ -68,7 +73,8 @@ export const authOtpConfig = {
     registrationInvoiceCampaignName: 'invoice',
     serviceFeeInvoiceCampaignName: 'Invoice def',
     feedbackCouponCampaignName: 'feedback_coupon',
-    storeOrderShippedCampaignName: 'bergman_order_shipped',
+    birthdayCampaignName: 'birthday',
+    storeOrderShippedCampaignName: 'ordershipped',
     storeOrderConfirmedCampaignName: 'bergman_store_invoice',
   },
 };

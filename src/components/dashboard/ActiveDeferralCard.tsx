@@ -11,6 +11,7 @@ import { useCountdown, CountdownTimeUnit } from '@/hooks/useCountdown';
 import { format } from 'date-fns';
 import { useRouter } from 'next/navigation';
 import { getEligibleEventsForDeferralAction, clearActiveDeferralNoticeAction } from '@/lib/actions/userActions';
+import { getActiveDeferralForUserAction } from '@/lib/actions';
 import { useToast } from '@/hooks/use-toast';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -32,7 +33,36 @@ export default function ActiveDeferralCard({ user }: ActiveDeferralCardProps) {
     setIsClient(true);
   }, []);
 
-  const countdown = useCountdown(user.activeDeferral?.expiryDate || '', '23:59:59');
+  const [resolvedActiveDeferral, setResolvedActiveDeferral] = useState<any | null>(user.activeDeferral || null);
+
+  useEffect(() => {
+    setResolvedActiveDeferral(user.activeDeferral || null);
+  }, [user.activeDeferral]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const shouldHydrateFromDeferrals = !user.activeDeferral || !user.activeDeferral.deferralId;
+    if (!shouldHydrateFromDeferrals) return;
+
+    getActiveDeferralForUserAction(user.uid, user.email || null)
+      .then((res) => {
+        if (!isMounted) return;
+        if (res.success) {
+          setResolvedActiveDeferral(res.activeDeferral || null);
+        }
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setResolvedActiveDeferral(null);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user.uid, user.email, user.activeDeferral]);
+
+  const countdown = useCountdown(resolvedActiveDeferral?.expiryDate || '', '23:59:59');
   
   const [eligibleEvents, setEligibleEvents] = useState<EventCalendarEntry[]>([]);
   const [isLoadingEvents, setIsLoadingEvents] = useState(true);
@@ -60,14 +90,14 @@ export default function ActiveDeferralCard({ user }: ActiveDeferralCardProps) {
   }, [toast, user.uid, user.email]);
 
   useEffect(() => {
-    if(user.activeDeferral && user.activeDeferral.status === 'Pending Ticket Selection') {
+    if(resolvedActiveDeferral && resolvedActiveDeferral.status === 'Pending Ticket Selection') {
         fetchEligibleEvents();
     }
-  }, [fetchEligibleEvents, user.activeDeferral]);
+  }, [fetchEligibleEvents, resolvedActiveDeferral]);
   
   const handleProceedToRegister = () => {
-    if (selectedEventSlug && user.activeDeferral?.deferralId) {
-      router.push(`/event-form/${selectedEventSlug}?deferralId=${user.activeDeferral.deferralId}`);
+    if (selectedEventSlug && resolvedActiveDeferral?.deferralId) {
+      router.push(`/event-form/${selectedEventSlug}?deferralId=${resolvedActiveDeferral.deferralId}`);
     }
   };
   
@@ -91,12 +121,12 @@ export default function ActiveDeferralCard({ user }: ActiveDeferralCardProps) {
     }
   };
   
-  if (!user.activeDeferral || (user.activeDeferral.status !== 'Pending Ticket Selection' && user.activeDeferral.status !== 'Expired')) {
+  if (!resolvedActiveDeferral || (resolvedActiveDeferral.status !== 'Pending Ticket Selection' && resolvedActiveDeferral.status !== 'Expired')) {
     return null;
   }
   
-  const isExpired = !countdown || countdown.isPast || user.activeDeferral.status === 'Expired';
-  const creditAmount = user.activeDeferral.estimatedOriginalBasePricePaisa;
+  const isExpired = !countdown || countdown.isPast || resolvedActiveDeferral.status === 'Expired';
+  const creditAmount = resolvedActiveDeferral.estimatedOriginalBasePricePaisa;
 
   if (!isClient) {
     return <Skeleton className="w-full h-52" />;
@@ -120,7 +150,7 @@ export default function ActiveDeferralCard({ user }: ActiveDeferralCardProps) {
              {isExpired ? (
                 <div className="text-center p-4 rounded-lg space-y-2">
                   <p className="font-semibold text-foreground">
-                    Your deferral credit from <strong>{user.activeDeferral.originalEventName}</strong> is no longer valid.
+                    Your deferral credit from <strong>{resolvedActiveDeferral.originalEventName}</strong> is no longer valid.
                   </p>
                    {typeof creditAmount === 'number' && (
                         <p className="text-sm text-muted-foreground">
@@ -131,7 +161,7 @@ export default function ActiveDeferralCard({ user }: ActiveDeferralCardProps) {
                 </div>
             ) : countdown ? (
                 <>
-                    <p className="text-muted-foreground">You have an active deferral credit from <strong>{user.activeDeferral.originalEventName}</strong>. Use it to register for an upcoming event before it expires.</p>
+                <p className="text-muted-foreground">You have an active deferral credit from <strong>{resolvedActiveDeferral.originalEventName}</strong>. Use it to register for an upcoming event before it expires.</p>
                     {typeof creditAmount === 'number' && creditAmount > 0 && (
                         <div className="text-center p-4 bg-orange-100/50 border border-orange-200 rounded-lg">
                             <p className="text-sm font-medium text-orange-800">Available Credit</p>
@@ -148,7 +178,7 @@ export default function ActiveDeferralCard({ user }: ActiveDeferralCardProps) {
                             <CountdownTimeUnit value={countdown.minutes} label="Mins" />
                             <CountdownTimeUnit value={countdown.seconds} label="Secs" />
                         </div>
-                        <p className="text-center text-xs text-muted-foreground mt-2">Expires on: {user.activeDeferral.expiryDate ? format(new Date(user.activeDeferral.expiryDate), 'MMM dd, yyyy') : 'N/A'}</p>
+                      <p className="text-center text-xs text-muted-foreground mt-2">Expires on: {resolvedActiveDeferral.expiryDate ? format(new Date(resolvedActiveDeferral.expiryDate), 'MMM dd, yyyy') : 'N/A'}</p>
                     </div>
                 </>
             ) : null}

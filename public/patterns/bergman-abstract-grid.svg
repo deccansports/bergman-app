@@ -1,0 +1,41 @@
+<svg width="1200" height="1200" viewBox="0 0 1200 1200" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" role="img">
+  <rect width="1200" height="1200" fill="#FFFFFF"/>
+  <defs>
+    <pattern id="bergman-abstract-grid" patternUnits="userSpaceOnUse" width="480" height="480">
+      <rect width="480" height="480" fill="#FFFFFF"/>
+      <g opacity="0.045" fill="none" stroke="#EDEDED" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+        <!-- Large hexagonal contour loops inspired by the reference -->
+        <path d="M30 96L108 48H224L302 96V184L224 232H108L30 184Z"/>
+        <path d="M64 114L122 78H210L268 114V166L210 202H122L64 166Z"/>
+
+        <path d="M244 54L322 6H438L516 54V142L438 190H322L244 142Z"/>
+        <path d="M278 72L336 36H424L482 72V124L424 160H336L278 124Z"/>
+
+        <path d="M14 270L92 222H208L286 270V358L208 406H92L14 358Z"/>
+        <path d="M48 288L106 252H194L252 288V340L194 376H106L48 340Z"/>
+
+        <path d="M258 258L336 210H452L530 258V346L452 394H336L258 346Z"/>
+        <path d="M292 276L350 240H438L496 276V328L438 364H350L292 328Z"/>
+
+        <!-- Soft vertical contour run-throughs -->
+        <path d="M176 0V62C176 76 182 88 192 98L212 118C222 128 228 140 228 154V480"/>
+        <path d="M356 0V82C356 94 350 106 340 116L318 138C308 148 302 160 302 174V480"/>
+        <path d="M72 0V52C72 66 78 78 88 88L108 108C118 118 124 130 124 144V480"/>
+        <path d="M452 0V70C452 82 446 94 436 104L414 126C404 136 398 148 398 162V480"/>
+
+        <!-- Minimal connector bends for a premium route feel -->
+        <path d="M92 166H142C156 166 168 172 176 182L192 202"/>
+        <path d="M350 124H398C412 124 424 130 432 140L448 160"/>
+        <path d="M108 340H164C178 340 190 346 198 356L214 376"/>
+        <path d="M350 328H404C418 328 430 334 438 344L454 364"/>
+
+        <!-- Start/end markers -->
+        <circle cx="64" cy="166" r="7"/>
+        <circle cx="474" cy="74" r="7"/>
+        <circle cx="78" cy="342" r="7"/>
+        <circle cx="466" cy="320" r="7"/>
+      </g>
+    </pattern>
+  </defs>
+  <rect width="1200" height="1200" fill="url(#bergman-abstract-grid)"/>
+</svg>

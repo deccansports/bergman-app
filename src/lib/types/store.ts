@@ -33,6 +33,7 @@ export interface StoreCartItem {
   sku: string;
   hsnCode: string;
   gstPercent: number;
+  isBestseller?: boolean;
   discount?: number;
   baseAmount?: number;
   gstAmount?: number;

@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { X, Waves, ChevronsRight, Bike, Footprints, Flag, Clock, MapPin, User as UserIcon, Building, ShieldCheck, AlertTriangle, TrendingUp, LocateFixed, Route, Hourglass } from 'lucide-react';
 import { isDuathlonEvent, formatSecondsToHMS, hmsToSeconds } from '@/lib/utils';
 import { motion } from 'framer-motion';
+import { buildSplitModalModel } from './split-modal/utils';
 
 const getInitials = (name?: string | null) => {
     if (!name) return '';
@@ -47,14 +48,16 @@ const RaceProgressBar: React.FC<{
     splits: Split[];
     startTime: number | null;
 }> = ({ leg, progress, category, splits, startTime }) => {
-    const isDua = isDuathlonEvent(category);
-    const segments: Leg[] = isDua ? ['RUN1', 'T1', 'BIKE', 'T2', 'RUN2'] : ['SWIM', 'T1', 'BIKE', 'T2', 'RUN'];
-    const totalSegments = segments.length;
+  const text = String(category || '').toLowerCase();
+  const isSwimOnlyContest = text.includes('swim') && !text.includes('triathlon') && !text.includes('duathlon') && !text.includes('aquathlon');
+  const isDua = isDuathlonEvent(category);
+  const segments: Leg[] = isSwimOnlyContest ? ['SWIM', 'FINISH'] : isDua ? ['RUN1', 'T1', 'BIKE', 'T2', 'RUN2'] : ['SWIM', 'T1', 'BIKE', 'T2', 'RUN'];
+  const totalSegments = segments.length;
     
     const legMap: Record<Leg | 'NOT_STARTED', number> = {
         'NOT_STARTED': 0, 'SWIM': 0, 'RUN1': 0, 
         'T1': 1, 'BIKE': 2, 'T2': 3, 
-        'RUN': 4, 'RUN2': 4, 'FINISH': 5, 'FINISHED': 5,
+        'RUN': 4, 'RUN2': 4, 'FINISH': isSwimOnlyContest ? 1 : 5, 'FINISHED': isSwimOnlyContest ? 1 : 5,
     };
     
     const currentSegmentIndex = legMap[leg as Leg | 'NOT_STARTED'] ?? 0;
@@ -65,7 +68,7 @@ const RaceProgressBar: React.FC<{
         <div className="w-full pt-2">
              <div className="flex justify-between items-center mb-1">
                 {segments.map((segmentName, i) => {
-                    const Icon = segmentName === 'SWIM' ? Waves : segmentName === 'BIKE' ? Bike : segmentName.startsWith('T') ? ChevronsRight : Footprints;
+                  const Icon = segmentName === 'SWIM' ? Waves : segmentName === 'BIKE' ? Bike : segmentName.startsWith('T') ? ChevronsRight : segmentName === 'FINISH' ? Flag : Footprints;
                     const isCompleted = leg === 'FINISHED' || currentSegmentIndex > i;
                     const isCurrent = currentSegmentIndex === i && leg !== 'FINISHED';
                     return (
@@ -197,7 +200,12 @@ export default function BergmanTrackerCard({ data, onViewMap, onRemove, onSelect
             <p className="font-semibold text-sm">{data.name}</p>
             <div className="flex items-center gap-2">
                 <p className="text-xs text-gray-500">BIB: {data.bib}</p>
-                {data.clubName && <p className="text-xs text-gray-500 flex items-center gap-1"><Building className="h-3 w-3"/>{data.clubName}</p>}
+                {data.clubName && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[11px] font-medium text-emerald-100">
+                    <Building className="h-3 w-3" />
+                    Proudly representing {data.clubName}
+                  </span>
+                )}
             </div>
           </div>
         </div>
@@ -231,14 +239,16 @@ export default function BergmanTrackerCard({ data, onViewMap, onRemove, onSelect
         <RaceProgressBar leg={data.leg as Leg | 'NOT_STARTED'} progress={data.legProgressPct || 0} category={data.category} splits={data.splits || []} startTime={data.startTime} />
         
         {data.status === 'On Course' && data.cutoffStatus && data.cutoffStatus !== 'N/A' && (
-            <div className={`p-2 rounded-md border text-center ${data.cutoffStatus === 'On Track' ? 'bg-green-50 border-green-100' : 'bg-orange-50 border-orange-100'}`}>
-                {data.cutoffStatus === 'On Track' ? (
-                    <p className="font-semibold text-sm text-green-700 flex items-center justify-center gap-1"><ShieldCheck className="h-4 w-4"/>On Track</p>
-                ) : (
-                     <p className="font-semibold text-sm text-orange-700 flex items-center justify-center gap-1"><AlertTriangle className="h-4 w-4"/>May Miss Cutoff</p>
-                )}
-                <p className="text-muted-foreground text-[10px]">Cutoff Status</p>
-            </div>
+          <div className={`p-2 rounded-md border text-center ${String(data.cutoffStatus) === 'Within Cutoff' || String(data.cutoffStatus) === 'On Track' ? 'bg-green-50 border-green-100' : String(data.cutoffStatus) === 'Missed Cutoff' ? 'bg-red-50 border-red-100' : 'bg-orange-50 border-orange-100'}`}>
+            {(String(data.cutoffStatus) === 'Within Cutoff' || String(data.cutoffStatus) === 'On Track') ? (
+              <p className="font-semibold text-sm text-green-700 flex items-center justify-center gap-1"><ShieldCheck className="h-4 w-4"/>Within Cutoff</p>
+            ) : String(data.cutoffStatus) === 'Missed Cutoff' ? (
+               <p className="font-semibold text-sm text-red-700 flex items-center justify-center gap-1"><AlertTriangle className="h-4 w-4"/>Missed Cutoff</p>
+            ) : (
+               <p className="font-semibold text-sm text-orange-700 flex items-center justify-center gap-1"><AlertTriangle className="h-4 w-4"/>Approaching Cutoff</p>
+            )}
+            <p className="text-muted-foreground text-[10px]">Cutoff Status</p>
+          </div>
         )}
       </CardContent>
     </Card>

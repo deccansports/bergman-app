@@ -3,6 +3,7 @@
 
 import { getFirestoreInstance } from '@/lib/firebaseAdmin';
 import type { Coupon } from '@/lib/types';
+import { getUserProfile } from '@/lib/dataLayerOptimized';
 
 /**
  * Validates if a user is eligible for a "Previous Participant" coupon.
@@ -26,12 +27,12 @@ export async function validatePreviousParticipantCoupon(
     return { success: false, message: 'This coupon is not configured correctly (missing source events).' };
   }
 
-  // Get user's email from their profile
-  const userDoc = await adminDb.collection('users').doc(athleteUid).get();
-  if (!userDoc.exists) {
+  // Get user's email from KV-first profile lookup
+  const userProfile = await getUserProfile(athleteUid);
+  if (!userProfile) {
     return { success: false, message: 'Could not verify user profile for coupon eligibility.' };
   }
-  const userEmail = userDoc.data()?.email?.toLowerCase();
+  const userEmail = String(userProfile.email || '').toLowerCase();
   if (!userEmail) {
     return { success: false, message: 'User profile is missing an email address.' };
   }

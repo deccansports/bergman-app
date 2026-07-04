@@ -5,7 +5,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Search as SearchIcon, Bike, User, RefreshCw, Download } from 'lucide-react';
 import type { EventParticipant, EventCalendarEntry } from '@/lib/types';
-import { getCheckedInParticipantsForEventAction, resetBikeCheckOutAction } from '@/lib/actions/volunteerActions';
+import { getBikeCheckedOutParticipantsForEventAction, resetBikeCheckOutAction } from '@/lib/actions/volunteerActions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -33,10 +33,9 @@ export default function BikeCheckoutLogTab({ events, isLoadingEvents }: BikeChec
     if (!selectedEventId) return;
     setIsLoading(true);
     try {
-      const result = await getCheckedInParticipantsForEventAction(selectedEventId, {});
+      const result = await getBikeCheckedOutParticipantsForEventAction(selectedEventId);
       if (result.success && result.participants) {
-        const bikeCheckedOut = result.participants.filter(p => p.bikeCheckOutStatus === 'CheckedOut');
-        setParticipants(bikeCheckedOut);
+        setParticipants(result.participants);
       } else {
         setParticipants([]);
         toast({ variant: 'destructive', title: 'Error', description: 'Could not fetch bike check-out log.' });

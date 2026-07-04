@@ -37,17 +37,255 @@
             from { transform: translateY(0); opacity: 1; }
             to { transform: translateY(100%); opacity: 0; }
         }
-        .sponsor-slider {
+        .ticker-track {
             display: flex;
-            animation: slide 30s linear infinite;
+            width: max-content;
+            align-items: center;
+            animation: tickerSlide 48s linear infinite;
         }
-        @keyframes slide {
+        @keyframes tickerSlide {
             from { transform: translateX(0); }
             to { transform: translateX(-50%); }
+        }
+        .ticker-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.75rem;
+            white-space: nowrap;
+            padding: 0 1.25rem;
+            color: #e2e8f0;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+        }
+        .ticker-item img {
+            width: auto;
+            height: 1.6rem;
+            object-fit: contain;
+        }
+        .ticker-separator {
+            color: rgba(250, 204, 21, 0.75);
+            font-size: 1rem;
+            letter-spacing: 0.2em;
+        }
+        .meta-chip {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.45rem;
+            padding: 0.45rem 0.9rem;
+            border-radius: 999px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            background: rgba(15, 23, 42, 0.72);
+            color: #e2e8f0;
+            backdrop-filter: blur(10px);
+        }
+        .sporty-bg {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            z-index: -1;
+            background:
+                radial-gradient(circle at 20% 15%, rgba(250, 204, 21, 0.12), transparent 28%),
+                radial-gradient(circle at 80% 20%, rgba(14, 165, 233, 0.10), transparent 28%),
+                radial-gradient(circle at 50% 85%, rgba(34, 197, 94, 0.08), transparent 30%),
+                linear-gradient(135deg, #020617 0%, #0b1227 40%, #111827 100%);
+        }
+        .sporty-bg::before,
+        .sporty-bg::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background-repeat: no-repeat;
+            opacity: 0.22;
+        }
+        .sporty-bg::before {
+            background-image:
+                linear-gradient(125deg, transparent 0 75%, rgba(250, 204, 21, .45) 75% 76%, transparent 76% 100%),
+                linear-gradient(145deg, transparent 0 30%, rgba(14, 165, 233, .35) 30% 31%, transparent 31% 100%),
+                linear-gradient(110deg, transparent 0 55%, rgba(34, 197, 94, .3) 55% 56%, transparent 56% 100%);
+        }
+        .sporty-bg::after {
+            background-image:
+              radial-gradient(closest-side, rgba(56,189,248,.2), transparent 75%),
+              radial-gradient(closest-side, rgba(250,204,21,.18), transparent 78%);
+            background-size: 220px 100px, 280px 120px;
+            background-position: left 8% bottom 8%, right 6% bottom 10%;
+            filter: blur(0.2px);
+        }
+        .podium-shell {
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 1.5rem;
+            width: 100%;
+            height: 100%;
+        }
+        .fade-in {
+            animation: fadeIn 700ms ease both;
+        }
+        .fade-up {
+            animation: fadeUp 800ms ease both;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .winner-glow {
+            animation: winnerGlow 1.5s ease-in-out infinite alternate;
+            box-shadow: 0 0 0 1px rgba(250,204,21,.25), 0 0 22px rgba(250,204,21,.45), 0 0 48px rgba(250,204,21,.22);
+        }
+        .podium-final-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr 1fr;
+            align-items: end;
+            gap: 1.25rem;
+            width: 100%;
+            height: 100%;
+        }
+        .podium-card {
+            min-height: 28vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .podium-card--winner {
+            min-height: 32vh;
+        }
+        .podium-rank-title {
+            font-size: clamp(0.9rem, 1.3vw, 1.8rem);
+        }
+        .podium-athlete-name {
+            font-size: clamp(1.2rem, 2.2vw, 3rem);
+            line-height: 0.95;
+            letter-spacing: -0.03em;
+            word-break: break-word;
+        }
+        .podium-card--winner .podium-athlete-name {
+            font-size: clamp(1.6rem, 3vw, 4rem);
+        }
+        .podium-athlete-time {
+            font-size: clamp(1rem, 2vw, 2.8rem);
+            line-height: 0.95;
+        }
+        .podium-card--winner .podium-athlete-time {
+            font-size: clamp(1.2rem, 2.4vw, 3.2rem);
+        }
+        .podium-athlete-gap {
+            font-size: clamp(1rem, 1.7vw, 2rem);
+        }
+        .podium-meta-row {
+            gap: 0.65rem;
+        }
+        .single-podium-name {
+            font-size: clamp(2.8rem, 6vw, 7rem);
+            line-height: 0.92;
+            letter-spacing: -0.04em;
+        }
+        .single-podium-time {
+            font-size: clamp(2rem, 4.5vw, 5rem);
+            line-height: 0.95;
+        }
+        .single-podium-rank {
+            font-size: clamp(1.2rem, 3vw, 3rem);
+            font-weight: 700;
+            color: #fbbf24;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+        .podium-final-grid .center-winner {
+            transform: scale(1.05);
+            transform-origin: bottom center;
+        }
+        .sponsor-display {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+        .sponsor-card {
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.95) 0%, rgba(15, 23, 42, 0.95) 100%);
+            border: 2px solid rgba(251, 191, 36, 0.4);
+            border-radius: 3rem;
+            padding: 3rem 2rem;
+            max-width: 70vw;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 1.5rem;
+            box-shadow: 0 20px 60px rgba(251, 191, 36, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            animation: sponsorPulse 0.8s ease-out;
+        }
+        .sponsor-logo-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            max-width: 60vw;
+            max-height: 60vh;
+        }
+        .sponsor-logo-container img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            filter: drop-shadow(0 0 30px rgba(251, 191, 36, 0.4));
+        }
+        .sponsor-name {
+            font-size: clamp(1.5rem, 4vw, 3rem);
+            font-weight: 900;
+            color: #fbbf24;
+            text-align: center;
+            letter-spacing: 0.05em;
+            text-shadow: 0 4px 15px rgba(251, 191, 36, 0.3);
+        }
+        @keyframes sponsorPulse {
+            from {
+                opacity: 0;
+                transform: scale(0.95) translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+        .sponsor-logo-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            max-width: 60vw;
+            max-height: 60vh;
+        }
+        @media (max-height: 900px) {
+            .podium-card {
+                min-height: 24vh;
+                padding: 1rem;
+            }
+            .podium-card--winner {
+                min-height: 28vh;
+            }
+            .single-podium-name {
+                font-size: clamp(2.2rem, 5vw, 5.5rem);
+            }
+        }
+        @keyframes winnerGlow {
+            from { transform: scale(1); }
+            to { transform: scale(1.02); }
         }
     </style>
 </head>
 <body class="w-screen h-screen p-4 md:p-6 lg:p-8 flex flex-col">
+
+    <div class="sporty-bg" aria-hidden="true"></div>
 
     <header class="w-full text-center pb-4 flex-shrink-0">
         <img id="header-logo" src="/Bmlogowhite.png" alt="Bergman Logo" class="h-16 md:h-20 lg:h-24 mx-auto object-contain transition-all duration-500" data-ai-hint="logo">
@@ -67,11 +305,15 @@
 
     </main>
 
+    <section id="podium-root" class="hidden flex-grow min-h-0">
+        <!-- Podium ceremony content rendered here -->
+    </section>
+
     <!-- Sponsor Banner -->
     <footer id="sponsor-banner-container" class="w-full flex-shrink-0 pt-4 hidden">
-        <div class="bg-slate-800/50 rounded-lg p-2 overflow-hidden">
-            <div class="sponsor-slider">
-                <!-- Sponsor logos will be injected here, duplicated for seamless scroll -->
+        <div class="bg-slate-900/75 border border-slate-700/70 rounded-lg px-2 py-2 overflow-hidden">
+            <div class="ticker-track">
+                <!-- Sponsor ticker items will be injected here, duplicated for seamless scroll -->
             </div>
         </div>
     </footer>
@@ -81,17 +323,26 @@
         import { getFirestore, onSnapshot, collection, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
         const MAX_FINISHERS_IN_FEED = 6; // Main finisher + 5 in the list
-        const SPONSOR_SLIDE_INTERVAL = 5000; // 5 seconds per set of sponsors
-
         let db;
         let unsubscribeFinishers = () => {};
         let unsubscribeSponsors = () => {};
 
+        const mainEl = document.querySelector('main');
+        const podiumRoot = document.getElementById('podium-root');
         const mainFinisherCard = document.getElementById('main-finisher-card');
         const recentFinishersList = document.getElementById('recent-finishers-list');
         const headerLogo = document.getElementById('header-logo');
         const sponsorBannerContainer = document.getElementById('sponsor-banner-container');
-        const sponsorSlider = document.querySelector('.sponsor-slider');
+        const sponsorSlider = document.querySelector('.ticker-track');
+        let podiumPollTimer = null;
+        let podiumLastSignature = '';
+        const DEFAULT_LOGO = '/Bmlogowhite.png';
+        const DEFAULT_FEMALE_LOGO = '/Bwwhitelogo.png';
+        const eventBranding = {
+            eventName: 'BERGMAN TRIATHLON & SWIMATHON',
+            logoUrl: '',
+            sponsors: [],
+        };
 
         // Function to get country flag emoji from name
         const countryNameToCode = { 'India': 'IN', 'United States': 'US', 'USA / Canada': 'US', 'United Kingdom': 'GB', 'Canada': 'CA', 'Australia': 'AU', 'Germany': 'DE', 'France': 'FR', 'Singapore': 'SG', 'United Arab Emirates': 'AE' };
@@ -101,19 +352,159 @@
             return String.fromCodePoint(...[...countryCode.toUpperCase()].map(c => 0x1F1A5 + c.charCodeAt(0)));
         }
 
+        function getActiveLogoSrc(gender) {
+            if (eventBranding.logoUrl) return eventBranding.logoUrl;
+            return gender === 'Female' ? DEFAULT_FEMALE_LOGO : DEFAULT_LOGO;
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        async function loadBranding(eventId, isDemo) {
+            if (isDemo) {
+                eventBranding.eventName = 'BERGMAN TRIATHLON & SWIMATHON';
+                eventBranding.logoUrl = '';
+                eventBranding.sponsors = [
+                    { name: 'Hydration Partner', logoUrl: 'https://placehold.co/160x60/0ea5e9/ffffff?text=Hydration' },
+                    { name: 'Energy Partner', logoUrl: 'https://placehold.co/160x60/facc15/111827?text=Energy' },
+                    { name: 'Recovery Partner', logoUrl: 'https://placehold.co/160x60/22c55e/ffffff?text=Recovery' },
+                ];
+                headerLogo.src = DEFAULT_LOGO;
+                updateSponsors(eventBranding.sponsors);
+                return;
+            }
+
+            if (!eventId) return;
+
+            try {
+                const res = await fetch(`/api/finish-line-led?eventId=${encodeURIComponent(eventId)}&action=branding`);
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data?.success || !data?.branding) return;
+
+                eventBranding.eventName = data.branding.eventName || eventBranding.eventName;
+                eventBranding.logoUrl = data.branding.logoUrl || '';
+                eventBranding.sponsors = Array.isArray(data.branding.sponsors) ? data.branding.sponsors : [];
+                headerLogo.src = getActiveLogoSrc();
+                updateSponsors(eventBranding.sponsors);
+            } catch (error) {
+                console.warn('Branding load failed:', error);
+            }
+        }
+
+        function renderIdleAwardCeremony(message = 'Waiting for admin to select category and start the ceremony…') {
+            if (!podiumRoot) return;
+            const activeLogo = eventBranding.logoUrl || DEFAULT_LOGO;
+            const activeTitle = eventBranding.eventName || 'BERGMAN TRIATHLON & SWIMATHON';
+            podiumRoot.innerHTML = `
+                <div class="podium-shell w-full h-full px-6 text-center">
+                    <div class="w-full max-w-5xl mx-auto flex flex-col items-center justify-center gap-6 fade-in">
+                        <img src="${activeLogo}" alt="Event Logo" class="h-28 md:h-36 lg:h-44 object-contain" style="display: none;">
+                        <div class="text-5xl md:text-7xl lg:text-8xl font-black text-white tracking-widest text-shadow-md">AWARD CEREMONY</div>
+                        <div class="text-xl md:text-3xl lg:text-4xl font-teko text-cyan-300 tracking-[0.18em]">${activeTitle}</div>
+                        <div class="inline-flex items-center rounded-full border border-yellow-400/30 bg-slate-900/60 px-5 py-2 text-base md:text-xl text-slate-200">
+                            ${message}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        let sponsorCarouselInterval = null;
+        let guestCarouselInterval = null;
+
+        function renderGuestCarousel(guests = []) {
+            if (!podiumRoot) return;
+            
+            // Clear all other intervals
+            if (sponsorCarouselInterval) clearInterval(sponsorCarouselInterval);
+            if (podiumPollTimer) clearInterval(podiumPollTimer);
+            if (guestCarouselInterval) clearInterval(guestCarouselInterval);
+            
+            const filteredGuests = Array.isArray(guests) ? guests.filter(g => g && g.name) : [];
+            if (filteredGuests.length === 0) {
+                renderIdleAwardCeremony('No guests to welcome.');
+                return;
+            }
+
+            const guestsList = filteredGuests.map(guest => `
+                <div class="bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-2 border-yellow-400/40 rounded-3xl px-6 py-4 mb-4 hover:border-yellow-400/60 transition-all shadow-lg">
+                    <div class="text-3xl md:text-4xl lg:text-5xl font-black text-yellow-300">
+                        ${guest.name}${guest.designation ? ` <span class="text-cyan-300 text-2xl md:text-3xl lg:text-4xl">- ${guest.designation}</span>` : ''}
+                    </div>
+                </div>
+            `).join('');
+            
+            podiumRoot.innerHTML = `
+                <div class="podium-shell w-full h-full flex flex-col px-6 py-8">
+                    <div class="text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-widest text-shadow-md mb-6 text-center">WELCOME GUESTS</div>
+                    <div class="flex-1 overflow-y-auto pr-2">
+                        ${guestsList}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderSponsorCarousel(sponsors = []) {
+            if (!podiumRoot) return;
+            
+            // Clear all other intervals
+            if (guestCarouselInterval) clearInterval(guestCarouselInterval);
+            if (podiumPollTimer) clearInterval(podiumPollTimer);
+            
+            const filteredSponsors = Array.isArray(sponsors) ? sponsors.filter(s => s && s.logoUrl) : [];
+            if (filteredSponsors.length === 0) {
+                renderIdleAwardCeremony('No sponsors available.');
+                return;
+            }
+
+            let currentIndex = 0;
+            const showSponsor = () => {
+                if (currentIndex >= filteredSponsors.length) currentIndex = 0;
+                const sponsor = filteredSponsors[currentIndex];
+                
+                podiumRoot.innerHTML = `
+                    <div class="podium-shell w-full h-full">
+                        <div class="sponsor-display">
+                            <div class="sponsor-card">
+                                <div class="sponsor-logo-container">
+                                    <img src="${sponsor.logoUrl}" alt="${sponsor.name || 'Sponsor'}" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22%3E%3Crect fill=%22%23333%22 width=%22200%22 height=%22200%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 font-size=%2214%22 fill=%22%23999%22 text-anchor=%22middle%22 dominant-baseline=%22middle%22%3E${sponsor.name || 'Sponsor'}%3C/text%3E%3C/svg%3E'">
+                                </div>
+                                ${sponsor.name ? `<div class="sponsor-name">${sponsor.name.toUpperCase()}</div>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                currentIndex += 1;
+            };
+
+            showSponsor();
+            
+            // Clear any existing interval
+            if (sponsorCarouselInterval) clearInterval(sponsorCarouselInterval);
+            
+            // Show new sponsor every 10 seconds
+            sponsorCarouselInterval = setInterval(showSponsor, 10000);
+        }
+
         function updateMainFinisher(finisher) {
             if (!mainFinisherCard || !finisher) {
                 mainFinisherCard.innerHTML = `<div class="text-center text-slate-400">Waiting for the next finisher...</div>`;
                 return;
             };
 
-            if(finisher.gender === 'Female') {
-                headerLogo.src = '/Bwwhitelogo.png';
-            } else {
-                headerLogo.src = '/Bmlogowhite.png';
-            }
+            headerLogo.src = getActiveLogoSrc(finisher.gender);
             
             const flag = getCountryFlagEmoji(finisher.country);
+            const ticketName = finisher.ticketName || finisher.raceCategory || 'Ticket Name';
+            const ageCategory = finisher.ageCategory || finisher.ageGroup || 'Age Category';
 
             mainFinisherCard.innerHTML = `
                 <div class="text-center w-full animate-roll-down">
@@ -121,7 +512,10 @@
                         <span class="text-6xl">${flag}</span>
                         <span>${finisher.name}</span>
                     </h1>
-                    <p class="text-2xl md:text-4xl lg:text-5xl font-teko text-yellow-400 mt-2">${finisher.ticketName || ''}</p>
+                    <div class="mt-4 flex flex-wrap items-center justify-center gap-3 text-sm md:text-base lg:text-lg">
+                        <span class="meta-chip"><strong>Ticket Name</strong> ${ticketName}</span>
+                        <span class="meta-chip"><strong>Age Category</strong> ${ageCategory}</span>
+                    </div>
                     ${finisher.clubName ? `<p class="text-xl md:text-2xl lg:text-3xl font-teko text-slate-300">${finisher.clubName}</p>` : ''}
                     <div class="mt-4 md:mt-8">
                         <p class="text-lg md:text-2xl font-teko text-yellow-300/80 tracking-widest">Finish Time</p>
@@ -147,7 +541,7 @@
                     </div>
                     <div class="flex flex-col items-end">
                         <span class="font-bold text-yellow-400 font-mono">${finisher.finishTime}</span>
-                        <span class="text-sm text-slate-400 font-teko">${finisher.ticketName} - ${finisher.ageCategory}</span>
+                        <span class="text-sm text-slate-400 font-teko">Ticket: ${finisher.ticketName || finisher.raceCategory || '—'} · Age: ${finisher.ageCategory || finisher.ageGroup || '—'}</span>
                     </div>
                 `;
                 
@@ -165,14 +559,343 @@
             }
             
             sponsorBannerContainer.classList.remove('hidden');
-            const sponsorContent = sponsors.map(s => `
-                <div class="flex-shrink-0 w-48 h-20 flex items-center justify-center mx-8">
-                    <img src="${s.logoUrl}" alt="${s.name}" class="max-h-16 max-w-full object-contain">
-                </div>
-            `).join('');
+            const sponsorItems = sponsors.map(s => {
+                const safeName = escapeHtml(s.name || 'Sponsor');
+                const safeLogo = s.logoUrl ? escapeHtml(s.logoUrl) : '';
+                return `
+                    <div class="ticker-item">
+                        ${safeLogo ? `<img src="${safeLogo}" alt="${safeName}">` : ''}
+                        <span>${safeName}</span>
+                        <span class="ticker-separator">•</span>
+                    </div>
+                `;
+            }).join('');
             
             // Duplicate content for seamless loop
-            sponsorSlider.innerHTML = sponsorContent + sponsorContent;
+            sponsorSlider.innerHTML = sponsorItems + sponsorItems + sponsorItems;
+        }
+
+        function podiumCard(position, title, medal, athlete, colorClass, isWinner = false, category = '', ageGroup = '') {
+            const safeAthlete = athlete || { name: '—', finishTime: 'N/A', gapFromWinner: '+00:00' };
+            return `
+                <div class="podium-card ${isWinner ? 'podium-card--winner' : ''} card-gradient rounded-2xl p-6 border ${colorClass} ${isWinner ? 'winner-glow' : ''} fade-up">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="podium-rank-title font-black">${medal} ${title}</div>
+                        <div class="text-lg font-teko tracking-widest text-slate-300">${position}</div>
+                    </div>
+                    <div class="podium-athlete-name font-bold text-white text-shadow-md">${safeAthlete.name}</div>
+                    <div class="mt-3 flex items-end justify-between gap-4">
+                        <div>
+                            <div class="text-sm uppercase tracking-[0.2em] text-slate-400">Finish Time</div>
+                            <div class="podium-athlete-time font-teko text-yellow-300">${safeAthlete.finishTime}</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-sm uppercase tracking-[0.2em] text-slate-400">Gap</div>
+                            <div class="podium-athlete-gap font-teko text-slate-200">${safeAthlete.gapFromWinner || '+00:00'}</div>
+                        </div>
+                    </div>
+                    <div class="podium-meta-row mt-4 flex flex-wrap text-xs md:text-sm">
+                        <span class="meta-chip"><strong>Ticket Name</strong> ${category || '—'}</span>
+                        <span class="meta-chip"><strong>Age Category</strong> ${ageGroup || '—'}</span>
+                    </div>
+                    ${isWinner ? '<div class="mt-4 inline-flex items-center gap-2 bg-yellow-400/15 border border-yellow-300/40 text-yellow-200 px-3 py-1 rounded-full font-semibold">🏆 Champion</div>' : ''}
+                </div>
+            `;
+        }
+
+        function singlePodiumCard(athlete, category, ageGroup, podiumPosition = 'none') {
+            const safeAthlete = athlete || { name: '—', finishTime: 'N/A', gapFromWinner: '+00:00', rank: null };
+            
+            let rankBadge = '';
+            let rankMedal = '';
+            if (podiumPosition === 'winner') {
+                rankBadge = '🥇 1st Place';
+                rankMedal = '🥇';
+            } else if (podiumPosition === 'first_runner_up') {
+                rankBadge = '🥈 2nd Place';
+                rankMedal = '🥈';
+            } else if (podiumPosition === 'second_runner_up') {
+                rankBadge = '🥉 3rd Place';
+                rankMedal = '🥉';
+            } else if (safeAthlete.rank) {
+                // Show rank as ordinal (1st, 2nd, 3rd, 4th, etc.)
+                const rankNum = safeAthlete.rank;
+                const suffix = rankNum === 1 ? 'st' : rankNum === 2 ? 'nd' : rankNum === 3 ? 'rd' : 'th';
+                rankBadge = `#${rankNum}${suffix} Place`;
+                rankMedal = '🏅';
+            } else {
+                rankBadge = 'Participant';
+                rankMedal = '🏅';
+            }
+            
+            return `
+                <div class="w-full h-full flex items-center justify-center px-6 md:px-10">
+                    <div class="card-gradient rounded-3xl p-8 md:p-12 border border-yellow-400/70 winner-glow w-full max-w-6xl fade-up">
+                        <div class="flex flex-col items-center text-center gap-4">
+                            <div class="text-2xl md:text-3xl font-teko tracking-[0.25em] text-cyan-300">AWARD CEREMONY</div>
+                            <div class="text-3xl md:text-5xl lg:text-6xl font-black text-white">${category || 'Category'}</div>
+                            <div class="flex flex-wrap items-center justify-center gap-3 mt-1 text-sm md:text-base lg:text-lg">
+                                <span class="meta-chip"><strong>Ticket Name</strong> ${category || 'Category'}</span>
+                                <span class="meta-chip"><strong>Age Category</strong> ${ageGroup || 'Age Group'}</span>
+                            </div>
+                            <div class="single-podium-name font-bold text-white text-shadow-md mt-6">${safeAthlete.name}</div>
+                            <div class="mt-3 px-3 py-1.5 bg-yellow-400/20 border border-yellow-300/60 rounded text-yellow-200 text-xs md:text-sm font-semibold tracking-wide">${rankMedal} ${rankBadge.toUpperCase()}</div>
+                            <div class="text-sm uppercase tracking-[0.2em] text-slate-400 mt-4">Finish Time</div>
+                            <div class="single-podium-time font-teko text-yellow-300">${safeAthlete.finishTime}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderPodiumFlow(data, style = 'sequential', athleteDisplaySeconds = 4) {
+            if (!podiumRoot) return;
+
+            const athleteDisplayMs = Math.min(30000, Math.max(2000, Number(athleteDisplaySeconds || 4) * 1000));
+            const introDelay = 3200;
+            const categoryDelay = 6400;
+            const podiumStartDelay = 9800;
+
+            const winner = data.podium?.[0] || null;
+            const firstRunnerUp = data.podium?.[1] || null;
+            const secondRunnerUp = data.podium?.[2] || null;
+            const activeLogo = eventBranding.logoUrl || DEFAULT_LOGO;
+            const activeTitle = eventBranding.eventName || 'BERGMAN TRIATHLON & SWIMATHON';
+
+            podiumRoot.innerHTML = `
+                <div class="podium-shell w-full">
+                    <div id="podium-stage" class="w-full h-full max-w-[95vw] mx-auto"></div>
+                </div>
+            `;
+
+            const stage = document.getElementById('podium-stage');
+            if (!stage) return;
+
+            const categoryLine = `${data.category || 'Category'} — ${data.ageGroup || 'Age Group'}`;
+
+            const finalPodiumLayout = `
+                <div class="w-full h-full px-4 md:px-8 py-4 flex items-center justify-center fade-in">
+                    <div class="podium-final-grid max-w-[94vw]">
+                        ${podiumCard('P2', '1st Runner-Up', '🥈', firstRunnerUp, 'border-slate-400/60', false, data.category, data.ageGroup)}
+                        <div class="center-winner">
+                            ${podiumCard('P1', 'Winner', '🥇', winner, 'border-yellow-400/70', true, data.category, data.ageGroup)}
+                        </div>
+                        ${podiumCard('P3', '2nd Runner-Up', '🥉', secondRunnerUp, 'border-amber-700/60', false, data.category, data.ageGroup)}
+                    </div>
+                </div>
+            `;
+
+            // For 'full' style, show podium directly without intro/category screens
+            if (style === 'full') {
+                stage.innerHTML = finalPodiumLayout;
+                return;
+            }
+
+            stage.innerHTML = `
+                <div class="h-full w-full flex flex-col items-center justify-center gap-8 fade-in">
+                    <img src="${activeLogo}" alt="Event Logo" class="h-24 md:h-32 lg:h-40 object-contain" style="display: none;">
+                    <div class="text-xl md:text-3xl lg:text-4xl font-teko text-cyan-300 tracking-[0.2em]">${activeTitle}</div>
+                </div>
+            `;
+
+            setTimeout(() => {
+                stage.innerHTML = `
+                    <div class="h-full w-full flex flex-col items-center justify-center gap-6">
+                        <div class="text-6xl md:text-8xl lg:text-9xl font-black text-white tracking-widest text-shadow-md fade-up">AWARD CEREMONY</div>
+                        <div class="text-xl md:text-3xl lg:text-4xl font-teko text-cyan-300 tracking-[0.15em] fade-up">${activeTitle}</div>
+                    </div>
+                `;
+            }, introDelay);
+
+            setTimeout(() => {
+                stage.innerHTML = `
+                    <div class="h-full w-full flex flex-col items-center justify-center gap-5 px-6 text-center">
+                        <div class="text-4xl md:text-6xl lg:text-7xl font-black text-yellow-300 tracking-tight fade-up">CATEGORY REVEAL</div>
+                        <div class="flex flex-wrap items-center justify-center gap-3 fade-up">
+                            <span class="meta-chip"><strong>Ticket Name</strong> ${data.category || 'Category'}</span>
+                            <span class="meta-chip"><strong>Age Category</strong> ${data.ageGroup || 'Age Group'}</span>
+                        </div>
+                        <div class="text-2xl md:text-4xl lg:text-6xl font-bold text-white fade-up">${categoryLine}</div>
+                    </div>
+                `;
+            }, categoryDelay);
+
+            setTimeout(() => {
+                stage.innerHTML = `
+                    <div class="w-full h-full px-4 md:px-8 py-4 flex items-center justify-center">
+                        <div id="sequential-podium" class="w-full max-w-5xl"></div>
+                    </div>
+                `;
+
+                const sequentialHost = document.getElementById('sequential-podium');
+                if (!sequentialHost) return;
+
+                const cards = [
+                    podiumCard('P3', '2nd Runner-Up', '🥉', secondRunnerUp, 'border-amber-700/60', false, data.category, data.ageGroup),
+                    podiumCard('P2', '1st Runner-Up', '🥈', firstRunnerUp, 'border-slate-400/60', false, data.category, data.ageGroup),
+                    podiumCard('P1', 'Winner', '🥇', winner, 'border-yellow-400/70', true, data.category, data.ageGroup),
+                ];
+
+                let i = 0;
+                const showNext = () => {
+                    if (i >= cards.length) {
+                        setTimeout(() => {
+                            stage.innerHTML = finalPodiumLayout;
+                        }, Math.max(1800, Math.round(athleteDisplayMs * 0.55)));
+                        return;
+                    }
+                    sequentialHost.innerHTML = cards[i];
+                    i += 1;
+                    setTimeout(showNext, athleteDisplayMs);
+                };
+                showNext();
+            }, podiumStartDelay);
+        }
+
+        async function initPodiumMode(eventId, isDemo, category, ageGroup, style, athleteSeconds = 4) {
+            if (!mainEl || !podiumRoot || !headerLogo) return;
+
+            mainEl.classList.add('hidden');
+            podiumRoot.classList.remove('hidden');
+            headerLogo.src = getActiveLogoSrc();
+
+            if (isDemo) {
+                await loadBranding(eventId, true);
+                renderPodiumFlow({
+                    category: category || 'Olympic Triathlon',
+                    ageGroup: ageGroup || 'Women 30-34',
+                    podium: [
+                        { name: 'Aditi Kulkarni', finishTime: '02:37:14', gapFromWinner: '+00:00' },
+                        { name: 'Nisha Rao', finishTime: '02:38:21', gapFromWinner: '+01:07' },
+                        { name: 'Priya Menon', finishTime: '02:40:05', gapFromWinner: '+02:51' }
+                    ]
+                }, style, athleteSeconds);
+                return;
+            }
+
+            await loadBranding(eventId, false);
+
+            if (!eventId) {
+                podiumRoot.innerHTML = `<div class="h-full flex items-center justify-center text-center text-3xl text-slate-300">Missing event parameter.</div>`;
+                return;
+            }
+
+            const fetchCurrent = async () => {
+                try {
+                    const res = await fetch(`/api/finish-line-led?eventId=${encodeURIComponent(eventId)}&action=podium-current`);
+                    if (!res.ok) return null;
+                    const json = await res.json();
+                    return json?.data || null;
+                } catch {
+                    return null;
+                }
+            };
+
+            const renderByGroup = async (cfg) => {
+                const c = String(cfg?.category || category || '').trim();
+                const a = String(cfg?.ageGroup || ageGroup || '').trim();
+                const s = String(cfg?.style || style || 'sequential').toLowerCase() === 'full' ? 'full' : 'sequential';
+                const displayMode = String(cfg?.displayMode || 'top3').toLowerCase();
+                const selectedDocId = String(cfg?.selectedDocId || '').trim();
+                const athleteDisplaySeconds = Math.min(30, Math.max(2, Number(cfg?.athleteDisplaySeconds || 4)));
+
+                if (!c || !a) {
+                    renderIdleAwardCeremony();
+                    return;
+                }
+
+                try {
+                    if (displayMode === 'guests') {
+                        // Show guest carousel
+                        const guests = Array.isArray(cfg?.guests) ? cfg.guests : [];
+                        renderGuestCarousel(guests);
+                        return;
+                    }
+
+                    if (displayMode === 'sponsors') {
+                        // Show sponsor carousel
+                        const sponsors = Array.isArray(eventBranding.sponsors) ? eventBranding.sponsors : [];
+                        renderSponsorCarousel(sponsors);
+                        return;
+                    }
+
+                    if (displayMode === 'single' && selectedDocId) {
+                        const entriesUrl = `/api/finish-line-led?eventId=${encodeURIComponent(eventId)}&action=podium-entries&category=${encodeURIComponent(c)}&ageGroup=${encodeURIComponent(a)}`;
+                        const entriesRes = await fetch(entriesUrl);
+                        const entriesData = await entriesRes.json();
+                        const entries = Array.isArray(entriesData?.entries) ? entriesData.entries : [];
+                        const found = entries.find((entry) => {
+                            const entryDocId = String(entry?.docId || '').trim();
+                            const entryBib = String(entry?.bibNumber || '').trim();
+                            return entryDocId === selectedDocId || entryBib === selectedDocId;
+                        });
+
+                        if (!found) {
+                            renderIdleAwardCeremony('Selected athlete not found for display.');
+                            return;
+                        }
+
+                        // Calculate rank from entries (1-indexed position)
+                        const rank = entries.indexOf(found) + 1;
+                        let rankPosition = 'none';
+                        if (found.podiumPosition) {
+                            rankPosition = found.podiumPosition;
+                        } else if (rank === 1) {
+                            rankPosition = 'winner';
+                        } else if (rank === 2) {
+                            rankPosition = 'first_runner_up';
+                        } else if (rank === 3) {
+                            rankPosition = 'second_runner_up';
+                        }
+
+                        podiumRoot.innerHTML = singlePodiumCard({
+                            name: found.name,
+                            finishTime: found.finishTime || found.chipTime || 'N/A',
+                            rank: rank,
+                        }, c, a, rankPosition);
+                        return;
+                    }
+
+                    const url = `/api/finish-line-led?eventId=${encodeURIComponent(eventId)}&action=podium&category=${encodeURIComponent(c)}&ageGroup=${encodeURIComponent(a)}`;
+                    const response = await fetch(url);
+                    const data = await response.json();
+
+                    if (!data?.success) {
+                        renderIdleAwardCeremony('Unable to load podium data.');
+                        return;
+                    }
+
+                    renderPodiumFlow({
+                        category: c,
+                        ageGroup: a,
+                        podium: Array.isArray(data.podium) ? data.podium.slice(0, 3) : []
+                    }, s, athleteDisplaySeconds);
+                } catch (e) {
+                    console.error('Podium mode error:', e);
+                    renderIdleAwardCeremony('Failed to fetch podium results.');
+                }
+            };
+
+            const current = await fetchCurrent();
+            const initialCfg = current || { category, ageGroup, style, athleteDisplaySeconds: athleteSeconds };
+            const guestHash = initialCfg.guests ? JSON.stringify(initialCfg.guests) : '';
+            podiumLastSignature = `${initialCfg.category || ''}|${initialCfg.ageGroup || ''}|${initialCfg.style || ''}|${initialCfg.updatedAt || ''}|${initialCfg.selectedDocId || ''}|${initialCfg.displayMode || ''}|${initialCfg.athleteDisplaySeconds || ''}|${initialCfg.replayToken || ''}|${guestHash}`;
+            await renderByGroup(initialCfg);
+
+            if (podiumPollTimer) {
+                clearInterval(podiumPollTimer);
+            }
+
+            podiumPollTimer = setInterval(async () => {
+                const live = await fetchCurrent();
+                if (!live) return;
+                const liveGuestHash = live.guests ? JSON.stringify(live.guests) : '';
+                const signature = `${live.category || ''}|${live.ageGroup || ''}|${live.style || ''}|${live.updatedAt || ''}|${live.selectedDocId || ''}|${live.displayMode || ''}|${live.athleteDisplaySeconds || ''}|${live.replayToken || ''}|${liveGuestHash}`;
+                if (signature && signature !== podiumLastSignature) {
+                    podiumLastSignature = signature;
+                    await renderByGroup(live);
+                }
+            }, 2000);
         }
 
         async function initFirebase(config) {
@@ -187,7 +910,7 @@
             }
         }
 
-        function listenToFinishers(eventId, isDemo) {
+        async function listenToFinishers(eventId, isDemo) {
             if (isDemo) {
                 const mockFinishers = [
                     { id: 5, bib: '1201', name: 'Rohan Gupta', finishTime: '04:30:15', ticketName: 'Bergman 113', ageCategory: '31-40', country: 'India', clubName: 'Delhi Dynamos', gender: 'Male' },
@@ -203,12 +926,35 @@
             }
         
             if (unsubscribeFinishers) unsubscribeFinishers();
+            
+            // ROBUST KV-FIRST STRATEGY:
+            // 1. Load from KV cache immediately (zero lag)
+            // 2. Subscribe to Firestore for real-time updates
+            // 3. If KV fails, Firestore is fallback
+            
+            // Load from KV first for instant display
+            try {
+                const kvResponse = await fetch(`/api/finish-line-led?eventId=${eventId}&action=get`);
+                if (kvResponse.ok) {
+                    const kvData = await kvResponse.json();
+                    if (kvData.finishers && kvData.finishers.length > 0) {
+                        console.log(`[LED] Loaded ${kvData.finishers.length} finishers from ${kvData.source} (${kvData.source === 'kv' ? '⚡ INSTANT' : 'Firestore backup'})`);
+                        updateMainFinisher(kvData.finishers[0]);
+                        updateRecentFinishers(kvData.finishers.slice(1, MAX_FINISHERS_IN_FEED));
+                    }
+                }
+            } catch (kvError) {
+                console.warn('[LED] KV load failed, will use Firestore');
+            }
+            
+            // Real-time Firestore listener for updates
             const feedRef = collection(db, "finish_line_feed", eventId, "entries");
             const q = query(feedRef, orderBy("timestamp", "desc"), limit(MAX_FINISHERS_IN_FEED));
             unsubscribeFinishers = onSnapshot(q, (snapshot) => {
                 const finishers = [];
                 snapshot.forEach(doc => finishers.push({ id: doc.id, ...doc.data() }));
                 if (finishers.length > 0) {
+                    console.log(`[LED] Real-time update: ${finishers[0].name} crossed finish line`);
                     updateMainFinisher(finishers[0]);
                     updateRecentFinishers(finishers.slice(1));
                 } else {
@@ -245,16 +991,28 @@
             const urlParams = new URLSearchParams(window.location.search);
             const eventId = urlParams.get('eventId');
             const isDemo = urlParams.get('demo') === 'true';
+            const mode = (urlParams.get('mode') || 'finishers').toLowerCase();
+            const category = urlParams.get('category') || '';
+            const ageGroup = urlParams.get('ageGroup') || '';
+            const style = (urlParams.get('style') || 'sequential').toLowerCase();
+            const athleteSeconds = Math.min(30, Math.max(2, Number(urlParams.get('athleteSeconds') || 4)));
 
             if (!eventId && !isDemo) {
                 mainFinisherCard.innerHTML = `<p class="text-destructive text-center text-2xl">Error: No Event ID provided in the URL.</p>`;
                 return;
             }
 
+            if (mode === 'podium') {
+                await initPodiumMode(eventId, isDemo, category, ageGroup, style === 'full' ? 'full' : 'sequential', athleteSeconds);
+                return;
+            }
+
             if (isDemo) {
+                await loadBranding(eventId, true);
                 listenToFinishers(null, true);
                 listenToSponsors(null, true);
             } else {
+                 await loadBranding(eventId, false);
                  try {
                     const response = await fetch('/api/firebase-config');
                     const firebaseConfig = await response.json();

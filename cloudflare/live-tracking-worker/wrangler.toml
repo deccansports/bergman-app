@@ -1,0 +1,27 @@
+name = "bergman-live-tracking-worker"
+main = "src/index.ts"
+compatibility_date = "2026-06-24"
+
+[[routes]]
+pattern = "api.bergmantri.com/v1/events/*"
+zone_name = "bergmantri.com"
+
+[vars]
+BERGMAN_ADMIN_API_BASE = "https://bergmantri.com"
+BERGMAN_INTERNAL_TOKEN = "replace-with-secret"
+
+[[kv_namespaces]]
+binding = "BERGMAN_KV"
+id = "99a9e5b2f3d24e88990cddb7b56aa59d"
+
+[[r2_buckets]]
+binding = "BERGMAN_R2"
+bucket_name = "bergman-tracking"
+
+[[durable_objects.bindings]]
+name = "LIVE_RACE_STATE"
+class_name = "LiveRaceState"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["LiveRaceState"]

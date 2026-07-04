@@ -33,6 +33,29 @@ const getInitials = (name?: string | null) => {
     return name.substring(0, 2).toUpperCase();
 };
 
+const getBelStatus = (participant: EventParticipant | null): string => {
+  if (!participant) return 'Unknown';
+  const fromParticipant = String((participant as any)?.belStatus || (participant as any)?.belTier || '').trim();
+  if (fromParticipant) return fromParticipant;
+  const fromProfile = String((participant as any)?.userProfile?.belStatus || (participant as any)?.userProfile?.belTier || '').trim();
+  if (fromProfile) return fromProfile;
+  const qualified = (participant as any)?.belQualified ?? (participant as any)?.userProfile?.belQualified;
+  if (qualified === true) return 'Qualified';
+  if (qualified === false) return 'Not Qualified';
+  return 'Unknown';
+};
+
+const belBadgeClass = (status: string): string => {
+  const s = status.toLowerCase();
+  if (s.includes('gold')) return 'bg-amber-400/20 text-amber-700 border-amber-500/40';
+  if (s.includes('silver')) return 'bg-slate-300/30 text-slate-700 border-slate-400/40';
+  if (s.includes('bronze')) return 'bg-orange-300/25 text-orange-800 border-orange-500/40';
+  if (s.includes('qualified')) return 'bg-emerald-500/15 text-emerald-700 border-emerald-500/40';
+  if (s.includes('provisional')) return 'bg-sky-500/15 text-sky-700 border-sky-500/40';
+  if (s.includes('not')) return 'bg-rose-500/15 text-rose-700 border-rose-500/40';
+  return 'bg-muted text-muted-foreground border-border';
+};
+
 export default function WaiverCheckinTab({ eventId, activeTab, volunteerId, volunteerName }: WaiverCheckinTabProps) {
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
@@ -243,6 +266,7 @@ export default function WaiverCheckinTab({ eventId, activeTab, volunteerId, volu
                   <div><strong>BIB:</strong> <div className="font-bold text-primary">{searchedParticipant.bibNumber || 'N/A'}</div></div>
                   <div><strong>Category:</strong> <div>{searchedParticipant.ticketName || 'N/A'}</div></div>
                   <div><strong>Status:</strong> <div><Badge variant={searchedParticipant.checkInStatus === 'CheckedIn' ? 'default' : 'destructive'}>{searchedParticipant.checkInStatus || 'Pending'}</Badge></div></div>
+                  <div><strong>BEL Status:</strong> <div><Badge variant="outline" className={belBadgeClass(getBelStatus(searchedParticipant))}>{getBelStatus(searchedParticipant)}</Badge></div></div>
                   <div><strong>ID Proof:</strong>
                     {searchedParticipant.idProofUrl ? (
                       <Button variant="link" className="p-0 h-auto text-xs" onClick={() => setIsIdProofModalOpen(true)}>View Document</Button>

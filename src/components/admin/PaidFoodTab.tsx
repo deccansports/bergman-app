@@ -14,7 +14,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDes
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PlusCircle, Trash2, Loader2, Edit, UtensilsCrossed, Settings, ListOrdered, ClipboardList, TrendingUp, Link as LinkIcon, Save, Copy, RefreshCw, Search, BarChart3, Ban, IndianRupee } from 'lucide-react';
 import type { PaidFoodItem, EventCalendarEntry, PaidFoodOrder, PaidFoodCoupon, PaidFoodStats } from '@/lib/types';
-import { addPaidFoodItemAction, getPaidFoodItemsAction, updatePaidFoodItemAction, deletePaidFoodItemAction, resetFoodCouponAction, getPaidFoodStatsAndLogsAction, cancelAndRefundPaidFoodOrderAction, cancelPaidFoodOrderAction } from '@/lib/actions';
+import { addPaidFoodItemAction, getPaidFoodItemsAction, updatePaidFoodItemAction, deletePaidFoodItemAction, resetFoodCouponAction, getPaidFoodStatsAndLogsAction, cancelAndRefundPaidFoodOrderAction, cancelPaidFoodOrderAction, repairPaidFoodOrdersAction } from '@/lib/actions';
 import { updateCalendarEventAction } from '@/lib/actions/eventActions';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose, DialogTrigger } from '@/components/ui/dialog';
 import {
@@ -88,6 +88,7 @@ export default function PaidFoodTab({ events, isLoadingEvents, onDataRefresh }: 
   const [selectedEventId, setSelectedEventId] = useState<string>('all');
   const [isRefunding, setIsRefunding] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState<string | null>(null);
+  const [isRepairingOrders, setIsRepairingOrders] = useState(false);
 
 
   useEffect(() => {
@@ -263,6 +264,23 @@ export default function PaidFoodTab({ events, isLoadingEvents, onDataRefresh }: 
     setIsCancelling(null);
   };
 
+  const handleRepairOrders = async () => {
+    setIsRepairingOrders(true);
+    const result = await repairPaidFoodOrdersAction({
+      limit: 150,
+      eventId: selectedEventId === 'all' ? undefined : selectedEventId,
+    });
+
+    if (result.success) {
+      toast({ title: 'Repair complete', description: result.message, duration: 7000 });
+      await fetchStatsAndLogs(selectedEventId === 'all' ? undefined : selectedEventId);
+    } else {
+      toast({ variant: 'destructive', title: 'Repair failed', description: result.message, duration: 7000 });
+    }
+
+    setIsRepairingOrders(false);
+  };
+
   const formatCurrency = (paisa: number) => `₹${(paisa / 100).toFixed(2)}`;
   
   const renderNav = () => {
@@ -302,7 +320,15 @@ export default function PaidFoodTab({ events, isLoadingEvents, onDataRefresh }: 
         <TabsContent value="overview" className="mt-4">
           <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2"><TrendingUp className="h-5 w-5 text-primary"/>Paid Food Overview</CardTitle>
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2"><TrendingUp className="h-5 w-5 text-primary"/>Paid Food Overview</CardTitle>
+                </div>
+                <Button variant="outline" onClick={handleRepairOrders} disabled={isRepairingOrders || isLoadingStats}>
+                  {isRepairingOrders ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                  Repair stuck paid orders
+                </Button>
+              </div>
               <div className="flex items-center gap-4">
                   <CardDescription>View overall statistics for paid food sales and redemptions.</CardDescription>
                   <Select onValueChange={(value) => setSelectedEventId(value)} defaultValue={selectedEventId}>

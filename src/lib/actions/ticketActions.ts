@@ -8,66 +8,82 @@ import { serializeValue } from '@/lib/utils';
 import type { TicketDefinition, EventTicketStats } from '@/lib/types';
 import { TicketDefinitionSchema, type TicketDefinitionFormInput } from '@/lib/schemas';
 import { merge } from 'lodash';
-import { getKV } from '../cloudflare/kv';
+import { deleteKV, getKV, putKV } from '../cloudflare/kv';
 import { _syncCalendarToKV } from './eventActions';
+import { getCachedServerValue } from '@/lib/serverCache';
+
+function getEventTicketDefinitionsCacheKey(eventId: string): string {
+  return `event:${eventId}:ticketDefinitions:v1`;
+}
 
 export async function _computeAllEventTicketStats(): Promise<{ success: boolean; message: string; eventTicketStats?: EventTicketStats[] }> {
   const actionName = '_computeAllEventTicketStats';
   let adminDb;
   try {
-    adminDb = getFirestoreInstance();
-    const allEventTicketStats: EventTicketStats[] = [];
-    const eventsSnapshot = await adminDb.collection('events').get();
-    if (eventsSnapshot.empty) return { success: true, message: "No events found.", eventTicketStats: [] };
+    return await getCachedServerValue(`stats:event-ticket:${actionName}`, 60_000, async () => {
+      adminDb = getFirestoreInstance();
+      const allEventTicketStats: EventTicketStats[] = [];
+      const perEventErrors: string[] = [];
+      const eventsSnapshot = await adminDb.collection('events').get();
+      if (eventsSnapshot.empty) return { success: true, message: "No events found.", eventTicketStats: [] };
 
-    for (const eventDoc of eventsSnapshot.docs) {
-      const eventData = eventDoc.data();
-      const ticketDefsSnapshot = await eventDoc.ref.collection('ticketDefinitions').get();
-      
-      const participantsSnapshot = await eventDoc.ref.collection('participants').get();
+      for (const eventDoc of eventsSnapshot.docs) {
+        try {
+          const eventData = eventDoc.data();
+          const ticketDefsSnapshot = await eventDoc.ref.collection('ticketDefinitions').get();
+          const participantsSnapshot = await eventDoc.ref.collection('participants').get();
 
-      const participantsByTicketId = new Map<string, number>();
-      let totalRevenueFromEventPaisa = 0;
+          const participantsByTicketId = new Map<string, number>();
+          let totalRevenueFromEventPaisa = 0;
 
-      participantsSnapshot.forEach(pDoc => {
-        const pData = pDoc.data();
-        if (pData.ticketId) {
-          participantsByTicketId.set(pData.ticketId, (participantsByTicketId.get(pData.ticketId) || 0) + 1);
-        }
-        const saleAmountPaisa = pData.amountPaidPaisa ?? 0;
-        if (saleAmountPaisa > 0) {
-          totalRevenueFromEventPaisa += saleAmountPaisa;
-        }
-      });
-      
-      const ticketDetailsForEvent: any[] = [];
-      if (!ticketDefsSnapshot.empty) {
-        ticketDefsSnapshot.forEach(defDoc => {
-          const defData = defDoc.data() as TicketDefinition;
-          const soldCount = participantsByTicketId.get(defDoc.id) || 0;
-          const remaining = typeof defData.maxQuantity === 'number' && defData.maxQuantity > 0 ? Math.max(0, defData.maxQuantity - soldCount) : 'Unlimited';
-          ticketDetailsForEvent.push({ 
-            ticketDefinitionId: defDoc.id, 
-            ticketName: defData.ticketName, 
-            sold: soldCount, 
-            remaining, 
-            pricePaisa: defData.price, 
-            ticketType: defData.ticketType 
+          participantsSnapshot.forEach(pDoc => {
+            const pData = pDoc.data();
+            if (pData.ticketId) {
+              participantsByTicketId.set(pData.ticketId, (participantsByTicketId.get(pData.ticketId) || 0) + 1);
+            }
+            const saleAmountPaisa = pData.amountPaidPaisa ?? 0;
+            if (saleAmountPaisa > 0) {
+              totalRevenueFromEventPaisa += saleAmountPaisa;
+            }
           });
-        });
+
+          const ticketDetailsForEvent: any[] = [];
+          if (!ticketDefsSnapshot.empty) {
+            ticketDefsSnapshot.forEach(defDoc => {
+              const defData = defDoc.data() as TicketDefinition;
+              const soldCount = participantsByTicketId.get(defDoc.id) || 0;
+              const remaining = typeof defData.maxQuantity === 'number' && defData.maxQuantity > 0 ? Math.max(0, defData.maxQuantity - soldCount) : 'Unlimited';
+              ticketDetailsForEvent.push({
+                ticketDefinitionId: defDoc.id,
+                ticketName: defData.ticketName,
+                sold: soldCount,
+                remaining,
+                pricePaisa: defData.price,
+                ticketType: defData.ticketType
+              });
+            });
+          }
+
+          allEventTicketStats.push({
+            eventId: eventDoc.id,
+            eventName: eventData.eventName || 'N/A',
+            totalTicketsSoldInEvent: participantsSnapshot.size,
+            totalRevenueFromEventPaisa,
+            tickets: ticketDetailsForEvent
+          });
+        } catch (eventError: any) {
+          const errMsg = eventError?.message || 'Unknown event stats error';
+          perEventErrors.push(`${eventDoc.id}: ${errMsg}`);
+          console.error(`[${actionName}] Failed for event ${eventDoc.id}:`, eventError);
+        }
       }
 
-      allEventTicketStats.push({ 
-          eventId: eventDoc.id, 
-          eventName: eventData.eventName || 'N/A', 
-          totalTicketsSoldInEvent: participantsSnapshot.size, 
-          totalRevenueFromEventPaisa, 
-          tickets: ticketDetailsForEvent 
-      });
-    }
-
-    allEventTicketStats.sort((a, b) => a.eventName.localeCompare(b.eventName));
-    return { success: true, message: "Event-wise ticket stats computed.", eventTicketStats: allEventTicketStats };
+      allEventTicketStats.sort((a, b) => a.eventName.localeCompare(b.eventName));
+      const message = perEventErrors.length > 0
+        ? `Event-wise ticket stats computed with ${perEventErrors.length} skipped event(s).`
+        : 'Event-wise ticket stats computed.';
+      return { success: true, message, eventTicketStats: allEventTicketStats };
+    });
   } catch (error: unknown) {
     const err = error instanceof Error ? error : new Error(String(error));
     return { success: false, message: `Server action '${actionName}' failed: ${err.message}.` };
@@ -79,12 +95,43 @@ export async function getTicketStatsAction(): Promise<{ success: boolean; messag
   try {
       const stats = await getKV<EventTicketStats[]>('analytics:ticket_stats', actionName);
       if (!stats) {
-          return { success: true, message: 'Ticket stats not found in cache. Please run a data sync.', eventTicketStats: [] };
+          const refreshed = await refreshTicketStatsCacheAction();
+          if (!refreshed.success) {
+            return { success: false, message: refreshed.message, eventTicketStats: [] };
+          }
+          return {
+            success: true,
+            message: 'Ticket stats cache was empty and has been rebuilt.',
+            eventTicketStats: refreshed.eventTicketStats || [],
+          };
       }
       return { success: true, message: 'Ticket stats fetched from cache.', eventTicketStats: stats };
   } catch (error: any) {
       console.error(`[${actionName}] Failed to get ticket stats from KV:`, error);
       return { success: false, message: `Failed to fetch stats from cache: ${error.message}` };
+  }
+}
+
+export async function refreshTicketStatsCacheAction(): Promise<{ success: boolean; message: string; eventTicketStats?: EventTicketStats[] }> {
+  const actionName = 'refreshTicketStatsCacheAction';
+  try {
+    const computed = await _computeAllEventTicketStats();
+    if (!computed.success) {
+      return { success: false, message: computed.message };
+    }
+
+    const stats = computed.eventTicketStats || [];
+    await putKV('analytics:ticket_stats', stats, actionName);
+    console.log(`[${actionName}] Refreshed ticket stats for ${stats.length} event(s).`);
+
+    return {
+      success: true,
+      message: `Ticket stats refreshed for ${stats.length} event(s).`,
+      eventTicketStats: stats,
+    };
+  } catch (error: any) {
+    console.error(`[${actionName}] Failed to refresh ticket stats cache:`, error);
+    return { success: false, message: error?.message || 'Failed to refresh ticket stats cache.' };
   }
 }
 
@@ -105,16 +152,51 @@ export async function addTicketDefinitionAction(
     }
     const validatedData = validation.data;
 
-    const newTicketRef = await adminDb.collection('events').doc(eventId).collection('ticketDefinitions').add({
+    const applicableAgeGroups = typeof validatedData.applicableAgeGroups === 'string'
+      ? validatedData.applicableAgeGroups.split(',').map((s: string) => s.trim()).filter(Boolean)
+      : (validatedData.applicableAgeGroups || []);
+
+    const normalizedPayload = {
       ...validatedData,
       eventId,
       price: validatedData.ticketType === 'Paid' ? (validatedData.price || 0) * 100 : null,
+      applicableAgeGroups,
+      gstPercent: validatedData.gstPercent ?? undefined,
+      tiers: (validatedData.tiers || []).map((t: any) => ({
+        ...t,
+        pricePaisa: Number(t?.pricePaisa || 0),
+        slotLimit: t?.slotLimit ?? null,
+        endDate: t?.endDate || null,
+      })),
+      subCategories: (validatedData.subCategories || []).map((s: any) => ({
+        ...s,
+        pricePaisa: Number(s?.pricePaisa || 0),
+        applicableAgeGroups: Array.isArray(s?.applicableAgeGroups)
+          ? s.applicableAgeGroups
+          : (typeof s?.applicableAgeGroups === 'string'
+              ? s.applicableAgeGroups.split(',').map((ss: string) => ss.trim()).filter(Boolean)
+              : []),
+        cutoff: s?.cutoff || null,
+        tiers: (s?.tiers || []).map((st: any) => ({
+          ...st,
+          pricePaisa: Number(st?.pricePaisa || 0),
+          slotLimit: st?.slotLimit ?? null,
+          endDate: st?.endDate || null,
+        })),
+      })),
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
-    });
+    };
+
+    const newTicketRef = await adminDb
+      .collection('events')
+      .doc(eventId)
+      .collection('ticketDefinitions')
+      .add(normalizedPayload);
 
     // IMMEDIATE SYNC TO KV
     await _syncCalendarToKV();
+    await deleteKV(getEventTicketDefinitionsCacheKey(eventId), actionName);
 
     revalidatePath('/admin/dashboard');
     return { success: true, message: "Ticket type added.", ticketId: newTicketRef.id };
@@ -184,6 +266,7 @@ export async function updateTicketDefinitionAction(
 
     // IMMEDIATE SYNC TO KV
     await _syncCalendarToKV();
+    await deleteKV(getEventTicketDefinitionsCacheKey(eventId), actionName);
 
     revalidatePath('/admin/dashboard');
     return { success: true, message: "Ticket definition updated.", updatedTicket: serializeValue(updatedTicket) };
@@ -214,6 +297,7 @@ export async function updateTicketOrderAction(
     
     // IMMEDIATE SYNC TO KV
     await _syncCalendarToKV();
+    await deleteKV(getEventTicketDefinitionsCacheKey(eventId), 'updateTicketOrderAction');
     
     revalidatePath('/admin/dashboard');
     return { success: true, message: "Display order updated." };
@@ -258,6 +342,7 @@ export async function cloneTicketDataAction(
         
         // IMMEDIATE SYNC TO KV
         await _syncCalendarToKV();
+        await deleteKV(getEventTicketDefinitionsCacheKey(targetEventId), actionName);
 
         revalidatePath('/admin/dashboard');
         return { success: true, message: "Successfully cloned GPX, Cutoff, and Age Group data." };
@@ -282,6 +367,7 @@ export async function deleteTicketDefinitionAction(
     
     // IMMEDIATE SYNC TO KV
     await _syncCalendarToKV();
+    await deleteKV(getEventTicketDefinitionsCacheKey(eventId), actionName);
 
     revalidatePath('/admin/dashboard');
     return { success: true, message: "Ticket definition deleted." };
@@ -300,6 +386,47 @@ export async function getTicketDefinitionsForEventAction(
         return { success: false, message: 'Event ID is required.' };
     }
     try {
+      const dedicatedCache = await getKV<TicketDefinition[]>(getEventTicketDefinitionsCacheKey(eventId), actionName);
+      if (Array.isArray(dedicatedCache)) {
+        let cachedTickets = dedicatedCache.map((ticket: any) => serializeValue(ticket) as TicketDefinition);
+
+        if (excludeTicketId) {
+          cachedTickets = cachedTickets.filter(ticket => ticket.id !== excludeTicketId);
+        }
+
+        cachedTickets.sort((a,b) => {
+          if ((a.order || 0) !== (b.order || 0)) return (a.order || 0) - (b.order || 0);
+          const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return dateA - dateB;
+        });
+
+        return { success: true, message: 'Tickets fetched successfully from dedicated cache.', ticketDefinitions: cachedTickets };
+      }
+
+      const calendar = await getKV<TicketDefinition[] | any[]>('calendar:snapshot', actionName);
+      if (Array.isArray(calendar)) {
+        const cachedEvent = calendar.find((event: any) => event?.id === eventId);
+        if (cachedEvent && Array.isArray(cachedEvent.ticketDefinitions)) {
+          let cachedTickets: TicketDefinition[] = cachedEvent.ticketDefinitions.map((ticket: any) => serializeValue(ticket) as TicketDefinition);
+
+          if (excludeTicketId) {
+            cachedTickets = cachedTickets.filter(ticket => ticket.id !== excludeTicketId);
+          }
+
+          cachedTickets.sort((a,b) => {
+            if ((a.order || 0) !== (b.order || 0)) return (a.order || 0) - (b.order || 0);
+            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+            return dateA - dateB;
+          });
+
+          await putKV(getEventTicketDefinitionsCacheKey(eventId), cachedTickets, actionName);
+
+          return { success: true, message: 'Tickets fetched successfully from cache.', ticketDefinitions: cachedTickets };
+        }
+      }
+
         const adminDb = getFirestoreInstance();
         const snapshot = await adminDb.collection('events').doc(eventId).collection('ticketDefinitions').get();
 
@@ -327,6 +454,8 @@ export async function getTicketDefinitionsForEventAction(
             const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
             return dateA - dateB;
         });
+
+        await putKV(getEventTicketDefinitionsCacheKey(eventId), tickets, actionName);
         
         return { success: true, message: "Tickets fetched successfully.", ticketDefinitions: tickets };
 

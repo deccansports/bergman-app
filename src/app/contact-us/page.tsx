@@ -6,47 +6,146 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { ContactUsSchema, type ContactUsFormInput } from '@/lib/schemas';
 import { useToast } from '@/hooks/use-toast';
 import { contactUsAction } from '@/lib/actions/contactActions';
+import { getCalendarEventsAction } from '@/lib/actions/eventActions';
+import type { EventCalendarEntry } from '@/lib/types';
+import { isBefore, isValid, parseISO, startOfDay } from 'date-fns';
 import { Loader2, Send, CheckCircle2, ShieldCheck, Zap } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Turnstile } from '@marsidev/react-turnstile';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export default function ContactUsPage() {
   const { toast } = useToast();
+  const isDev = process.env.NODE_ENV !== 'production';
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionResult, setSubmissionResult] = useState<{ ticketId: string } | null>(null);
   const [formStartTime, setFormStartTime] = useState<number>(0);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileError, setTurnstileError] = useState(false);
+  const [turnstileErrorCode, setTurnstileErrorCode] = useState<string | null>(null);
+  const [turnstileRenderKey, setTurnstileRenderKey] = useState(0);
+  const [upcomingEvents, setUpcomingEvents] = useState<EventCalendarEntry[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const [eventDropdownOpen, setEventDropdownOpen] = useState(false);
 
-  // Turnstile configuration - use the provided site key
-  const siteKey = "0x4AAAAAAA3HB7KHIWV8zWURw3xMAiE9OkI";
+  const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || '';
 
   useEffect(() => {
     setFormStartTime(Date.now());
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadEvents = async () => {
+      setEventsLoading(true);
+      setEventsError(null);
+
+      try {
+        const result = await getCalendarEventsAction();
+        const events = Array.isArray(result.events) ? result.events : [];
+        const today = startOfDay(new Date());
+
+        const getEffectiveDate = (event: EventCalendarEntry) => {
+          return event.disciplineSchedule?.[0]?.date || (event.eventDate && event.eventDate !== 'TBD' ? event.eventDate : null);
+        };
+
+        const filteredUpcoming = events.filter((event) => {
+          if (event.isHidden) return false;
+          const effectiveDateStr = getEffectiveDate(event);
+          if (!effectiveDateStr) return true;
+
+          const parsedDate = parseISO(effectiveDateStr);
+          if (!isValid(parsedDate)) return true;
+
+          return !isBefore(parsedDate, today);
+        });
+
+        if (!cancelled) {
+          setUpcomingEvents(filteredUpcoming);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setUpcomingEvents([]);
+          setEventsError(error instanceof Error ? error.message : 'Failed to load upcoming events');
+        }
+      } finally {
+        if (!cancelled) {
+          setEventsLoading(false);
+        }
+      }
+    };
+
+    void loadEvents();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const form = useForm<ContactUsFormInput & { website?: string }>({
     resolver: zodResolver(ContactUsSchema),
-    defaultValues: { name: '', email: '', mobile: '', message: '', website: '' },
+    defaultValues: {
+      name: '',
+      email: '',
+      mobile: '',
+      about: undefined,
+      selectedEventId: '',
+      selectedEventName: '',
+      message: '',
+      website: '',
+    },
   });
 
+  const queryType = form.watch('about');
+  const selectedEventId = form.watch('selectedEventId');
+  const needsEventSelection = queryType === 'Registration' || queryType === 'About Event';
+
+  useEffect(() => {
+    if (!needsEventSelection) {
+      if (form.getValues('selectedEventId')) {
+        form.setValue('selectedEventId', '');
+      }
+      if (form.getValues('selectedEventName')) {
+        form.setValue('selectedEventName', '');
+      }
+      setEventDropdownOpen(false);
+      return;
+    }
+
+    if (!selectedEventId && upcomingEvents.length > 0) {
+      setEventDropdownOpen(true);
+    }
+  }, [needsEventSelection, selectedEventId, upcomingEvents.length, form]);
+
   const onSubmit = async (data: ContactUsFormInput & { website?: string }) => {
-    // Only require token if Turnstile loaded successfully
-    if (!turnstileToken && !turnstileError) {
+    if (isSubmitting) {
+      return;
+    }
+
+    if (!turnstileToken && !isDev) {
         toast({ variant: 'destructive', title: 'Verification Required', description: 'Please complete the security challenge.' });
         return;
+    }
+
+    if (turnstileError && !isDev) {
+      toast({ variant: 'destructive', title: 'Verification Error', description: 'Security verification could not be loaded. Please refresh and try again.' });
+      return;
     }
 
     setIsSubmitting(true);
     try {
       const result = await contactUsAction({
           ...data,
+          selectedEventId: form.getValues('selectedEventId'),
+          selectedEventName: form.getValues('selectedEventName'),
           formStartTime,
-          turnstileToken: turnstileToken || 'BYPASS_LOCAL_DEV'
+          turnstileToken: turnstileToken || (isDev ? 'BYPASS_LOCAL_DEV' : undefined)
       });
       if (result.success && result.ticketId) {
         setSubmissionResult({ ticketId: result.ticketId });
@@ -59,6 +158,13 @@ export default function ContactUsPage() {
       toast({ variant: 'destructive', title: 'Error', description: `An unexpected error occurred: ${errorMessage}` });
     }
     setIsSubmitting(false);
+  };
+
+  const retryTurnstile = () => {
+    setTurnstileToken(null);
+    setTurnstileError(false);
+    setTurnstileErrorCode(null);
+    setTurnstileRenderKey(prev => prev + 1);
   };
 
   return (
@@ -178,6 +284,83 @@ export default function ContactUsPage() {
                           <FormMessage />
                         </FormItem>
                       )} />
+
+                      <FormField control={form.control} name="about" render={({ field }) => (
+                        <FormItem className="md:col-span-2 text-left">
+                          <FormLabel className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1 text-left">Query Type*</FormLabel>
+                          <Select
+                            value={field.value}
+                            onValueChange={(value) => {
+                              field.onChange(value);
+                              if (value !== 'Registration' && value !== 'About Event') {
+                                form.setValue('selectedEventId', '');
+                                form.setValue('selectedEventName', '');
+                                setEventDropdownOpen(false);
+                              } else if (upcomingEvents.length > 0) {
+                                setEventDropdownOpen(true);
+                              }
+                            }}
+                            disabled={isSubmitting}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="rounded-2xl h-14 border-slate-200 bg-white shadow-sm focus:border-sky-500 focus:ring-sky-500/15 transition-all text-sm font-bold">
+                                <SelectValue placeholder="Select what your enquiry is about" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="Registration">Registration</SelectItem>
+                              <SelectItem value="General Enquiry">General Enquiry</SelectItem>
+                              <SelectItem value="About Event">About Event</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+
+                      {needsEventSelection && (
+                        <FormField control={form.control} name="selectedEventId" render={({ field }) => (
+                          <FormItem className="md:col-span-2 text-left">
+                            <FormLabel className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1 text-left">Upcoming Event*</FormLabel>
+                            <Select
+                              open={eventDropdownOpen}
+                              onOpenChange={setEventDropdownOpen}
+                              value={field.value || ''}
+                              onValueChange={(value) => {
+                                field.onChange(value);
+                                const selectedEvent = upcomingEvents.find((event) => event.id === value);
+                                form.setValue('selectedEventName', selectedEvent?.eventName || '');
+                                setEventDropdownOpen(false);
+                              }}
+                              disabled={isSubmitting || eventsLoading || upcomingEvents.length === 0}
+                            >
+                              <FormControl>
+                                <SelectTrigger className="rounded-2xl h-14 border-slate-200 bg-white shadow-sm focus:border-sky-500 focus:ring-sky-500/15 transition-all text-sm font-bold">
+                                  <SelectValue placeholder={eventsLoading ? 'Loading upcoming events…' : 'Select an upcoming event'} />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {upcomingEvents.length > 0 ? (
+                                  upcomingEvents.map((event) => (
+                                    <SelectItem key={event.id} value={event.id}>
+                                      {event.eventName}{event.displayDateRange ? ` — ${event.displayDateRange}` : event.eventDate ? ` — ${event.eventDate}` : ''}
+                                    </SelectItem>
+                                  ))
+                                ) : (
+                                  <SelectItem value="__no_upcoming_events__" disabled>
+                                    No upcoming events available
+                                  </SelectItem>
+                                )}
+                              </SelectContent>
+                            </Select>
+                            {eventsError ? (
+                              <p className="text-xs font-medium text-rose-600 ml-1">{eventsError}</p>
+                            ) : (
+                              <p className="text-xs font-medium text-slate-500 ml-1">Choose an upcoming event for registration-related enquiries.</p>
+                            )}
+                            <FormMessage />
+                          </FormItem>
+                        )} />
+                      )}
                       
                       <FormField control={form.control} name="message" render={({ field }) => (
                         <FormItem className="md:col-span-2 text-left">
@@ -199,19 +382,59 @@ export default function ContactUsPage() {
 
                     <div className="space-y-6 pt-4 text-left">
                       <div className="flex justify-center md:justify-start">
+                        {siteKey ? (
                           <Turnstile
+                              key={turnstileRenderKey}
                               siteKey={siteKey}
-                              onSuccess={(token: string) => { setTurnstileToken(token); setTurnstileError(false); }}
+                              options={{ appearance: 'always' }}
+                              onSuccess={(token: string) => {
+                                setTurnstileToken(token);
+                                setTurnstileError(false);
+                                setTurnstileErrorCode(null);
+                              }}
                               onExpire={() => setTurnstileToken(null)}
-                              onError={() => setTurnstileError(true)}
+                              onError={(error?: string) => {
+                                setTurnstileError(true);
+                                setTurnstileErrorCode(error || 'widget-error');
+                                setTurnstileToken(null);
+                              }}
+                              onUnsupported={() => {
+                                setTurnstileError(true);
+                                setTurnstileErrorCode('browser-unsupported');
+                                setTurnstileToken(null);
+                              }}
                           />
+                        ) : (
+                          <p className="text-xs font-bold text-destructive text-left">
+                            Turnstile site key is missing. Add `NEXT_PUBLIC_TURNSTILE_SITE_KEY` to continue.
+                          </p>
+                        )}
                       </div>
+
+                      {turnstileError && !isDev && (
+                        <div className="space-y-2 text-left">
+                          <p className="text-xs font-bold text-destructive text-left">
+                            Security verification failed to load. Please retry verification.
+                          </p>
+                          <p className="text-[11px] text-muted-foreground text-left">
+                            If it still fails, ensure this domain is added in Cloudflare Turnstile Allowed Hostnames and disable ad/script blockers.
+                          </p>
+                          {turnstileErrorCode && (
+                            <p className="text-[11px] text-muted-foreground text-left">
+                              Error code: {turnstileErrorCode}
+                            </p>
+                          )}
+                          <Button type="button" variant="outline" size="sm" onClick={retryTurnstile} className="text-left">
+                            Retry Verification
+                          </Button>
+                        </div>
+                      )}
 
                       <div className="w-full relative group">
                         <Button 
                           type="submit" 
                           className="w-full h-16 rounded-2xl bg-gradient-to-r from-sky-500 to-green-500 hover:from-sky-600 hover:to-green-600 text-white font-black uppercase tracking-widest shadow-2xl shadow-sky-500/20 transition-all active:scale-[0.98] disabled:opacity-50 text-sm text-center" 
-                          disabled={isSubmitting || (!turnstileToken && !turnstileError)}
+                          aria-busy={isSubmitting}
                         >
                           {isSubmitting ? <Loader2 className="mr-3 h-6 w-6 animate-spin" /> : <Send className="mr-3 h-5 w-5" />}
                           Dispatch Inquiry 🚀

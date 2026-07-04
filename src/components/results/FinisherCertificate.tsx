@@ -5,14 +5,19 @@ import Image from "next/image";
 import Link from 'next/link';
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { toPng } from "html-to-image";
+import { toJpeg, toPng } from "html-to-image";
 import jsPDF from "jspdf";
 
 import { format, parseISO } from "date-fns";
 import {
   ArrowLeft,
+  Copy,
   Download,
+  Facebook,
+  Instagram,
   Loader2,
+  MessageCircle,
+  Twitter,
   Waves,
   Bike as BikeIcon,
   Footprints,
@@ -69,6 +74,40 @@ interface Props {
   ticketDef?: TicketDefinition;
   totalYearlyPoints?: number | null;
   onBack: () => void;
+}
+
+async function fetchImageAsDataUrl(url: string, proxy = false): Promise<string> {
+  const finalUrl = proxy
+    ? `/api/proxy-image?url=${encodeURIComponent(url)}`
+    : url;
+
+  const response = await fetch(finalUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to load image: ${url}`);
+  }
+
+  const blob = await response.blob();
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error(`Failed to read image: ${url}`));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function dataUrlToFile(dataUrl: string, fileName: string): File {
+  const [meta, base64] = dataUrl.split(',');
+  const mimeMatch = meta.match(/data:(.*?);base64/);
+  const mime = mimeMatch?.[1] || 'image/png';
+  const binary = atob(base64 || '');
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  return new File([bytes], fileName, { type: mime });
 }
 
 const Stat = ({ label, value }: { label: string, value: string | number | undefined | null }) => (
@@ -150,6 +189,9 @@ export default function FinisherCertificate({
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+  const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null);
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
+  const [flagDataUrl, setFlagDataUrl] = useState<string | null>(null);
 
   const raceDate = athlete.raceDate
     ? format(parseISO(athlete.raceDate), "MMMM dd, yyyy")
@@ -163,7 +205,7 @@ export default function FinisherCertificate({
 
   const verificationUrl = useMemo(() => {
     if (typeof window === 'undefined' || !eventSlug || !athlete.bibNumber) return '';
-    return `${window.location.origin}/results?eventSlug=${eventSlug}&bib=${athlete.bibNumber}`;
+    return `${window.location.origin}/certificate/${encodeURIComponent(eventSlug)}/${encodeURIComponent(athlete.bibNumber)}`;
   }, [eventSlug, athlete.bibNumber]);
 
   useEffect(() => {
@@ -182,6 +224,39 @@ export default function FinisherCertificate({
       })
       .catch(e => console.error("QR Code fetch error:", e));
   }, [verificationUrl]);
+
+  useEffect(() => {
+    const isFemale = athlete.gender?.toLowerCase() === 'female';
+    const targetLogoUrl = isFemale ? '/Bwwhitelogo.png' : '/Bmlogowhite.png';
+
+    fetchImageAsDataUrl(targetLogoUrl)
+      .then(setLogoDataUrl)
+      .catch((e) => {
+        console.error('Certificate logo fetch error:', e);
+        setLogoDataUrl(targetLogoUrl);
+      });
+
+    fetchImageAsDataUrl('/white signature.png')
+      .then(setSignatureDataUrl)
+      .catch((e) => {
+        console.error('Certificate signature fetch error:', e);
+        setSignatureDataUrl('/white signature.png');
+      });
+  }, [athlete.gender]);
+
+  useEffect(() => {
+    if (!flagSrc) {
+      setFlagDataUrl(null);
+      return;
+    }
+
+    fetchImageAsDataUrl(flagSrc, true)
+      .then(setFlagDataUrl)
+      .catch((e) => {
+        console.error('Certificate flag fetch error:', e);
+        setFlagDataUrl(flagSrc);
+      });
+  }, [flagSrc]);
 
   const isDua = isDuathlonEvent(athlete.ticketName || athlete.category);
 
@@ -218,8 +293,9 @@ export default function FinisherCertificate({
       overallRank: `${athlete.oRank || 'N/A'}${getOrdinal(Number(athlete.oRank))}`,
       genderRank: `${athlete.gRank || 'N/A'}${getOrdinal(Number(athlete.gRank))}`,
       categoryRank: `${athlete.cRank || 'N/A'}${getOrdinal(Number(athlete.cRank))}`,
-      logoUrl: logoUrl,
-      signatureUrl: '/white signature.png',
+      gender: athlete.gender || null,
+      logoUrl: logoDataUrl || logoUrl,
+      signatureUrl: signatureDataUrl || '/white signature.png',
       qrCodeUrl: qrCodeDataUrl,
       splits: legs.map(l => ({
           label: l.k,
@@ -227,12 +303,23 @@ export default function FinisherCertificate({
           pace: getPace(hmsToSeconds(l.t), l.d, l.type),
           time: formatSecondsToHMS(hmsToSeconds(l.t)),
       })),
-      flagSrc: flagSrc,
+      flagSrc: flagDataUrl || flagSrc,
     };
-  }, [athlete, eventName, raceDate, qrCodeDataUrl, legs, flagSrc]);
+  }, [athlete, eventName, raceDate, qrCodeDataUrl, legs, flagSrc, logoDataUrl, signatureDataUrl, flagDataUrl]);
+
+  const areExportAssetsReady = useMemo(() => {
+    const logoReady = !!certificateData.logoUrl;
+    const signatureReady = !!certificateData.signatureUrl;
+    const flagReady = !flagSrc || !!certificateData.flagSrc;
+    return logoReady && signatureReady && flagReady;
+  }, [certificateData.logoUrl, certificateData.signatureUrl, certificateData.flagSrc, flagSrc]);
 
   const downloadImage = useCallback(async (ref: React.RefObject<HTMLDivElement>, format: 'post' | 'story' | 'square') => {
     if (!ref.current) return;
+    if (!areExportAssetsReady) {
+      toast({ variant: "destructive", title: "Export not ready", description: "Certificate assets are still loading. Please try again in a moment." });
+      return;
+    }
     
     let setDownloading: (isDownloading: boolean) => void;
     switch (format) {
@@ -254,27 +341,121 @@ export default function FinisherCertificate({
     } finally {
       setDownloading(false);
     }
-  }, [athlete.name, toast]);
+  }, [athlete.name, toast, areExportAssetsReady]);
+
+  const copyCertificateLink = useCallback(async () => {
+    if (!verificationUrl) {
+      toast({ variant: "destructive", title: "Link unavailable", description: "Certificate link is not ready yet." });
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(verificationUrl);
+      toast({ title: "Link copied", description: "Certificate link copied to clipboard." });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Copy failed", description: e?.message || "Could not copy certificate link." });
+    }
+  }, [verificationUrl, toast]);
+
+  const buildShareImageFile = useCallback(async (format: 'post' | 'story') => {
+    const sourceRef = format === 'story' ? storyRef.current : postRef.current;
+    if (!sourceRef) {
+      throw new Error('Certificate image is not ready yet.');
+    }
+    if (!areExportAssetsReady) {
+      throw new Error('Certificate assets are still loading.');
+    }
+
+    const dataUrl = await toPng(sourceRef, { cacheBust: true, pixelRatio: 2 });
+    return dataUrlToFile(dataUrl, `Bergman_${cleanText(athlete.name)}_${format}_certificate.png`);
+  }, [athlete.name, areExportAssetsReady]);
+
+  const shareCertificate = useCallback(async (platform: 'facebook' | 'whatsapp' | 'instagram-story' | 'instagram-post' | 'x') => {
+    if (!verificationUrl) {
+      toast({ variant: "destructive", title: "Link unavailable", description: "Certificate link is not ready yet." });
+      return;
+    }
+
+    const shareText = `${cleanText(athlete.name)}'s Bergman finisher certificate`;
+    const encodedUrl = encodeURIComponent(verificationUrl);
+    const encodedText = encodeURIComponent(`${shareText} - ${verificationUrl}`);
+
+    try {
+      if (platform === 'whatsapp') {
+        try {
+          const imageFile = await buildShareImageFile('post');
+          if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [imageFile] }))) {
+            await navigator.share({
+              title: shareText,
+              text: `${shareText}\n${verificationUrl}`,
+              url: verificationUrl,
+              files: [imageFile],
+            });
+            return;
+          }
+        } catch (shareFileError) {
+          console.warn('WhatsApp file share fallback:', shareFileError);
+        }
+      }
+
+      if (platform === 'instagram-story' || platform === 'instagram-post') {
+        const format = platform === 'instagram-story' ? 'story' : 'post';
+        try {
+          const imageFile = await buildShareImageFile(format);
+          if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [imageFile] }))) {
+            await navigator.share({
+              title: shareText,
+              text: `${shareText}\n${verificationUrl}`,
+              url: verificationUrl,
+              files: [imageFile],
+            });
+            return;
+          }
+        } catch (shareFileError) {
+          console.warn('Instagram file share fallback:', shareFileError);
+        }
+
+        await navigator.clipboard.writeText(verificationUrl);
+        window.open('https://www.instagram.com/', '_blank', 'noopener,noreferrer');
+        toast({ title: 'Link copied', description: `Certificate link copied. Use the ${format} image after Instagram opens.` });
+        return;
+      }
+
+      const shareUrls = {
+        facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`,
+        whatsapp: `https://wa.me/?text=${encodedText}`,
+        x: `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodedUrl}`,
+      } as const;
+
+      window.open(shareUrls[platform], '_blank', 'noopener,noreferrer');
+    } catch (e: any) {
+      toast({ variant: 'destructive', title: 'Share failed', description: e?.message || 'Could not open share link.' });
+    }
+  }, [verificationUrl, athlete.name, toast, buildShareImageFile]);
 
  const downloadPdf = useCallback(async () => {
     if (!printRef.current) {
       toast({ title: "Error", description: "Certificate template not ready.", variant: "destructive" });
       return;
     }
+    if (!areExportAssetsReady) {
+      toast({ variant: "destructive", title: "PDF Export not ready", description: "Certificate assets are still loading. Please try again in a moment." });
+      return;
+    }
     setIsDownloadingPdf(true);
     try {
-      const dataUrl = await toPng(printRef.current, { cacheBust: true, pixelRatio: 2 });
+      const dataUrl = await toJpeg(printRef.current, { cacheBust: true, pixelRatio: 1.35, quality: 0.84 });
       const pdf = new jsPDF({ orientation: "portrait", unit: "px", format: "a4" });
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
-      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.addImage(dataUrl, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'MEDIUM');
       pdf.save(`Finisher_Certificate_${cleanText(athlete.name)}.pdf`);
     } catch (e: any) {
       toast({ variant: "destructive", title: "PDF Export failed", description: e.message });
     } finally {
       setIsDownloadingPdf(false);
     }
-  }, [athlete.name, toast]);
+  }, [athlete.name, toast, areExportAssetsReady]);
 
   const isFemale = athlete.gender?.toLowerCase() === 'female';
   const logoUrl = isFemale ? '/Bwwhitelogo.png' : '/Bmlogowhite.png';
@@ -349,21 +530,21 @@ export default function FinisherCertificate({
         
         <div className="my-8">
              <h3 className="text-xl font-semibold text-center text-primary mb-4">Your Splits</h3>
-             <div className="rounded-lg border border-slate-700 bg-slate-800/50">
+           <div className="overflow-hidden rounded-xl border border-slate-600 bg-slate-900/80 shadow-inner shadow-slate-950/40">
                   <Table>
-                    <TableHeader><TableRow className="border-slate-700 hover:bg-slate-800">
-                        <TableHead className="text-slate-300">Segment</TableHead>
-                        <TableHead className="text-slate-300">Distance</TableHead>
-                        <TableHead className="text-slate-300">Pace</TableHead>
-                        <TableHead className="text-right text-slate-300">Time</TableHead>
+              <TableHeader><TableRow className="border-b border-slate-600 bg-slate-800/90 hover:bg-slate-800/90">
+                <TableHead className="py-4 text-sm font-semibold uppercase tracking-wide text-slate-200">Segment</TableHead>
+                <TableHead className="py-4 text-sm font-semibold uppercase tracking-wide text-slate-200">Distance</TableHead>
+                <TableHead className="py-4 text-sm font-semibold uppercase tracking-wide text-slate-200">Pace</TableHead>
+                <TableHead className="py-4 text-right text-sm font-semibold uppercase tracking-wide text-slate-200">Time</TableHead>
                     </TableRow></TableHeader>
                     <TableBody>
                         {legs.map(l => (
-                            <TableRow key={l.k} className="border-slate-700/50 hover:bg-slate-800 text-sm">
-                                <TableCell className="font-medium flex items-center gap-2">{l.k}</TableCell>
-                                <TableCell className="text-slate-300">{l.d ? `${l.d.toFixed(2)} km` : '-'}</TableCell>
-                                <TableCell className="text-slate-300">{getPace(hmsToSeconds(l.t), l.d, l.type)}</TableCell>
-                                <TableCell className="text-right font-mono text-white">{formatSecondsToHMS(hmsToSeconds(l.t))}</TableCell>
+                  <TableRow key={l.k} className="border-b border-slate-700/70 text-base hover:bg-slate-800/70">
+                    <TableCell className="py-4 font-semibold text-white">{l.k}</TableCell>
+                    <TableCell className="py-4 text-slate-200">{l.d ? `${l.d.toFixed(2)} km` : '-'}</TableCell>
+                    <TableCell className="py-4 text-slate-200">{getPace(hmsToSeconds(l.t), l.d, l.type)}</TableCell>
+                    <TableCell className="py-4 text-right font-mono text-lg font-semibold text-white">{formatSecondsToHMS(hmsToSeconds(l.t))}</TableCell>
                             </TableRow>
                         ))}
                     </TableBody>
@@ -374,12 +555,12 @@ export default function FinisherCertificate({
         <div className="relative mt-8 pt-8 border-t border-slate-700">
             <div className="flex justify-between items-end">
                 <div className="text-left">
-                    <Image src="/white signature.png" alt="Race Director Signature" width={150} height={38} className="object-contain" />
+              <Image src="/white signature.png" alt="Race Director Signature" width={280} height={84} className="h-auto w-36 sm:w-52 md:w-[280px] object-contain" />
                 </div>
                 {qrCodeDataUrl && (
-                    <div className="text-right">
-                        <Image src={qrCodeDataUrl} alt="Verification QR Code" width={80} height={80} className="bg-white p-1 rounded-md" />
-                        <p className="text-[10px] text-slate-400 mt-1">Scan to verify</p>
+              <div className="flex items-center gap-3">
+                <Image src={qrCodeDataUrl} alt="Verification QR Code" width={80} height={80} className="bg-white p-1 rounded-md" />
+                <p className="text-xs text-slate-400 text-center leading-tight">Scan to verify</p>
                     </div>
                 )}
             </div>
@@ -388,7 +569,11 @@ export default function FinisherCertificate({
       
       <Card className="mt-8">
         <CardHeader><CardTitle>Share Your Achievement</CardTitle></CardHeader>
-        <CardContent className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+             <Button onClick={copyCertificateLink} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white">
+                <Copy className="mr-2 h-4 w-4" /> Copy Link
+            </Button>
            <Button onClick={downloadPdf} disabled={isDownloadingPdf} className="w-full bg-blue-600 hover:bg-blue-700 text-white">
                 {isDownloadingPdf ? <Loader2 className="animate-spin mr-2"/> : <Download className="mr-2"/>} Print (PDF)
             </Button>
@@ -401,6 +586,28 @@ export default function FinisherCertificate({
             <Button onClick={() => downloadImage(squareRef, 'square')} disabled={isDownloadingSquare} className="w-full bg-blue-600 hover:bg-blue-700 text-white">
                     {isDownloadingSquare ? <Loader2 className="animate-spin mr-2"/> : <Download className="mr-2"/>} Square (1:1)
             </Button>
+          </div>
+
+          <div className="border-t pt-4">
+            <p className="mb-3 text-sm font-medium text-muted-foreground">Share certificate link</p>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+              <Button onClick={() => shareCertificate('facebook')} className="w-full bg-[#1877F2] hover:bg-[#166FE5] text-white">
+                <Facebook className="mr-2 h-4 w-4" /> Facebook
+              </Button>
+              <Button onClick={() => shareCertificate('whatsapp')} className="w-full bg-[#25D366] hover:bg-[#1EBE5B] text-white">
+                <MessageCircle className="mr-2 h-4 w-4" /> WhatsApp
+              </Button>
+              <Button onClick={() => shareCertificate('instagram-story')} className="w-full bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] hover:opacity-90 text-white">
+                <Instagram className="mr-2 h-4 w-4" /> Insta Story
+              </Button>
+              <Button onClick={() => shareCertificate('instagram-post')} className="w-full bg-gradient-to-r from-[#F58529] via-[#DD2A7B] to-[#8134AF] hover:opacity-90 text-white">
+                <Instagram className="mr-2 h-4 w-4" /> Insta Post
+              </Button>
+              <Button onClick={() => shareCertificate('x')} className="w-full bg-black hover:bg-zinc-800 text-white">
+                <Twitter className="mr-2 h-4 w-4" /> X
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

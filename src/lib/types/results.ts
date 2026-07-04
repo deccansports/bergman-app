@@ -3,8 +3,14 @@
 export type EventCategory = 'TRIATHLON' | 'DUATHLON' | 'SWIMMING' | 'OTHER';
 
 export interface Split {
+  id?: string;
+  uuid?: string;
+  splitUuid?: string;
+  providerId?: string | null;
+  providerCode?: string | null;
   segment: string;
   name?: string;
+  label?: string;
   distance: number;
   time: number;
   absoluteTimestamp?: number;
@@ -87,8 +93,15 @@ export interface RankedAthlete {
 }
 
 export interface LegacyAthlete {
+  athleteUid?: string;
   name: string;
   email: string;
+  mobile?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  pincode?: string | null;
+  country?: string | null;
   achievementYears: string;
   totalYears: number;
   contributingRaces: {
@@ -119,12 +132,34 @@ export interface AthleteRankingEntry {
 export interface LiveAthlete {
   id: string;
   athleteUid?: string | null;
+  participantUuid?: string | null;
+  participant_uuid?: string | null;
   bib: string;
   name: string;
   category: string;
   ageGroup: string | null;
+  ageGroupUuid?: string | null;
+  ageGroupName?: string | null;
+  age_group_uuid?: string | null;
+  age_group_name?: string | null;
   gender: 'Male' | 'Female';
   country?: string | null;
+  contestUuid?: string | null;
+  contest_uuid?: string | null;
+  contestName?: string | null;
+  contest_name?: string | null;
+  providerContestUuid?: string | null;
+  providerContestName?: string | null;
+  privacy?: 'PUBLIC' | 'PRIVATE' | string | null;
+  liveTracking?: {
+    provider?: string | null;
+    participantUuid?: string | null;
+    contestUuid?: string | null;
+    contestName?: string | null;
+    bib?: string | null;
+    chip?: string | null;
+    privacy?: 'PUBLIC' | 'PRIVATE' | string | null;
+  };
   status: string;
   leg: string;
   splits: Split[];
@@ -157,6 +192,18 @@ export interface LiveAthlete {
   rank?: number;
   prevRank?: number;
   completedLegIndex?: number;
+}
+
+export interface ParticipantMapping {
+  bergmanParticipantId: string | null;
+  feibotParticipantUUID: string | null;
+  eventId: string;
+  contestUUID: string | null;
+  bib: string | null;
+  chipCode: string | null;
+  synced: boolean;
+  lastSync: string;
+  status: 'matched' | 'needs_review' | 'unmatched';
 }
 
 export interface LoopLog {

@@ -87,7 +87,8 @@ export async function updateZohoCustomer(contactId: string, data: any): Promise<
           if (k === 'state' && addr[k]) addr[k] = getStateName(addr[k]) || addr[k];
       });
       if (addr.state) addr.country = "India";
-      if (addr.address) addr.address = addr.address.replace(/[^\x20-\x7E]/g, "").substring(0, 200).trim();
+      if (addr.address) addr.address = addr.address.replace(/[^\x20-\x7E]/g, "").replace(/[<>"'`]/g, "").substring(0, 128).trim();
+      if (addr.city) addr.city = addr.city.replace(/[^\x20-\x7E]/g, "").substring(0, 50).trim();
   }
 
   return zohoFetch(`/contacts/${contactId}`, { method: "PUT", body: cleanData });

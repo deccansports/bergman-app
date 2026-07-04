@@ -1,11 +1,12 @@
 // src/lib/actions/backupActions.ts
-'use server';
+ 'use server';
 
-import { getFirestoreInstance } from '@/lib/firebaseAdmin';
-import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { getFirestoreInstance, getStorageInstance } from '@/lib/firebaseAdmin';
+import { FieldValue } from 'firebase-admin/firestore';
 import { revalidatePath } from 'next/cache';
-import type { BackupRecord, EventParticipant, TicketDefinition, BibAssignmentRule, Sponsor, EventInventory } from '@/lib/types';
+import type { BackupRecord } from '@/lib/types';
 import { serializeParticipantData, toIsoStringSafe, serializeValue } from '@/lib/utils';
+import * as zlib from 'zlib';
 
 const BACKUPS_COLLECTION = 'eventBackups';
 
@@ -42,21 +43,62 @@ export async function createBackupAction(
     
     // Construct the payload, converting all nested objects to strings
     // We use null instead of undefined to satisfy Firestore requirements if settings aren't applied
-    const backupPayload: Omit<BackupRecord, 'id' | 'createdAt'> = {
+    // Create a full JS object representation of everything we want to persist
+    const fullBackupObject = {
+      participantsData,
+      eventDocument: serializeValue(eventData),
+      ticketDefinitionsData,
+      bibAssignmentsData,
+      sponsorsData,
+      inventoryData,
+    };
+
+    const fullString = JSON.stringify(fullBackupObject);
+
+    // If payload is large, upload to Storage and save a small Firestore record
+    const shouldUseStorage = Buffer.byteLength(fullString, 'utf8') > 800000; // ~800KB threshold
+
+    const backupPayloadBase: Omit<BackupRecord, 'id' | 'createdAt'> = {
       eventId,
       eventName,
       participantCount: participantsData.length,
-      participantsData: JSON.stringify(participantsData),
-      eventDocument: JSON.stringify(serializeValue(eventData)),
-      ticketDefinitionsData: JSON.stringify(ticketDefinitionsData),
-      bibAssignmentsData: JSON.stringify(bibAssignmentsData),
-      sponsorsData: JSON.stringify(sponsorsData),
-      inventoryData: inventoryData ? JSON.stringify(inventoryData) : null,
+      participantsData: null,
+      eventDocument: null,
+      ticketDefinitionsData: null,
+      bibAssignmentsData: null,
+      sponsorsData: null,
+      inventoryData: null,
+      storagePath: null,
+      storageSize: null,
+      storageCompressed: null,
     };
 
+    let finalPayload = { ...backupPayloadBase } as any;
+
+    if (shouldUseStorage) {
+      const storage = getStorageInstance();
+      const bucket = storage.bucket();
+      const filename = `backups/${eventId}/${Date.now()}_${Math.random().toString(36).slice(2,8)}.json.gz`;
+      const compressed = zlib.gzipSync(Buffer.from(fullString, 'utf8'));
+      const file = bucket.file(filename);
+      await file.save(compressed, { resumable: false, contentType: 'application/gzip' });
+
+      finalPayload.storagePath = filename;
+      finalPayload.storageSize = compressed.length;
+      finalPayload.storageCompressed = true;
+    } else {
+      // Small enough to keep inline in Firestore as before
+      finalPayload.participantsData = JSON.stringify(participantsData);
+      finalPayload.eventDocument = JSON.stringify(serializeValue(eventData));
+      finalPayload.ticketDefinitionsData = JSON.stringify(ticketDefinitionsData);
+      finalPayload.bibAssignmentsData = JSON.stringify(bibAssignmentsData);
+      finalPayload.sponsorsData = JSON.stringify(sponsorsData);
+      finalPayload.inventoryData = inventoryData ? JSON.stringify(inventoryData) : null;
+    }
+
     const newBackupRef = await adminDb.collection(BACKUPS_COLLECTION).add({
-        ...backupPayload,
-        createdAt: FieldValue.serverTimestamp(),
+      ...finalPayload,
+      createdAt: FieldValue.serverTimestamp(),
     });
 
     revalidatePath('/admin/dashboard');
@@ -99,6 +141,9 @@ export async function getBackupsForEventAction(
         bibAssignmentsData: data.bibAssignmentsData,
         sponsorsData: data.sponsorsData,
         inventoryData: data.inventoryData,
+        storagePath: data.storagePath || null,
+        storageSize: data.storageSize || null,
+        storageCompressed: data.storageCompressed || null,
       };
     });
 
@@ -127,6 +172,56 @@ export async function deleteBackupAction(
   }
 }
 
+export async function fetchBackupDataAction(backupId: string): Promise<{ success: boolean; message: string; data?: { participantsData?: string | null; eventDocument?: string | null; ticketDefinitionsData?: string | null; bibAssignmentsData?: string | null; sponsorsData?: string | null; inventoryData?: string | null } }> {
+  const actionName = 'fetchBackupDataAction';
+  if (!backupId) return { success: false, message: 'Backup ID is required.' };
+  try {
+    const adminDb = getFirestoreInstance();
+    const snap = await adminDb.collection(BACKUPS_COLLECTION).doc(backupId).get();
+    if (!snap.exists) return { success: false, message: 'Backup not found.' };
+    const data = snap.data() as any;
+
+    // If stored in storage, download and decompress
+    if (data.storagePath) {
+      const storage = getStorageInstance();
+      const bucket = storage.bucket();
+      const file = bucket.file(data.storagePath);
+      const [buffer] = await file.download();
+      const raw = data.storageCompressed ? zlib.gunzipSync(buffer).toString('utf8') : buffer.toString('utf8');
+      const parsed = JSON.parse(raw);
+      return {
+        success: true,
+        message: 'Backup payload loaded from storage.',
+        data: {
+          participantsData: JSON.stringify(parsed.participantsData),
+          eventDocument: JSON.stringify(parsed.eventDocument),
+          ticketDefinitionsData: JSON.stringify(parsed.ticketDefinitionsData),
+          bibAssignmentsData: JSON.stringify(parsed.bibAssignmentsData),
+          sponsorsData: JSON.stringify(parsed.sponsorsData),
+          inventoryData: parsed.inventoryData ? JSON.stringify(parsed.inventoryData) : null,
+        }
+      };
+    }
+
+    // Inline data
+    return {
+      success: true,
+      message: 'Backup payload loaded from Firestore.',
+      data: {
+        participantsData: data.participantsData || null,
+        eventDocument: data.eventDocument || null,
+        ticketDefinitionsData: data.ticketDefinitionsData || null,
+        bibAssignmentsData: data.bibAssignmentsData || null,
+        sponsorsData: data.sponsorsData || null,
+        inventoryData: data.inventoryData || null,
+      }
+    };
+  } catch (e: any) {
+    console.error(`[${actionName}] Error:`, e);
+    return { success: false, message: `Failed to fetch backup payload: ${e.message}` };
+  }
+}
+
 export async function restoreBackupAction(backupId: string, targetEventId: string): Promise<{ success: boolean; message: string }> {
   const actionName = 'restoreBackupAction';
   if (!backupId || !targetEventId) {
@@ -137,7 +232,26 @@ export async function restoreBackupAction(backupId: string, targetEventId: strin
     const backupSnap = await adminDb.collection(BACKUPS_COLLECTION).doc(backupId).get();
     if (!backupSnap.exists) return { success: false, message: "Backup not found." };
     
-    const backupData = backupSnap.data() as BackupRecord;
+    let backupData = backupSnap.data() as BackupRecord;
+    // If backup is stored in Storage, load the payload and populate inline fields for restore
+    if (!backupData) return { success: false, message: 'Backup not found.' };
+    if (!backupData.participantsData && backupData.storagePath) {
+      const storage = getStorageInstance();
+      const bucket = storage.bucket();
+      const file = bucket.file(backupData.storagePath!);
+      const [buffer] = await file.download();
+      const raw = backupData.storageCompressed ? zlib.gunzipSync(buffer).toString('utf8') : buffer.toString('utf8');
+      const parsed = JSON.parse(raw);
+      backupData = {
+        ...backupData,
+        participantsData: JSON.stringify(parsed.participantsData),
+        eventDocument: JSON.stringify(parsed.eventDocument),
+        ticketDefinitionsData: JSON.stringify(parsed.ticketDefinitionsData),
+        bibAssignmentsData: JSON.stringify(parsed.bibAssignmentsData),
+        sponsorsData: JSON.stringify(parsed.sponsorsData),
+        inventoryData: parsed.inventoryData ? JSON.stringify(parsed.inventoryData) : null,
+      } as BackupRecord;
+    }
     const targetEventRef = adminDb.collection('events').doc(targetEventId);
     
     // --- Overwrite logic ---
@@ -187,10 +301,32 @@ export async function restoreBackupToNewEventAction(backupId: string): Promise<{
   const adminDb = getFirestoreInstance();
   try {
     const backupSnap = await adminDb.collection(BACKUPS_COLLECTION).doc(backupId).get();
-    const backupData = backupSnap.data() as BackupRecord | undefined;
-    if (!backupSnap.exists || !backupData?.eventDocument) return { success: false, message: "Backup data is incomplete or not found." };
+    let backupData = backupSnap.data() as BackupRecord | undefined;
+    if (!backupSnap.exists || !backupData) return { success: false, message: "Backup data is incomplete or not found." };
 
-    const eventDocData = JSON.parse(backupData.eventDocument);
+    // If backup payload is in Storage, load it so we can access eventDocument
+    if (!backupData.eventDocument && backupData.storagePath) {
+      const storage = getStorageInstance();
+      const bucket = storage.bucket();
+      const file = bucket.file(backupData.storagePath);
+      const [buffer] = await file.download();
+      const raw = backupData.storageCompressed ? zlib.gunzipSync(buffer).toString('utf8') : buffer.toString('utf8');
+      const parsed = JSON.parse(raw);
+      backupData = {
+        ...backupData,
+        participantsData: JSON.stringify(parsed.participantsData),
+        eventDocument: JSON.stringify(parsed.eventDocument),
+        ticketDefinitionsData: JSON.stringify(parsed.ticketDefinitionsData),
+        bibAssignmentsData: JSON.stringify(parsed.bibAssignmentsData),
+        sponsorsData: JSON.stringify(parsed.sponsorsData),
+        inventoryData: parsed.inventoryData ? JSON.stringify(parsed.inventoryData) : null,
+      } as BackupRecord;
+    }
+
+    if (!backupData.eventDocument) {
+      return { success: false, message: "Backup payload missing eventDocument." };
+    }
+    const eventDocData = JSON.parse(backupData.eventDocument as string);
     const newEventData = {
         ...eventDocData,
         eventName: `${eventDocData.eventName} (Restored ${new Date().toISOString().split('T')[0]})`,

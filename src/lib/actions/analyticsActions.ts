@@ -5,8 +5,9 @@ import { Timestamp, type Firestore, FieldPath, type Query } from 'firebase-admin
 import type { AdminAthleteAnalytics, User, OverviewMetrics, EventParticipant, CancellationEntry, RetentionStats, CrossEventComparison } from '@/lib/types';
 import { serializeParticipantData, serializeValue, normalizeStatus } from '@/lib/utils';
 import type { AdminOnly } from '@/lib/types/admin';
-import { format, parseISO, isAfter, isEqual, startOfDay, subYears } from 'date-fns';
+import { format, parseISO, isAfter, isEqual, startOfDay, subYears, isBefore } from 'date-fns';
 import { getKV, putKV } from '../cloudflare/kv';
+import { getCachedServerValue } from '@/lib/serverCache';
 
 /**
  * SCALE-FIRST: Uses aggregation queries (count) instead of full collection scans.
@@ -194,94 +195,134 @@ export async function getGlobalParticipantStatsAction(): Promise<{
 }> {
   const actionName = 'getGlobalParticipantStatsAction';
   try {
-    const adminDb = getFirestoreInstance();
-    const today = startOfDay(new Date());
+    return await getCachedServerValue('analytics:global-participant-stats', 60_000, async () => {
+      const adminDb = getFirestoreInstance();
+      const today = startOfDay(new Date());
 
-    const totalAthletesSnap = await adminDb.collection('users').count().get();
-    const clubAthletesSnap = await adminDb.collection('users').where('clubId', '!=', null).count().get();
-    
-    // For upcoming events athletes, we check participants in active upcoming races
-    const upcomingEventsSnap = await adminDb.collection('events').where('eventDate', '>=', today.toISOString().split('T')[0]).get();
-    const upcomingEventIds = upcomingEventsSnap.docs.map(d => d.id);
-    
-    let athletesInUpcoming = 0;
-    if (upcomingEventIds.length > 0) {
-        const activeParticipantsSnap = await adminDb.collectionGroup('participants')
-            .where('eventId', 'in', upcomingEventIds)
-            .where('ticketStatus', '==', 'Active')
-            .select('athleteUid')
-            .get();
-        const uniqueUids = new Set(activeParticipantsSnap.docs.map(d => d.data().athleteUid).filter(Boolean));
-        athletesInUpcoming = uniqueUids.size;
-    }
+      const totalAthletesSnap = await adminDb.collection('users').count().get();
+      const clubAthletesSnap = await adminDb.collection('users').where('clubId', '!=', null).count().get();
+      
+      const upcomingEventsSnap = await adminDb.collection('events').where('eventDate', '>=', today.toISOString().split('T')[0]).get();
+      const upcomingEventIds = upcomingEventsSnap.docs.map(d => d.id);
+      
+      let athletesInUpcoming = 0;
+      if (upcomingEventIds.length > 0) {
+          const activeParticipantsSnap = await adminDb.collectionGroup('participants')
+              .where('eventId', 'in', upcomingEventIds)
+              .where('ticketStatus', '==', 'Active')
+              .select('athleteUid')
+              .get();
+          const uniqueUids = new Set(activeParticipantsSnap.docs.map(d => d.data().athleteUid).filter(Boolean));
+          athletesInUpcoming = uniqueUids.size;
+      }
 
-    const stats = {
+      const stats = {
         totalAthletes: totalAthletesSnap.data().count,
         clubAffiliatedAthletes: clubAthletesSnap.data().count,
         athletesInUpcomingEvents: athletesInUpcoming
-    };
+      };
 
-    await putKV('analytics:global_participant_snapshot', stats, actionName);
+      await putKV('analytics:global_participant_snapshot', stats, actionName);
 
-    return {
-      success: true,
-      message: 'Global stats fetched.',
-      stats: serializeValue(stats)
-    };
+      return {
+        success: true,
+        message: 'Global stats fetched.',
+        stats: serializeValue(stats)
+      };
+    });
   } catch (e: any) {
     return { success: false, message: e.message };
   }
 }
 
-export async function getEventRegistrationOverviewMetricsAction(adminContext: AdminOnly, eventId?: string, country?: 'IN' | 'US'): Promise<{
+/**
+ * Compute and cache country/event-level registration metrics to KV
+ * This should be called periodically (via a scheduled job) to keep KV caches fresh
+ * KV Keys:
+ * - analytics:country:{IN|US}:metrics -> {totalRegs, todaysRegs, totalSales, totalFree, totalRefunds, recentTx}
+ * - analytics:event:{eventId}:metrics -> same structure
+ */
+export async function computeCountryRegistrationMetricsAction(country: 'IN' | 'US'): Promise<{
   success: boolean;
   message: string;
-  metrics?: OverviewMetrics;
 }> {
-  const actionName = 'getEventRegistrationOverviewMetricsAction';
-  let adminDb: Firestore;
+  const actionName = `computeCountryRegistrationMetricsAction:${country}`;
   try {
-    adminDb = getFirestoreInstance();
-    
+    const adminDb = getFirestoreInstance();
     const now = new Date();
-    // Correctly get the start of the day in the server's local timezone.
     const startOfToday = startOfDay(now);
+
+    const normalizeCountryCode = (eventCountry?: string | null, eventCurrency?: string | null): 'IN' | 'US' | null => {
+      const c = (eventCountry || '').trim().toLowerCase();
+      const curr = (eventCurrency || '').trim().toUpperCase();
+      if (c === 'in' || c === 'india' || curr === 'INR') return 'IN';
+      if (c === 'us' || c === 'usa' || c === 'united states' || c === 'united states of america' || curr === 'USD') return 'US';
+      return null;
+    };
+
+    const parseEventDateSafe = (value: any): Date | null => {
+      if (!value) return null;
+      if (value instanceof Date) return value;
+      if (typeof value?.toDate === 'function') return value.toDate();
+      if (typeof value === 'string') {
+        const parsed = parseISO(value);
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+      }
+      return null;
+    };
+
+    // Use all events and filter in memory (works even when country format is 'India' / 'USA')
+    const eventsSnap = await adminDb
+      .collection('events')
+      .select('country', 'currency', 'eventDate')
+      .get();
+
+    const eventIds = eventsSnap.docs
+      .filter((doc) => {
+        const data = doc.data() as any;
+        const mappedCountry = normalizeCountryCode(data?.country, data?.currency);
+        if (mappedCountry !== country) return false;
+
+        // Keep only upcoming events for overview scope
+        const eventDate = parseEventDateSafe(data?.eventDate);
+        return !!eventDate && !isBefore(startOfDay(eventDate), startOfDay(now));
+      })
+      .map((doc) => doc.id);
     
-    let eventIdsToConsider: string[] | undefined = undefined;
-    if (eventId) {
-        eventIdsToConsider = [eventId];
-    } else if (country) {
-        const eventsSnap = await adminDb.collection('events').where('country', '==', country).get();
-        eventIdsToConsider = eventsSnap.docs.map(doc => doc.id);
-        if (eventIdsToConsider.length === 0) {
-            return {
-                success: true,
-                message: "No events found for the selected country.",
-                metrics: { todaysRegistrations: 0, totalRegistrations: 0, totalSales: 0, todaysRefunds: 0, totalFreeRegistrations: 0, recentTransactions: [], totalRefunds: 0 }
-            };
-        }
+    if (eventIds.length === 0) {
+      return { success: true, message: `No events found for country ${country}` };
     }
     
-    // Fetch all participants and cancellations broadly first
-    const allParticipantsSnap = await adminDb.collectionGroup('participants').get();
-    const allCancellationsSnap = await adminDb.collectionGroup('cancellations').get();
+    const allParticipants: EventParticipant[] = [];
+    const allCancellations: CancellationEntry[] = [];
 
-    let allParticipants = allParticipantsSnap.docs.map(doc => serializeParticipantData(doc));
-    let allCancellations = allCancellationsSnap.docs.map(doc => doc.data() as CancellationEntry);
+    // Read per-event subcollections to avoid collectionGroup index constraints
+    for (const eid of eventIds) {
+      const participantsSnap = await adminDb
+        .collection('events')
+        .doc(eid)
+        .collection('participants')
+        .select('name', 'email', 'registeredAt', 'amountPaidPaisa', 'ticketStatus', 'eventName')
+        .get();
 
-    // Filter in-memory if eventIds are specified
-    if (eventIdsToConsider) {
-        allParticipants = allParticipants.filter(p => p.eventId && eventIdsToConsider!.includes(p.eventId));
-        allCancellations = allCancellations.filter(c => c.eventId && eventIdsToConsider!.includes(c.eventId));
+      allParticipants.push(...participantsSnap.docs.map(doc => serializeParticipantData(doc)));
+
+      const cancellationsSnap = await adminDb
+        .collection('events')
+        .doc(eid)
+        .collection('cancellations')
+        .select('calculatedRefundAmountPaisa')
+        .get();
+
+      allCancellations.push(...cancellationsSnap.docs.map(doc => doc.data() as CancellationEntry));
     }
     
+    // Compute aggregated metrics
     const sortedParticipants = allParticipants.sort((a, b) => {
-        const dateA = a.registeredAt ? new Date(a.registeredAt).getTime() : 0;
-        const dateB = b.registeredAt ? new Date(b.registeredAt).getTime() : 0;
-        return dateB - dateA; // Descending
+      const dateA = a.registeredAt ? new Date(a.registeredAt).getTime() : 0;
+      const dateB = b.registeredAt ? new Date(b.registeredAt).getTime() : 0;
+      return dateB - dateA;
     });
-
-    const recentTransactions: Array<EventParticipant> = sortedParticipants.slice(0, 5);
 
     let totalRegistrations = allParticipants.length;
     let todaysRegistrations = 0;
@@ -309,17 +350,223 @@ export async function getEventRegistrationOverviewMetricsAction(adminContext: Ad
       totalRefunds += cancellation.calculatedRefundAmountPaisa || 0;
     });
 
-    const metrics: OverviewMetrics = {
-      todaysRegistrations,
+    // Extract only latest 5 registrations with minimal fields
+    const latest5Registrations = sortedParticipants.slice(0, 5).map(p => ({
+      id: p.id,
+      name: p.name,
+      email: p.email,
+      eventName: p.eventName,
+      registeredAt: p.registeredAt,
+      amountPaidPaisa: p.amountPaidPaisa,
+      ticketStatus: p.ticketStatus,
+    }));
+
+    // Store only numbers + latest 5 registrations in KV
+    const metrics = {
       totalRegistrations,
+      todaysRegistrations,
       totalSales,
-      todaysRefunds: 0, 
       totalFreeRegistrations,
-      recentTransactions: recentTransactions, 
       totalRefunds,
+      recentTransactions: latest5Registrations,
+      lastUpdated: now.toISOString(),
     };
 
-    return { success: true, message: "Registration metrics fetched.", metrics: serializeValue(metrics) };
+    await putKV(`analytics:overview_metrics:${country === 'IN' ? 'all-in' : 'all-us'}`, metrics, actionName);
+    
+    return { success: true, message: `Country metrics cached for ${country}` };
+  } catch (e: any) {
+    console.error(`[${actionName}] Error:`, e);
+    return { success: false, message: e.message };
+  }
+}
+
+/**
+ * Compute and cache event-level registration metrics to KV
+ */
+export async function computeEventRegistrationMetricsAction(eventId: string): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  const actionName = `computeEventRegistrationMetricsAction:${eventId}`;
+  try {
+    const adminDb = getFirestoreInstance();
+    const now = new Date();
+    const startOfToday = startOfDay(now);
+    
+    // Fetch only necessary fields: registration metrics and latest 5 registrations
+    const participantsSnap = await adminDb.collection('events').doc(eventId).collection('participants')
+      .select('name', 'email', 'registeredAt', 'amountPaidPaisa', 'ticketStatus', 'eventName')
+      .get();
+    const allParticipants = participantsSnap.docs.map(doc => serializeParticipantData(doc));
+    
+    const cancellationsSnap = await adminDb.collection('events').doc(eventId).collection('cancellations')
+      .select('calculatedRefundAmountPaisa')
+      .get();
+    const allCancellations = cancellationsSnap.docs.map(doc => doc.data() as CancellationEntry);
+    
+    // Compute aggregated metrics
+    const sortedParticipants = allParticipants.sort((a, b) => {
+      const dateA = a.registeredAt ? new Date(a.registeredAt).getTime() : 0;
+      const dateB = b.registeredAt ? new Date(b.registeredAt).getTime() : 0;
+      return dateB - dateA;
+    });
+
+    let totalRegistrations = allParticipants.length;
+    let todaysRegistrations = 0;
+    let totalSales = 0;
+    let totalFreeRegistrations = 0;
+
+    allParticipants.forEach(participant => {
+      const amount = participant.amountPaidPaisa;
+      if (typeof amount === 'number' && amount > 0) {
+        totalSales += amount;
+      } else {
+        totalFreeRegistrations++;
+      }
+      
+      if (participant.registeredAt) {
+        const registeredDate = new Date(participant.registeredAt);
+        if (registeredDate >= startOfToday) {
+          todaysRegistrations++;
+        }
+      }
+    });
+
+    let totalRefunds = 0;
+    allCancellations.forEach(cancellation => {
+      totalRefunds += cancellation.calculatedRefundAmountPaisa || 0;
+    });
+
+    // Extract only latest 5 registrations with minimal fields
+    const latest5Registrations = sortedParticipants.slice(0, 5).map(p => ({
+      id: p.id,
+      name: p.name,
+      email: p.email,
+      eventName: p.eventName,
+      registeredAt: p.registeredAt,
+      amountPaidPaisa: p.amountPaidPaisa,
+      ticketStatus: p.ticketStatus,
+    }));
+
+    // Store only numbers + latest 5 registrations in KV
+    const metrics = {
+      totalRegistrations,
+      todaysRegistrations,
+      totalSales,
+      totalFreeRegistrations,
+      totalRefunds,
+      recentTransactions: latest5Registrations,
+      lastUpdated: now.toISOString(),
+    };
+
+    await putKV(`analytics:overview_metrics:${eventId}`, metrics, actionName);
+    
+    return { success: true, message: `Event metrics cached for ${eventId}` };
+  } catch (e: any) {
+    console.error(`[${actionName}] Error:`, e);
+    return { success: false, message: e.message };
+  }
+}
+
+export async function getEventRegistrationOverviewMetricsAction(adminContext: AdminOnly, eventId?: string, country?: 'IN' | 'US'): Promise<{
+  success: boolean;
+  message: string;
+  metrics?: OverviewMetrics;
+}> {
+  const actionName = 'getEventRegistrationOverviewMetricsAction';
+  try {
+    let metrics: any = null;
+    let kvKey = '';
+
+    // Determine the KV key based on parameters
+    if (eventId) {
+      kvKey = `analytics:overview_metrics:${eventId}`;
+    } else if (country) {
+      kvKey = `analytics:overview_metrics:${country === 'IN' ? 'all-in' : 'all-us'}`;
+    } else {
+      // Global view: aggregate IN + US overview metrics from KV
+      const [inMetrics, usMetrics] = await Promise.all([
+        getKV<any>('analytics:overview_metrics:all-in', actionName),
+        getKV<any>('analytics:overview_metrics:all-us', actionName),
+      ]);
+
+      if (!inMetrics) {
+        computeCountryRegistrationMetricsAction('IN').catch(e =>
+          console.error(`[${actionName}] Background sync failed for country IN:`, e)
+        );
+      }
+
+      if (!usMetrics) {
+        computeCountryRegistrationMetricsAction('US').catch(e =>
+          console.error(`[${actionName}] Background sync failed for country US:`, e)
+        );
+      }
+
+      const combinedRecent = [
+        ...(inMetrics?.recentTransactions || []),
+        ...(usMetrics?.recentTransactions || []),
+      ]
+        .sort((a: any, b: any) => {
+          const dateA = a?.registeredAt ? new Date(a.registeredAt).getTime() : 0;
+          const dateB = b?.registeredAt ? new Date(b.registeredAt).getTime() : 0;
+          return dateB - dateA;
+        })
+        .slice(0, 5);
+
+      const globalMetrics = {
+        totalRegistrations: (inMetrics?.totalRegistrations || 0) + (usMetrics?.totalRegistrations || 0),
+        todaysRegistrations: (inMetrics?.todaysRegistrations || 0) + (usMetrics?.todaysRegistrations || 0),
+        totalSales: (inMetrics?.totalSales || 0) + (usMetrics?.totalSales || 0),
+        todaysRefunds: 0,
+        totalFreeRegistrations: (inMetrics?.totalFreeRegistrations || 0) + (usMetrics?.totalFreeRegistrations || 0),
+        totalRefunds: (inMetrics?.totalRefunds || 0) + (usMetrics?.totalRefunds || 0),
+        recentTransactions: combinedRecent,
+      };
+
+      return {
+        success: true,
+        message: 'Global registration metrics fetched from cache.',
+        metrics: serializeValue(globalMetrics),
+      };
+    }
+
+    // Try to fetch metrics from KV
+    metrics = await getKV<any>(kvKey, actionName);
+
+    // If not in KV, compute it on-demand and cache it (without blocking)
+    if (!metrics) {
+      console.log(`[${actionName}] Metrics not found in KV (${kvKey}), computing on-demand...`);
+      
+      // Compute in background (don't await)
+      if (eventId) {
+        computeEventRegistrationMetricsAction(eventId).catch(e => 
+          console.error(`[${actionName}] Background sync failed for event ${eventId}:`, e)
+        );
+      } else if (country) {
+        computeCountryRegistrationMetricsAction(country).catch(e =>
+          console.error(`[${actionName}] Background sync failed for country ${country}:`, e)
+        );
+      }
+
+      // Return empty metrics while async computation runs
+      metrics = {
+        totalRegistrations: 0,
+        todaysRegistrations: 0,
+        totalSales: 0,
+        todaysRefunds: 0,
+        totalFreeRegistrations: 0,
+        totalRefunds: 0,
+        recentTransactions: [],
+        message: 'Loading...',
+      };
+    }
+
+    return { 
+      success: true, 
+      message: "Registration metrics fetched from cache.", 
+      metrics: serializeValue(metrics) 
+    };
   } catch (e: any) {
     console.error(`[${actionName}] Error:`, e);
     return { success: false, message: `Server action '${actionName}' failed: ${e.message}` };

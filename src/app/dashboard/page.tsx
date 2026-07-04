@@ -2,7 +2,7 @@
 "use client";
 
 import * as React from "react";
-import { useEffect, useState, useCallback, Suspense, useMemo } from 'react';
+import { useEffect, useState, useCallback, Suspense, useMemo, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { getAthleteRaceHistoryAction } from '@/lib/actions';
 import type { RaceResult, User, EventCalendarEntry } from '@/lib/types';
@@ -19,14 +19,18 @@ import { UserProfile } from "@/components/dashboard/UserProfile";
 import { YearlyRanking } from "@/components/dashboard/YearlyRanking";
 import { YearlyProgressReport } from "@/components/dashboard/YearlyProgressReport";
 import { Separator } from "@/components/ui/separator";
-import { useRouter, useSearchParams } from 'next/navigation';
 import FinishCard from '@/components/dashboard/FinishCard';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import ActiveDeferralCard from "@/components/dashboard/ActiveDeferralCard";
-import AthleteRewardsWidget from "@/components/dashboard/AthleteRewardsWidget";
+import ActiveCancellationCard from "@/components/dashboard/ActiveCancellationCard";
+import BelProgressCard from "@/components/dashboard/BelProgressCard";
+import AthleteRacePhotosCard from '@/components/dashboard/AthleteRacePhotosCard';
+import { ClubAffiliationCard } from "@/components/dashboard/ClubAffiliationCard";
+import LiveTrackingPrivacyCard from '@/components/dashboard/LiveTrackingPrivacyCard';
 import { getCalendarEventsAction } from '@/lib/actions/eventActions';
 import { parseISO, isBefore, startOfDay } from 'date-fns';
 import { normalizeStatus } from '@/lib/utils';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 export const dynamic = "force-dynamic";
 
@@ -57,14 +61,15 @@ function DashboardPageContent() {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [showFinishCardForBookingId, setShowFinishCardForBookingId] = useState<string | null>(null);
   const { toast } = useToast();
+  const lastProcessedPaymentKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
     const fetchRaces = async () => {
-      if (!authLoading && !isAuthenticating && userFromAuth?.uid && userFromAuth.email) {
+      if (!authLoading && !isAuthenticating && userFromAuth?.uid) {
         setDataLoading(true);
         setFetchError(null);
-        getAthleteRaceHistoryAction(userFromAuth.email).then((result) => {
+        getAthleteRaceHistoryAction(userFromAuth.email || '', userFromAuth.uid, userFromAuth.mobile || undefined).then((result) => {
           if (!ignore) {
             if (result.success && result.races) {
               setCurrentUserRaces(result.races);
@@ -84,11 +89,94 @@ function DashboardPageContent() {
 
   useEffect(() => {
     const bookingId = searchParams.get('bookingId');
+    const paymentProcessing = searchParams.get('payment');
+    const registrationType = searchParams.get('type');
+    const stripeSessionId = searchParams.get('session_id');
+    const paymentKey = `${paymentProcessing || ''}|${registrationType || ''}|${stripeSessionId || ''}|${bookingId || ''}`;
+
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    
     if (bookingId) {
       setShowFinishCardForBookingId(bookingId);
       router.replace('/dashboard', { scroll: false });
+    } else if (paymentProcessing === 'processing' && registrationType === 'registration') {
+      // Use sessionStorage as the primary gate — survives ref resets caused by Suspense remounts
+      const ssGateKey = `payment_processed_${paymentKey}`;
+      if (typeof window !== 'undefined' && sessionStorage.getItem(ssGateKey)) {
+        // Already handled in this browser session — just ensure URL is clean
+        router.replace('/dashboard', { scroll: false });
+        return;
+      }
+      if (lastProcessedPaymentKeyRef.current === paymentKey) return;
+
+      lastProcessedPaymentKeyRef.current = paymentKey;
+      // Mark as handled immediately before any async work or navigation
+      if (typeof window !== 'undefined') sessionStorage.setItem(ssGateKey, '1');
+
+      // Immediately clean the URL to prevent RSC re-render loop while async work runs
+      router.replace('/dashboard', { scroll: false });
+
+      let cancelled = false;
+
+      const run = async () => {
+        try {
+          // Stripe flow (session_id available): finalize explicitly as fallback
+          if (stripeSessionId) {
+            let finalized = false;
+
+            for (let attempt = 0; attempt < 4; attempt++) {
+              const response = await fetch('/api/stripe/finalize-registration', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionId: stripeSessionId }),
+              });
+
+              const data = await response.json().catch(() => ({}));
+
+              if (response.ok && data?.success) {
+                finalized = true;
+                break;
+              }
+
+              // 202 = payment/webhook still settling; wait and retry
+              if (response.status === 202 && attempt < 3) {
+                await sleep(1500);
+                continue;
+              }
+
+              // hard failure: break and continue to graceful message
+              break;
+            }
+
+            if (!cancelled) {
+              if (finalized && stripeSessionId && typeof window !== 'undefined') {
+                sessionStorage.setItem(`stripe_finalized_${stripeSessionId}`, '1');
+              }
+              if (finalized) {
+                toast({ title: 'Processing Complete', description: 'Check your email for confirmation details.' });
+              } else {
+                toast({ title: 'Payment Received', description: 'Registration is being finalized. Please refresh in a few seconds.' });
+              }
+            }
+            return;
+          }
+
+          // Razorpay (or old Stripe links without session_id): keep existing behavior
+          await sleep(3000);
+          if (!cancelled) {
+            toast({ title: 'Processing Complete', description: 'Check your email for confirmation details.' });
+          }
+        } catch {
+          if (!cancelled) {
+            toast({ title: 'Payment Received', description: 'Registration is being finalized. Please refresh in a few seconds.' });
+          }
+        }
+      };
+
+      run();
+      return () => { cancelled = true; };
     }
-  }, [searchParams, router]);
+  }, [searchParams, router, toast]);
 
   useEffect(() => {
     setEventsLoading(true);
@@ -133,9 +221,14 @@ function DashboardPageContent() {
             
             <div className="space-y-6 w-full">
                 <UserProfile user={userFromAuth} onUpdate={handleUserUpdate} />
+                <ClubAffiliationCard user={userFromAuth} onUpdate={handleUserUpdate} />
+                <LiveTrackingPrivacyCard />
 
+              <EventSummary races={currentUserRaces} />
                 <RegisteredEvents />
-                <AthleteRewardsWidget />
+                <AthleteRacePhotosCard />
+                <BelProgressCard />
+                <ActiveCancellationCard user={userFromAuth} />
                 <ActiveDeferralCard user={userFromAuth} />
             </div>
             
@@ -146,8 +239,6 @@ function DashboardPageContent() {
                     <AlertDescription>{fetchError}</AlertDescription>
                 </Alert>
             )}
-            
-            <EventSummary races={currentUserRaces} />
             
             <Card className="w-full">
               <CardHeader className="text-left">
@@ -192,7 +283,7 @@ function DashboardPageContent() {
             )}
 
             <div className="mt-6 text-sm text-muted-foreground text-center border-t pt-4">
-                <p>If you think your timing or race data is incorrect, please inform our support tech team at <a href="mailto:info@bergmantri.com" className="text-primary underline hover:no-underline">info@bergmantri.com</a>. They will verify and update accordingly.</p>
+              <p>If you think your timing or race data is incorrect, please inform our support tech team on <a href="https://bergmantri.com/contact-us" className="text-primary underline hover:no-underline">bergmantri.com/contact-us</a> or email to <a href="mailto:info@bergmantri.com" className="text-primary underline hover:no-underline">info@bergmantri.com</a>. They will verify and update accordingly.</p>
             </div>
         </div>
     </div>

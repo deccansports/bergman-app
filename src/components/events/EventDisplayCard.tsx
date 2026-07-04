@@ -13,7 +13,7 @@ import {
 import Image from 'next/image';
 import React, { useState, useEffect } from 'react';
 import CourseMapDialog from './CourseMapDialog';
-import { cn, getCountryFlagEmoji, isValidImageUrl } from '@/lib/utils';
+import { cn, getCountryFlagEmoji, getEventRegistrationButtonState, isValidImageUrl, isTicketHidden, isTicketSaleOpen } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import { format, parseISO } from 'date-fns';
 import { Badge } from '../ui/badge';
@@ -23,6 +23,7 @@ import { getPerformanceRewardAction } from '@/lib/actions/userActions';
 interface EventDisplayCardProps {
   event: EventCalendarEntry;
   layout?: 'vertical' | 'horizontal';
+  activeWaitlistEventIds?: string[];
 }
 
 const DisciplineBadge = ({ type }: { type: string }) => {
@@ -89,7 +90,7 @@ const CourseProfileIcon = ({ type, characteristic }: { type: 'swim' | 'bike' | '
     );
 };
 
-export default function EventDisplayCard({ event, layout = 'vertical' }: EventDisplayCardProps) {
+export default function EventDisplayCard({ event, layout = 'vertical', activeWaitlistEventIds }: EventDisplayCardProps) {
   const { currentUser } = useAuth();
   const [isMapModalOpen, setIsMapModalOpen] = useState(false);
   const [userReward, setUserReward] = useState<{ discount: number; label: string } | null>(null);
@@ -105,22 +106,120 @@ export default function EventDisplayCard({ event, layout = 'vertical' }: EventDi
     }
   }, [currentUser?.uid, event.eventDate]);
 
-  const hasTicketsDefined = event.ticketDefinitions && event.ticketDefinitions.length > 0;
+  const publicVisibleTickets = (event.ticketDefinitions || []).filter((ticket) => {
+    const maybeDeleted = (ticket as any)?.isDeleted || !!(ticket as any)?.deletedAt;
+    return !isTicketHidden(ticket) && !maybeDeleted;
+  });
+
+  const hasTicketsDefined = publicVisibleTickets.length > 0;
+  
+  // Check if ALL public tickets are sold out (ticket-level check takes precedence over event-level)
+  const areAllPublicTicketsSoldOut = hasTicketsDefined && publicVisibleTickets.every((ticket) => ticket.isSoldOut === true);
+  const hasSomeSoldOutTickets = publicVisibleTickets.some((ticket) => ticket.isSoldOut === true);
+  const waitlistLink = event.customSlug ? `/waitlist/${event.customSlug}` : `/waitlist/${event.id}`;
+  const isWaitlistFormActive = activeWaitlistEventIds === undefined ? true : activeWaitlistEventIds.includes(event.id);
+  const showWaitlist = (event.isSoldOut || areAllPublicTicketsSoldOut || hasSomeSoldOutTickets || (event as any).showWaitlistButton) && isWaitlistFormActive;
   const hasValidExternalRegUrl = typeof event.registrationUrl === 'string' && event.registrationUrl.trim() !== '' && event.registrationUrl.startsWith('http');
   const canUseInternalForm = event.customSlug && (hasTicketsDefined || !hasValidExternalRegUrl);
 
-  const registrationLink = canUseInternalForm ? `/event-form/${event.customSlug}` : (hasValidExternalRegUrl ? event.registrationUrl : '#');
-  const isExternalLink = !canUseInternalForm && hasValidExternalRegUrl;
-  const canRegister = registrationLink !== '#';
+  // Check if event has TBD date and if so, verify ticket sale is open
+  const isEventDateTBD = !event.eventDate || event.eventDate === 'TBD';
+  const isTicketSaleOpenNow = hasTicketsDefined && publicVisibleTickets.some(ticket => 
+    isTicketSaleOpen(ticket.openDate, ticket.startTime, ticket.closeDate, ticket.endTime)
+  );
+
+  // Always require at least one ticket to have an open registration window
+  // This ensures tickets with closed end dates don't show as "Registration Open"
+  const shouldAllowRegistration = isTicketSaleOpenNow;
+
+  const registrationLink = shouldAllowRegistration && canUseInternalForm ? `/event-form/${event.customSlug}` : (shouldAllowRegistration && hasValidExternalRegUrl ? event.registrationUrl : '#');
+  const isExternalLink = !canUseInternalForm && hasValidExternalRegUrl && shouldAllowRegistration;
+  const canRegister = registrationLink !== '#' && isTicketSaleOpenNow;
+  const registrationButtonState = getEventRegistrationButtonState(event);
   
   const detailLink = event.customSlug ? `/races/${event.customSlug}` : `/races/${event.id}`;
+
+  // Compute lowest and highest tier/base prices across all public tickets for display
+  const computePriceRange = () => {
+    const prices: number[] = [];
+    for (const ticket of publicVisibleTickets) {
+      // subCategories
+      if (ticket.subCategories && ticket.subCategories.length > 0) {
+        for (const sub of ticket.subCategories) {
+          if (sub.tiers && sub.tiers.length > 0) {
+            for (const t of sub.tiers) {
+              if (t.pricePaisa !== null && t.pricePaisa !== undefined) prices.push(Number(t.pricePaisa));
+            }
+          } else if (sub.pricePaisa) {
+            prices.push(Number(sub.pricePaisa));
+          }
+        }
+      }
+
+      // ticket tiers
+      if ((ticket as any).tiers && (ticket as any).tiers.length > 0) {
+        for (const t of (ticket as any).tiers) {
+          if (t.pricePaisa !== null && t.pricePaisa !== undefined) prices.push(Number(t.pricePaisa));
+        }
+      }
+
+      // base ticket price
+      if ((ticket as any).price !== null && (ticket as any).price !== undefined) {
+        prices.push(Number((ticket as any).price));
+      }
+    }
+
+    if (prices.length === 0) return { min: null as number | null, max: null as number | null };
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    return { min, max };
+  };
+
+  const { min: eventMinPricePaisa, max: eventMaxPricePaisa } = computePriceRange();
+
+  const formatMinorToRupee = (paisa: number | null | undefined) => {
+    if (paisa === null || paisa === undefined) return '';
+    const rupees = Math.round(Number(paisa) / 100);
+    return `₹${rupees.toLocaleString('en-IN')}`;
+  };
+  const formatMinorToRupeeShort = (paisa: number | null | undefined) => {
+    if (paisa === null || paisa === undefined) return '';
+    const rupees = Math.round(Number(paisa) / 100);
+    return `₹${rupees.toLocaleString('en-IN')}`;
+  };
 
   const orangeBtnClass = "w-full bg-orange-600 hover:bg-orange-700 text-white font-black uppercase tracking-wider border-none shadow-lg transition-all duration-300 transform hover:-translate-y-0.5 relative overflow-hidden group/btn h-12";
   const secondaryBtnClass = "flex-1 h-12 text-[10px] sm:text-xs bg-orange-600 hover:bg-orange-700 text-white font-black uppercase tracking-widest border-none transition-all shadow-md shadow-orange-600/20 px-2";
 
   let registrationButton;
-  if (event.isSoldOut) {
-    registrationButton = <Button className="w-full h-12 bg-red-600/20 text-red-500 border-red-500/50" disabled><Ban className="mr-2 h-4 w-4" /> Sold Out</Button>;
+  if (registrationButtonState === 'hide') {
+    registrationButton = null;
+  } else if (registrationButtonState === 'sold_out' || areAllPublicTicketsSoldOut) {
+    registrationButton = (
+      <div className="w-full flex flex-col gap-2">
+        <Button className="w-full h-12 bg-red-600/20 text-red-500 border border-red-500/50" disabled><Ban className="mr-2 h-4 w-4" /> Sold Out</Button>
+        <Button asChild className="w-full h-10 bg-sky-500 hover:bg-sky-400 text-slate-950 font-black uppercase tracking-widest border-none shadow-md shadow-sky-500/30">
+          <Link href={waitlistLink}><Zap className="mr-2 h-4 w-4" /> Join Waitlist</Link>
+        </Button>
+      </div>
+    );
+  } else if (canRegister && showWaitlist) {
+    registrationButton = (
+      <div className="w-full flex flex-col gap-2">
+        <Button asChild className={orangeBtnClass}>
+          <Link href={registrationLink || '#'} target={isExternalLink ? "_blank" : "_self"}>
+            <span className="relative z-10 flex items-center justify-center">
+              <Ticket className="mr-2 h-4 w-4" /> Register Now
+              {isExternalLink && <ExternalLink className="ml-1 h-3 w-3" />}
+            </span>
+            <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] group-hover/btn:translate-x-[100%] transition-transform duration-1000"></span>
+          </Link>
+        </Button>
+        <Button asChild className="w-full h-10 bg-sky-500 hover:bg-sky-400 text-slate-950 font-black uppercase tracking-widest border-none shadow-md shadow-sky-500/30">
+          <Link href={waitlistLink}><Zap className="mr-2 h-4 w-4" /> Join Waitlist</Link>
+        </Button>
+      </div>
+    );
   } else if (canRegister) {
     registrationButton = (
       <Button asChild className={orangeBtnClass}>
@@ -137,7 +236,7 @@ export default function EventDisplayCard({ event, layout = 'vertical' }: EventDi
     registrationButton = <Button className="w-full h-12" disabled><Info className="mr-2 h-4 w-4" /> Unavailable</Button>;
   }
 
-  const hasCourseMaps = event.ticketDefinitions?.some(td => 
+  const hasCourseMaps = publicVisibleTickets.some(td => 
     td.courseMaps?.swimGpxUrl || 
     td.courseMaps?.bikeGpxUrl || 
     td.courseMaps?.runGpxUrl ||
@@ -241,12 +340,7 @@ export default function EventDisplayCard({ event, layout = 'vertical' }: EventDi
                             <Zap className="h-3 w-3 fill-white" /> {userReward.discount}% Loyalty Discount
                         </div>
                     )}
-                    {event.isRaceWeekend && (
-                        <div className="bg-primary text-orange-500 text-[10px] font-black px-3 py-1.5 rounded-tr-2xl uppercase tracking-widest shadow-lg border-t border-r border-primary/50 flex items-center gap-1.5 text-left">
-                            Race Weekend
-                        </div>
-                    )}
-                    {event.isSoldOut ? (
+                    {event.isSoldOut || areAllPublicTicketsSoldOut ? (
                         <div className="bg-red-600 text-white text-[10px] font-black px-3 py-1.5 rounded-tr-2xl uppercase tracking-widest shadow-lg border-t border-r border-red-500 text-left">
                             Sold Out
                         </div>
@@ -267,13 +361,23 @@ export default function EventDisplayCard({ event, layout = 'vertical' }: EventDi
                     </CardTitle>
                     <CardDescription className="text-xs flex flex-wrap items-center gap-3 mt-3 text-muted-foreground font-medium text-left">
                       <CalendarDays className="h-3.5 w-3.5 text-orange-500" />
-                      {event.ticketDefinitions && event.ticketDefinitions.length > 0 ? (
-                        event.ticketDefinitions.map((ticket) => (
-                          <span key={ticket.id} className="flex items-center gap-1">
-                            {ticket.ticketName}
+                      {/* Show lowest price and range when available */}
+                      {eventMinPricePaisa ? (
+                        <div className="flex flex-col">
+                          <span className="text-lg font-black text-orange-600">{formatMinorToRupee(eventMinPricePaisa)}</span>
+                          {eventMaxPricePaisa && eventMaxPricePaisa !== eventMinPricePaisa && (
+                            <span className="text-[10px] text-muted-foreground">{`${formatMinorToRupeeShort(eventMinPricePaisa)} - ${formatMinorToRupeeShort(eventMaxPricePaisa)} range`}</span>
+                          )}
+                        </div>
+                      ) : null}
+                      {publicVisibleTickets.length > 0 ? (
+                        publicVisibleTickets.map((ticket) => (
+                          <span key={ticket.id} className="flex items-center gap-1.5 flex-wrap">
+                            <span className={ticket.isSoldOut ? 'line-through text-slate-500' : ''}>{ticket.ticketName}</span>
                             <span className="text-orange-500">
                               {ticket.eventDate ? format(parseISO(ticket.eventDate), "dd MMM") : "(TBD)"}
                             </span>
+                            {ticket.isSoldOut && <span className="text-[9px] font-black uppercase tracking-wide text-red-400 bg-red-900/20 border border-red-500/40 px-1.5 py-0.5 rounded-full leading-none">SOLD OUT</span>}
                           </span>
                         ))
                       ) : (
@@ -348,12 +452,7 @@ export default function EventDisplayCard({ event, layout = 'vertical' }: EventDi
                         <Zap className="h-3 w-3 fill-white" /> {userReward.discount}% Loyalty Discount
                     </div>
                 )}
-                {event.isRaceWeekend && (
-                    <div className="bg-primary text-orange-500 text-[9px] font-black px-3 py-1.5 rounded-tr-2xl uppercase tracking-widest shadow-lg border-t border-r border-primary/50 flex items-center justify-start text-left">
-                        Race Weekend
-                    </div>
-                )}
-                {event.isSoldOut ? (
+                {event.isSoldOut || areAllPublicTicketsSoldOut ? (
                     <div className="bg-red-600 text-white text-[9px] font-black px-3 py-1.5 rounded-tr-2xl uppercase tracking-widest shadow-lg border-t border-r border-red-500 flex items-center justify-start text-left">
                         Sold Out
                     </div>
@@ -374,13 +473,14 @@ export default function EventDisplayCard({ event, layout = 'vertical' }: EventDi
               </CardTitle>
               <CardDescription className="text-xs flex flex-wrap items-center gap-3 mt-3 text-muted-foreground font-medium text-left">
                 <CalendarDays className="h-3.5 w-3.5 text-orange-500" />
-                {event.ticketDefinitions && event.ticketDefinitions.length > 0 ? (
-                  event.ticketDefinitions.map((ticket) => (
-                    <span key={ticket.id} className="flex items-center gap-1">
-                      {ticket.ticketName}
+                {publicVisibleTickets.length > 0 ? (
+                  publicVisibleTickets.map((ticket) => (
+                    <span key={ticket.id} className="flex items-center gap-1.5 flex-wrap">
+                      <span className={ticket.isSoldOut ? 'line-through text-slate-500' : ''}>{ticket.ticketName}</span>
                       <span className="text-orange-500">
                         {ticket.eventDate ? format(parseISO(ticket.eventDate), "dd MMM") : "(TBD)"}
                       </span>
+                      {ticket.isSoldOut && <span className="text-[9px] font-black uppercase tracking-wide text-red-400 bg-red-900/20 border border-red-500/40 px-1.5 py-0.5 rounded-full leading-none">SOLD OUT</span>}
                     </span>
                   ))
                 ) : (

@@ -9,8 +9,10 @@ import * as z from 'zod';
 import { useToast } from '@/hooks/use-toast';
 import { 
     Mail, Loader2, Send, History, 
-    Search, RefreshCw, TestTube2, Globe, Users, Building
+  Search, RefreshCw, TestTube2, Globe, Users, Building, FileUp,
+    CheckCircle2, XCircle, Clock
 } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
 import { 
     getCalendarEventsAction,
     getCampaignLogsAction,
@@ -40,6 +42,7 @@ const EmailCampaignSchema = z.object({
   excludeRegistered: z.boolean().default(false),
   subject: z.string().min(5, "Subject must be at least 5 characters long."),
   htmlContent: z.string().min(20, "Email content must be at least 20 characters long."),
+  attachmentFile: z.instanceof(File).optional().nullable(),
   year: z.string().default(new Date().getFullYear().toString()),
 });
 
@@ -52,15 +55,26 @@ export default function EmailCampaignsTab() {
   const [activeTab, setActiveTab] = useState('send');
   const [events, setEvents] = useState<EventCalendarEntry[]>([]);
   const [logs, setLogs] = useState<CampaignLogEntry[]>([]);
+  const [logStats, setLogStats] = useState<{ totalSent: number; sentToday: number }>({ totalSent: 0, sentToday: 0 });
   const [isLoadingLogs, setIsLoadingLogs] = useState(true);
   const [isSending, setIsSending] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [testEmail, setTestEmail] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeJob, setActiveJob] = useState<{
+    jobId: string;
+    status: string;
+    progress: number;
+    emailsSent: number;
+    emailsFailed: number;
+    totalRecipients: number;
+    errorMessage?: string | null;
+  } | null>(null);
+  const pollIntervalRef = React.useRef<NodeJS.Timeout | null>(null);
 
   const form = useForm<EmailCampaignFormInput>({
     resolver: zodResolver(EmailCampaignSchema),
-    defaultValues: { targetType: 'event', eventId: '', ticketIds: [], excludeRegistered: false, subject: '', htmlContent: '' },
+    defaultValues: { targetType: 'event', eventId: '', ticketIds: [], excludeRegistered: false, subject: '', htmlContent: '', attachmentFile: null },
   });
 
   const targetType = form.watch('targetType');
@@ -83,7 +97,10 @@ export default function EmailCampaignsTab() {
             getCampaignLogsAction()
         ]);
         if (eRes.success) setEvents(eRes.events || []);
-        if (lRes.success) setLogs(lRes.logs || []);
+      if (lRes.success) {
+        setLogs(lRes.logs || []);
+        setLogStats(lRes.stats || { totalSent: 0, sentToday: 0 });
+      }
     } catch (e) {
         console.error("Fetch failed:", e);
     } finally {
@@ -92,6 +109,27 @@ export default function EmailCampaignsTab() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  const startPolling = useCallback((jobId: string, token: string) => {
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/admin/campaign-job/${jobId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (data.success && data.job) {
+          setActiveJob(prev => ({ ...(prev ?? { jobId, status: 'processing', progress: 0, emailsSent: 0, emailsFailed: 0, totalRecipients: 0 }), ...data.job }));
+          if (data.job.status === 'completed' || data.job.status === 'failed') {
+            if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+            fetchData();
+          }
+        }
+      } catch (e) { /* ignore poll errors */ }
+    };
+    poll();
+    pollIntervalRef.current = setInterval(poll, 3000);
+  }, [fetchData]);
 
   const onSendCampaign = async (data: EmailCampaignFormInput) => {
     if (!firebaseUserFromAuth) return;
@@ -102,22 +140,46 @@ export default function EmailCampaignsTab() {
     }
 
     setIsSending(true);
+    setActiveJob(null);
     try {
         const token = await firebaseUserFromAuth.getIdToken();
+
+        let attachmentData: { filename: string; data: string; type: string } | undefined;
+        if (data.attachmentFile) {
+          const fileContent = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result || ''));
+            reader.onerror = reject;
+            reader.readAsDataURL(data.attachmentFile!);
+          });
+
+          attachmentData = {
+            filename: data.attachmentFile.name,
+            data: fileContent.split(',')[1] || '',
+            type: data.attachmentFile.type || 'application/octet-stream',
+          };
+        }
+
         const res = await fetch('/api/admin/send-campaign', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({
                 ...data,
+                attachmentFile: undefined,
+                attachment: attachmentData,
                 ticketNames: data.ticketIds.map(id => availableTickets.find(t => t.id === id)?.ticketName).join(', '),
-                eventName: selectedEvent?.eventName
+                eventName: selectedEvent?.eventName,
             }),
         });
         const result = await res.json();
         if (res.ok && result.success) {
-            toast({ title: 'Success', description: result.message });
+            toast({ title: '🚀 Campaign Queued', description: result.message });
             form.reset();
-            fetchData();
+            if (result.jobId) {
+                setActiveJob({ jobId: result.jobId, status: 'queued', progress: 0, emailsSent: 0, emailsFailed: 0, totalRecipients: 0 });
+                startPolling(result.jobId, token);
+                setActiveTab('logs');
+            }
         } else {
             toast({ variant: 'destructive', title: 'Error', description: result.message });
         }
@@ -137,8 +199,30 @@ export default function EmailCampaignsTab() {
       return;
     }
 
+    const attachmentFile = form.getValues('attachmentFile');
+    let attachmentData: { filename: string; data: string; type: string } | null = null;
+    if (attachmentFile) {
+      try {
+        const fileContent = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ''));
+          reader.onerror = reject;
+          reader.readAsDataURL(attachmentFile);
+        });
+        attachmentData = {
+          filename: attachmentFile.name,
+          data: fileContent.split(',')[1] || '',
+          type: attachmentFile.type || 'application/octet-stream',
+        };
+      } catch (e) {
+        toast({ variant: 'destructive', title: 'Attachment Error', description: 'Failed to read attachment file.' });
+        setIsSendingTest(false);
+        return;
+      }
+    }
+
     setIsSendingTest(true);
-    const result = await sendTestCampaignEmailAction(testEmail, subject, htmlContent, null);
+    const result = await sendTestCampaignEmailAction(testEmail, subject, htmlContent, attachmentData);
     if (result.success) {
       toast({ title: 'Test Sent', description: `Check your inbox at ${testEmail}` });
     } else {
@@ -155,6 +239,17 @@ export default function EmailCampaignsTab() {
         l.subject?.toLowerCase().includes(lowerTerm)
     );
   }, [logs, searchTerm]);
+
+  const derivedLogStats = useMemo(() => {
+    const successCount = logs.filter((log) => String(log.status || '').toLowerCase() === 'success').length;
+    const failedCount = logs.filter((log) => String(log.status || '').toLowerCase() !== 'success').length;
+    return {
+      totalSent: logStats.totalSent || logs.length,
+      sentToday: logStats.sentToday || 0,
+      successCount,
+      failedCount,
+    };
+  }, [logStats, logs]);
 
   return (
     <div className="space-y-6 text-left">
@@ -267,6 +362,30 @@ export default function EmailCampaignsTab() {
                     </FormItem>
                   )} />
 
+                  <FormField control={form.control} name="attachmentFile" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Attachment (Optional)</FormLabel>
+                      <div className="flex flex-col gap-3">
+                        <Input
+                          type="file"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] || null;
+                            field.onChange(file);
+                          }}
+                          accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png,.gif,.zip"
+                          className="h-10 rounded-xl cursor-pointer"
+                        />
+                        {form.watch('attachmentFile') && (
+                          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2">
+                            <FileUp className="h-4 w-4 text-blue-600" />
+                            <span className="text-xs font-semibold text-blue-700">{form.watch('attachmentFile')?.name}</span>
+                          </div>
+                        )}
+                        <p className="text-[9px] text-muted-foreground">Max size: 15 MB. Supported: PDF, DOC, DOCX, TXT, JPG, PNG, GIF, ZIP</p>
+                      </div>
+                    </FormItem>
+                  )} />
+
                   <div className="p-4 border-t bg-muted/30 rounded-2xl flex flex-col sm:flex-row justify-between items-center gap-4">
                       <div className="w-full sm:w-auto text-left">
                           <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Quick Test:</Label>
@@ -303,19 +422,68 @@ export default function EmailCampaignsTab() {
                     </div>
                 </div>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className="space-y-4 p-4 sm:p-6">
+                {activeJob && (
+                  <div className={`rounded-2xl border p-4 space-y-3 ${
+                    activeJob.status === 'completed' ? 'bg-green-50 border-green-200' :
+                    activeJob.status === 'failed' ? 'bg-red-50 border-red-200' :
+                    'bg-blue-50 border-blue-200 animate-pulse-subtle'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {activeJob.status === 'completed' ? <CheckCircle2 className="h-5 w-5 text-green-600" /> :
+                         activeJob.status === 'failed' ? <XCircle className="h-5 w-5 text-red-600" /> :
+                         <Loader2 className="h-5 w-5 text-blue-600 animate-spin" />}
+                        <span className="font-black uppercase text-xs tracking-widest">
+                          {activeJob.status === 'completed' ? 'Campaign Completed' :
+                           activeJob.status === 'failed' ? 'Campaign Failed' :
+                           activeJob.status === 'queued' ? 'Campaign Queued…' :
+                           'Sending in Background…'}
+                        </span>
+                      </div>
+                      <button onClick={() => setActiveJob(null)} className="text-xs text-muted-foreground hover:text-foreground">✕</button>
+                    </div>
+                    {activeJob.status !== 'queued' && (
+                      <Progress value={activeJob.progress} className="h-2" />
+                    )}
+                    <div className="flex gap-4 text-xs font-bold">
+                      <span>Sent: <span className="text-green-700">{activeJob.emailsSent}</span></span>
+                      <span>Failed: <span className="text-red-600">{activeJob.emailsFailed}</span></span>
+                      {activeJob.totalRecipients > 0 && <span>Total: {activeJob.totalRecipients}</span>}
+                      {activeJob.progress > 0 && <span>{activeJob.progress}%</span>}
+                    </div>
+                    {activeJob.errorMessage && <p className="text-xs text-red-600">{activeJob.errorMessage}</p>}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    {[
+                      { label: 'Total Sent', value: derivedLogStats.totalSent, color: 'text-slate-900' },
+                      { label: 'Sent Today', value: derivedLogStats.sentToday, color: 'text-blue-600' },
+                      { label: 'Successful', value: derivedLogStats.successCount, color: 'text-green-600' },
+                      { label: 'Failed', value: derivedLogStats.failedCount, color: 'text-red-600' },
+                    ].map((stat) => (
+                      <div key={stat.label} className="rounded-2xl border bg-muted/20 p-4 text-left shadow-sm">
+                        <div className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">{stat.label}</div>
+                        <div className={`mt-2 text-2xl font-black ${stat.color}`}>{stat.value}</div>
+                      </div>
+                    ))}
+                </div>
+
+                <div className="overflow-hidden rounded-xl border">
                 <Table>
                     <TableHeader className="bg-muted/30">
                         <TableRow>
                             <TableHead className="font-bold uppercase text-[10px] text-left">Recipient</TableHead>
                             <TableHead className="font-bold uppercase text-[10px] text-left">Subject</TableHead>
+                        <TableHead className="font-bold uppercase text-[10px] text-left">Attachment</TableHead>
                             <TableHead className="font-bold uppercase text-[10px] text-left">Status</TableHead>
                             <TableHead className="text-right font-bold uppercase text-[10px]">Date</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {filteredLogs.length === 0 ? (
-                            <TableRow><TableCell colSpan={4} className="text-center py-12 text-muted-foreground italic">No logs match your filters.</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={5} className="text-center py-12 text-muted-foreground italic">No logs match your filters.</TableCell></TableRow>
                         ) : filteredLogs.map(log => (
                             <TableRow key={log.id} className="hover:bg-muted/5 transition-colors text-left">
                                 <TableCell>
@@ -323,6 +491,11 @@ export default function EmailCampaignsTab() {
                                     <div className="text-[10px] text-muted-foreground lowercase">{log.recipientEmail || ''}</div>
                                 </TableCell>
                                 <TableCell className="max-w-xs truncate text-xs font-medium">{log.subject || ''}</TableCell>
+                          <TableCell>
+                            <Badge variant={log.hasAttachment ? 'default' : 'secondary'} className="text-[9px] uppercase font-black">
+                            {log.hasAttachment ? 'Yes' : 'No'}
+                            </Badge>
+                          </TableCell>
                                 <TableCell><Badge variant={log.status === 'Success' ? 'default' : 'destructive'} className="text-[9px] uppercase font-black">{log.status}</Badge></TableCell>
                                 <TableCell className="text-right text-[10px] text-muted-foreground">
                                     {log.sentAt ? format(parseISO(log.sentAt), 'MMM dd, p') : '—'}
@@ -331,6 +504,7 @@ export default function EmailCampaignsTab() {
                         ))}
                     </TableBody>
                 </Table>
+                </div>
             </CardContent>
           </Card>
         </TabsContent>

@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Loader2, Edit, Trash2, Send, PlusCircle, FileClock, IndianRupee, Save, Info, Mail } from 'lucide-react';
+import { Loader2, Edit, Trash2, Send, PlusCircle, FileClock, IndianRupee, DollarSign, Save, Info, Mail, ShieldCheck } from 'lucide-react';
 import { format, parseISO, addYears, endOfYear } from 'date-fns';
 import {
   getAllDeferralsAction,
@@ -50,6 +50,13 @@ function ServicePricingManager() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
+  const monetaryFields: (keyof ServiceFeeConfig)[] = [
+    'deferralFeePaisa',
+    'deferralFeeUsdCents',
+    'categoryChangeFeePaisa',
+    'categoryChangeFeeUsdCents',
+  ];
+
   useEffect(() => {
     getServiceFeesAction().then(res => {
       if (res.success && res.fees) setFees(res.fees);
@@ -59,8 +66,9 @@ function ServicePricingManager() {
 
   const handleUpdateFee = (category: keyof GlobalServiceFees, field: keyof ServiceFeeConfig, value: string) => {
     if (!fees) return;
-    const numValue = Math.round(parseFloat(value) * 100);
-    if (isNaN(numValue)) return;
+    const parsed = parseFloat(value);
+    if (isNaN(parsed)) return;
+    const numValue = monetaryFields.includes(field) ? Math.round(parsed * 100) : Math.round(parsed);
     setFees({
       ...fees,
       [category]: { ...fees[category], [field]: numValue }
@@ -83,7 +91,7 @@ function ServicePricingManager() {
   return (
     <Card className="border-primary/20">
       <CardHeader className="p-4">
-        <CardTitle className="flex items-center gap-2 text-sm font-black uppercase text-left leading-none"><IndianRupee className="h-4 w-4 text-primary"/>Service Pricing Matrix</CardTitle>
+        <CardTitle className="flex items-center gap-2 text-sm font-black uppercase text-left leading-none"><IndianRupee className="h-4 w-4 text-primary"/><DollarSign className="h-4 w-4 text-green-600 -ml-1"/>Service Pricing Matrix</CardTitle>
         <CardDescription className="text-left text-[10px] uppercase font-bold mt-1">Configure processing fees per race type.</CardDescription>
       </CardHeader>
       <CardContent className="p-4 pt-0 text-left">
@@ -93,7 +101,10 @@ function ServicePricingManager() {
               <TableRow className="h-10 text-[10px] font-black uppercase">
                 <TableHead>Race Type</TableHead>
                 <TableHead className="text-right">Def. Fee (₹)</TableHead>
+                <TableHead className="text-right">Def. Fee ($)</TableHead>
                 <TableHead className="text-right">Cat. Chg Fee (₹)</TableHead>
+                <TableHead className="text-right">Cat. Chg Fee ($)</TableHead>
+                <TableHead className="text-right">Min Age (Yrs)</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -111,9 +122,37 @@ function ServicePricingManager() {
                   <TableCell className="text-right">
                     <Input 
                       type="number" 
+                      step="0.01"
+                      className="w-20 ml-auto h-7 text-right font-mono text-xs border-green-300 focus-visible:ring-green-400" 
+                      value={(fees![cat]?.deferralFeeUsdCents || 0) / 100}
+                      onChange={e => handleUpdateFee(cat, 'deferralFeeUsdCents', e.target.value)}
+                    />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Input 
+                      type="number" 
                       className="w-20 ml-auto h-7 text-right font-mono text-xs" 
                       value={(fees![cat]?.categoryChangeFeePaisa || 0) / 100}
                       onChange={e => handleUpdateFee(cat, 'categoryChangeFeePaisa', e.target.value)}
+                    />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Input 
+                      type="number" 
+                      step="0.01"
+                      className="w-20 ml-auto h-7 text-right font-mono text-xs border-green-300 focus-visible:ring-green-400" 
+                      value={(fees![cat]?.categoryChangeFeeUsdCents || 0) / 100}
+                      onChange={e => handleUpdateFee(cat, 'categoryChangeFeeUsdCents', e.target.value)}
+                    />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Input
+                      type="number"
+                      step="1"
+                      min="0"
+                      className="w-20 ml-auto h-7 text-right font-mono text-xs"
+                      value={fees![cat]?.minimumAgeYears ?? (cat === 'Swimming' ? 9 : 16)}
+                      onChange={e => handleUpdateFee(cat, 'minimumAgeYears', e.target.value)}
                     />
                   </TableCell>
                 </TableRow>
@@ -246,6 +285,7 @@ export default function DeferralsTab() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="bg-muted/50 p-1 rounded-xl h-9">
           <TabsTrigger value="management" className="gap-2 font-bold uppercase text-[10px] tracking-widest h-7"><FileClock className="h-3.5 w-3.5"/>Management</TabsTrigger>
+          <TabsTrigger value="audit" className="gap-2 font-bold uppercase text-[10px] tracking-widest h-7"><ShieldCheck className="h-3.5 w-3.5"/>Audit Trail</TabsTrigger>
           <TabsTrigger value="pricing" className="gap-2 font-bold uppercase text-[10px] tracking-widest h-7"><IndianRupee className="h-3.5 w-3.5"/>Service Pricing</TabsTrigger>
         </TabsList>
 
@@ -322,6 +362,77 @@ export default function DeferralsTab() {
         <TabsContent value="pricing" className="animate-in fade-in duration-500">
           <ServicePricingManager />
         </TabsContent>
+
+        <TabsContent value="audit" className="animate-in fade-in duration-500">
+          <Card className="border-none shadow-xl">
+            <CardHeader className="p-4 border-b">
+              <CardTitle className="flex items-center gap-2 text-lg font-black uppercase tracking-tight italic"><ShieldCheck className="h-5 w-5 text-primary"/>Deferral Consumption Audit</CardTitle>
+              <CardDescription className="text-[10px] font-bold uppercase">Which participant used each deferral credit and where it was applied</CardDescription>
+            </CardHeader>
+            <CardContent className="p-4">
+              <div className="rounded-xl border overflow-x-auto max-h-[65vh] shadow-inner">
+                <Table>
+                  <TableHeader className="bg-muted/30 sticky top-0 z-10">
+                    <TableRow className="h-10 text-[10px] font-black uppercase">
+                      <TableHead className="pl-4 text-left">Athlete</TableHead>
+                      <TableHead className="text-left">From Race</TableHead>
+                      <TableHead className="text-left">Status</TableHead>
+                      <TableHead className="text-left">Used For Race</TableHead>
+                      <TableHead className="text-left">Used Ticket</TableHead>
+                      <TableHead className="text-right pr-4">Credit (₹)</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isLoading ? (
+                      <TableRow><TableCell colSpan={6} className="text-center p-8"><Loader2 className="animate-spin mx-auto text-primary"/></TableCell></TableRow>
+                    ) : requests.length === 0 ? (
+                      <TableRow><TableCell colSpan={6} className="text-center py-10 text-muted-foreground italic">No deferral records found.</TableCell></TableRow>
+                    ) : [...requests].sort((a, b) => {
+                        // Consumed/Used first, then pending, then expired
+                        const order = (s: string) => s === 'Used' || s === 'Confirmed' ? 0 : s === 'Pending' || s === 'Pending Ticket Selection' ? 1 : 2;
+                        return order(a.status) - order(b.status);
+                      }).map(d => {
+                      const isConsumed = d.status === 'Used' || d.status === 'Confirmed';
+                      const isRevoked = d.status === 'RevokedByAdmin' || d.status === 'Expired';
+                      return (
+                        <TableRow key={d.id} className={`hover:bg-muted/10 text-left h-14 ${isConsumed ? 'bg-green-50/40' : isRevoked ? 'bg-red-50/30' : ''}`}>
+                          <TableCell className="pl-4">
+                            <div className="font-black text-sm uppercase leading-tight">{d.participantName}</div>
+                            <div className="text-[10px] text-muted-foreground lowercase">{d.participantEmail}</div>
+                          </TableCell>
+                          <TableCell>
+                            <p className="font-bold uppercase tracking-tight text-xs">{d.originalEventName}</p>
+                            <p className="text-[9px] font-black text-slate-400 uppercase">{d.deferralDate || '—'}</p>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant={statusVariantMap[d.status] || 'secondary'} className="text-[9px] uppercase font-black px-2 h-5">{d.status}</Badge>
+                          </TableCell>
+                          <TableCell>
+                            {isConsumed && d.deferredToEventName ? (
+                              <p className="font-bold uppercase tracking-tight text-xs text-green-700">{d.deferredToEventName}</p>
+                            ) : isRevoked ? (
+                              <span className="text-[10px] text-muted-foreground italic">Revoked / Expired</span>
+                            ) : (
+                              <span className="text-[10px] text-muted-foreground italic">Not yet used</span>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {isConsumed && d.deferredToTicketName ? (
+                              <Badge variant="outline" className="text-[9px] uppercase font-black">{d.deferredToTicketName}</Badge>
+                            ) : <span className="text-muted-foreground">—</span>}
+                          </TableCell>
+                          <TableCell className="text-right pr-4 font-black text-primary">
+                            ₹{((d.estimatedOriginalBasePricePaisa || 0) / 100).toLocaleString('en-IN')}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* EDIT MODAL */}
@@ -351,6 +462,40 @@ export default function DeferralsTab() {
                                 </Select>
                             </FormItem>)}/>
                             <FormField control={editForm.control} name="expiryDate" render={({field})=>(<FormItem className="text-left"><FormLabel className="text-[10px] font-black uppercase text-muted-foreground text-left">Expiry Date</FormLabel><Input type="date" value={field.value instanceof Date ? format(field.value, 'yyyy-MM-dd') : ''} onChange={e => field.onChange(parseISO(e.target.value))} className="rounded-xl h-10 font-bold" disabled={isSubmitting}/></FormItem>)}/>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-left">
+                            <FormField
+                              control={editForm.control}
+                              name="deferredToEventId"
+                              render={({ field }) => (
+                                <FormItem className="text-left">
+                                  <FormLabel className="text-[10px] font-black uppercase text-muted-foreground text-left">Deferred To Event</FormLabel>
+                                  <Select
+                                    onValueChange={field.onChange}
+                                    value={field.value || 'NONE'}
+                                    disabled={isSubmitting}
+                                  >
+                                    <FormControl>
+                                      <SelectTrigger className="rounded-xl h-10 font-bold text-left text-xs">
+                                        <SelectValue placeholder="Select destination event..." />
+                                      </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent className="text-left">
+                                      <SelectItem value="NONE" className="text-xs">Not Assigned</SelectItem>
+                                      {events.map((e) => (
+                                        <SelectItem key={e.id} value={e.id} className="text-xs">
+                                          {e.eventName}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                  <FormDescription className="text-[10px] text-muted-foreground text-left">
+                                    Select the event where this deferral credit was applied.
+                                  </FormDescription>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-left">
                             <FormField control={editForm.control} name="estimatedOriginalBasePricePaisa" render={({field})=>(<FormItem className="text-left"><FormLabel className="text-[10px] font-black uppercase text-muted-foreground text-left">Credit Value (Paisa)</FormLabel><Input type="number" {...field} value={field.value ?? ''} onChange={e => field.onChange(parseInt(e.target.value))} className="rounded-xl h-10 font-black text-primary" disabled={isSubmitting}/></FormItem>)}/>

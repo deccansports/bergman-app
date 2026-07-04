@@ -6,6 +6,11 @@ import { serializeValue, toIsoStringSafe } from '@/lib/utils';
 import type { RegistrationAttempt } from '@/lib/types';
 import { FieldPath, Timestamp } from 'firebase-admin/firestore';
 
+function isParticipantActiveStatus(status: any): boolean {
+  const raw = String(status || '').trim().toLowerCase();
+  return !(raw === 'cancelled' || raw === 'refunded' || raw === 'inactive');
+}
+
 export async function findBrokenRegistrations(): Promise<{
   success: boolean;
   message: string;
@@ -67,6 +72,9 @@ export async function findBrokenRegistrations(): Promise<{
       const attempt = doc.data() as RegistrationAttempt;
       
       let participantExists = false;
+      let matchedParticipantId: string | null = null;
+      let matchedBookingId: string | null = null;
+      let matchedBibNumber: string | null = null;
       // If we have a transactionId, that's the most reliable way to check for an existing participant.
       if (attempt.transactionId && attempt.eventId) {
         const participantSnap = await adminDb.collection("events")
@@ -77,6 +85,35 @@ export async function findBrokenRegistrations(): Promise<{
           .get();
         if (!participantSnap.empty) {
             participantExists = true;
+            matchedParticipantId = participantSnap.docs[0].id;
+            matchedBookingId = String((participantSnap.docs[0].data() as any)?.bookingId || '') || null;
+            matchedBibNumber = String((participantSnap.docs[0].data() as any)?.bibNumber || '') || null;
+        }
+      }
+
+      // Fallback for manually fixed registrations where transactionId wasn't copied to participant.
+      if (!participantExists && attempt.eventId && attempt.email) {
+        const normalizedEmail = String(attempt.email || '').trim().toLowerCase();
+        const byEmailSnap = await adminDb.collection('events')
+          .doc(attempt.eventId)
+          .collection('participants')
+          .where('email', '==', normalizedEmail)
+          .limit(25)
+          .get();
+
+        const matched = byEmailSnap.docs.find((doc) => {
+          const p = doc.data() as any;
+          const sameTicket = String(p?.ticketId || '') === String(attempt.ticketId || '');
+          const sameSubCategory = String(p?.selectedSubCategory || '') === String((attempt as any)?.selectedSubCategory || '');
+          const isActive = isParticipantActiveStatus(p?.ticketStatus);
+          return sameTicket && sameSubCategory && isActive;
+        });
+
+        if (matched) {
+          participantExists = true;
+          matchedParticipantId = matched.id;
+          matchedBookingId = String((matched.data() as any)?.bookingId || '') || null;
+          matchedBibNumber = String((matched.data() as any)?.bibNumber || '') || null;
         }
       }
 
@@ -90,6 +127,19 @@ export async function findBrokenRegistrations(): Promise<{
           updatedAt: toIsoStringSafe(attempt.updatedAt) || undefined,
           status: attempt.status,
         });
+      } else if (String(attempt.status || '') !== 'Completed') {
+        await adminDb.collection('registrationAttempts').doc(doc.id).set({
+          status: 'Completed',
+          participantId: matchedParticipantId,
+          bookingId: matchedBookingId,
+          bibNumber: matchedBibNumber,
+          duplicateSuppressed: true,
+          manualRegistrationExists: true,
+          lastError: '',
+          updatedAt: Timestamp.now(),
+          autoReconciledBy: 'findBrokenRegistrations',
+          autoReconciledAt: Timestamp.now(),
+        }, { merge: true });
       }
     }
 

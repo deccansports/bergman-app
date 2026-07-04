@@ -4,8 +4,19 @@ import { getAuthInstance, getFirestoreInstance } from '@/lib/firebaseAdmin';
 import { syncPaymentToZohoAction } from '@/lib/actions/invoiceActions';
 import { FieldPath } from 'firebase-admin/firestore';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 export async function POST(request: NextRequest) {
   const actionName = '[API /admin/zoho/retry-sync]';
+  
+  // Safety check for Firebase configuration
+  if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+    return NextResponse.json(
+      { success: false, message: 'Firebase not configured', status: 'unavailable' },
+      { status: 503 }
+    );
+  }
   
   try {
     const authHeader = request.headers.get('Authorization');

@@ -11,9 +11,44 @@ import { _updateUserFromParticipantData } from '@/lib/actions/userActions';
 import { parse as parseDateFns, isValid as isDateValid } from 'date-fns';
 import { startJob, updateJobProgress } from '@/lib/jobManager';
 import { assignNextAvailableBib } from '@/lib/actions/bibActions';
-import { calculateAgeGroup, serializeValue } from '@/lib/utils';
-import { runDataSyncAction } from '@/lib/actions/dataSyncActions';
+import { calculateAgeGroup, serializeValue, normalizeToE164 } from '@/lib/utils';
+import { runDataSyncAction, _mirrorParticipantToKV } from '@/lib/actions/dataSyncActions';
 import { NO_CLUB_SELECTED_VALUE, GST_PERCENTAGE } from '@/lib/constants';
+import { getEventParticipants } from '@/lib/dataLayerOptimized';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+function normalizeBulkMobileToIndia(raw?: string | null, country?: string | null): string | undefined {
+  if (!raw) return undefined;
+
+  const cleaned = String(raw).trim().replace(/\D/g, '');
+  if (!cleaned) return undefined;
+
+  const normalizedCountry = String(country || '').trim().toLowerCase();
+  const isIndia =
+    !normalizedCountry ||
+    normalizedCountry === 'india' ||
+    normalizedCountry === 'in' ||
+    normalizedCountry === 'bharat';
+
+  // For bulk uploads (default India): force +91 for local mobile patterns.
+  if (isIndia) {
+    if (cleaned.length === 12 && cleaned.startsWith('91')) return `+${cleaned}`;
+    if (cleaned.length === 11 && cleaned.startsWith('0') && /^[6-9]/.test(cleaned.slice(1))) return `+91${cleaned.slice(1)}`;
+    if (cleaned.length === 10 && /^[6-9]/.test(cleaned)) return `+91${cleaned}`;
+    if (cleaned.length === 11 && /^[6-9]/.test(cleaned)) return `+91${cleaned.slice(0, 10)}`;
+
+    // If extra digits are present, try last 10 first, then first 10.
+    const last10 = cleaned.slice(-10);
+    if (last10.length === 10 && /^[6-9]/.test(last10)) return `+91${last10}`;
+    const first10 = cleaned.slice(0, 10);
+    if (first10.length === 10 && /^[6-9]/.test(first10)) return `+91${first10}`;
+  }
+
+  // Non-India fallback to generic E.164 normalization.
+  return normalizeToE164(raw);
+}
 
 async function generateUniqueBookingId(
   eventParticipantsRef: CollectionReference
@@ -84,11 +119,21 @@ async function processUploadJob(jobId: string, eventId: string, assignedTicketId
     
     const hasBibColumn = jsonData.length > 0 && ('BIB NO' in jsonData[0] || 'BIB Number' in jsonData[0]);
 
-    const allParticipantsSnapshot = await eventRef.collection('participants').select('bibNumber', 'email').get();
+    const allParticipantsSnapshot = await getEventParticipants(eventId);
     const existingBibs = new Map<string, string>(); 
-    allParticipantsSnapshot.forEach(doc => {
-      const bib = doc.data().bibNumber;
-      const email = doc.data().email;
+    const isTerminalStatus = (participant: any) => {
+      const combined = [
+        participant?.ticketStatus,
+        participant?.registrationStatus,
+        participant?.status,
+        participant?.paymentStatus,
+      ].map((s) => String(s || '').trim().toLowerCase()).filter(Boolean).join(' ');
+      return combined.includes('cancel') || combined.includes('defer') || combined.includes('refund') || combined.includes('inactive');
+    };
+    allParticipantsSnapshot.forEach((doc: any) => {
+      if (isTerminalStatus(doc)) return;
+      const bib = doc?.bibNumber;
+      const email = doc?.email;
       if (bib) {
         existingBibs.set(String(bib), email);
       }
@@ -105,6 +150,15 @@ async function processUploadJob(jobId: string, eventId: string, assignedTicketId
             }
         }
         return null;
+    };
+
+    const normalizeOptionalUrl = (val?: string | null): string | null => {
+      if (!val) return null;
+      const trimmed = String(val).trim();
+      if (!trimmed) return null;
+      const lower = trimmed.toLowerCase();
+      if (['na', 'n/a', 'null', 'undefined', '-'].includes(lower)) return null;
+      return trimmed;
     };
 
 
@@ -132,6 +186,9 @@ async function processUploadJob(jobId: string, eventId: string, assignedTicketId
 
             const userQuery = await adminDb.collection('users').where('email', '==', email).limit(1).get();
             const existingUserProfile: User | null = userQuery.empty ? null : userQuery.docs[0].data() as User;
+            const idProofFromSheet = normalizeOptionalUrl(getVal(row, 'Identity Proof', ['ID Proof']));
+            const idProofFromUser = normalizeOptionalUrl((existingUserProfile as any)?.idProofUrl || null);
+            const resolvedIdProofUrl = idProofFromSheet || idProofFromUser || undefined;
             
             let bibNumber: string | null = null;
             let bibWarningMessage = '';
@@ -203,9 +260,19 @@ async function processUploadJob(jobId: string, eventId: string, assignedTicketId
 
             const finalEventDate = ticketData.eventDate || eventData.eventDate || null;
 
+            const countryFromSheet = getVal(row, 'Country') || undefined;
+            const normalizedMobile = normalizeBulkMobileToIndia(
+              getVal(row, 'Phone Number', ['Mobile', 'Contact', 'Phone']),
+              countryFromSheet
+            );
+            const normalizedEmergencyMobile = normalizeBulkMobileToIndia(
+              getVal(row, 'Emergency Contact Number', ['Emergency Contact']),
+              countryFromSheet
+            );
+
             const potentialPayload: Record<string, any> = {
                 name, email,
-                mobile: getVal(row, 'Phone Number', ['Mobile', 'Contact', 'Phone']) || undefined,
+                mobile: normalizedMobile,
                 gender: getVal(row, 'Gender', ['Sex']) || undefined,
                 transactionId: getVal(row, 'Payment ID', ['Transaction ID']) || `BULK_UPLOAD_${Date.now()}`,
                 amountPaidPaisa,
@@ -218,16 +285,16 @@ async function processUploadJob(jobId: string, eventId: string, assignedTicketId
                 dob: dob,
                 eventDate: finalEventDate,
                 bloodGroup: getVal(row, 'Blood Group') || undefined,
-                emergencyContactNumber: getVal(row, 'Emergency Contact Number', ['Emergency Contact']) || undefined,
+                emergencyContactNumber: normalizedEmergencyMobile,
                 address: getVal(row, 'Address') || undefined,
                 city: getVal(row, 'City') || undefined,
                 pincode: getVal(row, 'Pincode', ['Zip Code']) || undefined,
                 state: getVal(row, 'State') || undefined,
-                country: getVal(row, 'Country') || undefined,
+                country: countryFromSheet,
                 tshirtSize: getVal(row, 'T-shirt Size', ['T Shirt Size', 'Size']) || undefined,
                 gstPaid: (amountPaidPaisa > basePricePaisa) ? 'Yes' : 'No',
                 previousDeferralDetails: previousDeferralDetailsPayload,
-                idProofUrl: getVal(row, 'Identity Proof', ['ID Proof']) || undefined,
+                idProofUrl: resolvedIdProofUrl,
                 digitalSignatureName: getVal(row, 'Digital Signature (Name)', ['Signature']) || name,
                 agreedRules: toBoolean(getVal(row, 'Rules & Regulations', ['Agreed to Rules'])),
                 agreedWaiver: toBoolean(getVal(row, 'Waiver', ['Agreed to Waiver'])),
@@ -260,6 +327,24 @@ async function processUploadJob(jobId: string, eventId: string, assignedTicketId
                 }
                 
                 await existingDoc.ref.update(updatePayload);
+
+                // Immediate KV sync for this participant (do not wait for end-of-job sync)
+                try {
+                  const existingData = existingDoc.data() as Record<string, any>;
+                  const participantForKv = serializeValue({
+                    id: existingDoc.id,
+                    ...existingData,
+                    ...potentialPayload,
+                    bookingId: finalBookingId,
+                    eventId,
+                    eventName: eventData.eventName,
+                    updatedAt: new Date().toISOString(),
+                  }) as EventParticipant;
+                  await _mirrorParticipantToKV(participantForKv);
+                } catch (kvSyncError: any) {
+                  console.warn(`${actionName} Immediate KV sync warning (update row ${rowIndex}):`, kvSyncError?.message || kvSyncError);
+                }
+
                 results.push({ row: rowIndex, email, name, status: 'success', detail: `Updated ${name} (BIB: ${bibNumber || 'TBD'}). ${bibWarningMessage}`.trim() });
             } else {
                 const createPayload: Record<string, any> = {
@@ -275,7 +360,25 @@ async function processUploadJob(jobId: string, eventId: string, assignedTicketId
                 finalBookingId = getVal(row, 'Booking Id') || await generateUniqueBookingId(participantsCol);
                 createPayload.bookingId = finalBookingId;
 
-                await participantsCol.add(createPayload);
+                const createdRef = await participantsCol.add(createPayload);
+
+                // Immediate KV sync for this participant (do not wait for end-of-job sync)
+                try {
+                  const participantForKv = serializeValue({
+                    id: createdRef.id,
+                    ...potentialPayload,
+                    bookingId: finalBookingId,
+                    eventId,
+                    eventName: eventData.eventName,
+                    registeredAt: registrationTime.toISOString(),
+                    createdAt: registrationTime.toISOString(),
+                    updatedAt: registrationTime.toISOString(),
+                  }) as EventParticipant;
+                  await _mirrorParticipantToKV(participantForKv);
+                } catch (kvSyncError: any) {
+                  console.warn(`${actionName} Immediate KV sync warning (create row ${rowIndex}):`, kvSyncError?.message || kvSyncError);
+                }
+
                 results.push({ row: rowIndex, email, name, status: 'success', detail: `Created ${name} (BIB: ${bibNumber || 'TBD'}). Booking ID: ${finalBookingId}. ${bibWarningMessage}`.trim() });
             }
 
@@ -348,9 +451,21 @@ async function processUploadJob(jobId: string, eventId: string, assignedTicketId
         if (i % 5 === 0) await checkpoint(((i + 1) / totalRows) * 100, `Processed ${i + 1} of ${totalRows} rows...`);
     }
     
-    revalidatePath('/admin/dashboard');
-    await runDataSyncAction('registrations', eventId);
-    await updateJobProgress(jobId, { status: 'completed', progress: 100, results: serializeValue(results), message: `Processing complete. Success: ${successCount}, Failed: ${errorCount}.` });
+    const completionMessage = `Processing complete. Success: ${successCount}, Failed: ${errorCount}.`;
+    await updateJobProgress(jobId, {
+      status: 'completed',
+      progress: 100,
+      results: serializeValue(results),
+      message: completionMessage,
+    });
+
+    // Post-processing should not block user-facing completion state.
+    try {
+      revalidatePath('/admin/dashboard');
+      await runDataSyncAction('registrations', eventId);
+    } catch (postProcessError: any) {
+      console.error(`[${actionName}] Post-processing warning for job ${jobId}:`, postProcessError);
+    }
 
   } catch (error: any) {
     console.error(`[${actionName}] Critical error for job ${jobId}:`, error);
@@ -361,6 +476,15 @@ async function processUploadJob(jobId: string, eventId: string, assignedTicketId
 
 export async function POST(request: Request) {
   const actionName = '[API /bulk-upload-participants]';
+  
+  // Safety check for Firebase configuration
+  if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+    return NextResponse.json(
+      { success: false, message: 'Firebase not configured', status: 'unavailable' },
+      { status: 503 }
+    );
+  }
+  
   try {
     const formData = await request.formData();
     const eventId = formData.get('eventId') as string;

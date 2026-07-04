@@ -127,13 +127,18 @@ export async function retryFailedZohoSyncsAction(eventId: string) {
   try {
     console.log(`[Zoho Retry] Finding failed syncs for event: ${eventId}`);
     
-    const query = await db
-      .collection('events')
-      .doc(eventId)
-      .collection('participants')
-      .where('zohoSynced', '==', false)
-      .limit(10)
-      .get();
+    // Query both zohoSynced===false and zohoSyncPending===true to catch all unsynced registrations.
+    const [unsyncedSnap, pendingSnap] = await Promise.all([
+      db.collection('events').doc(eventId).collection('participants')
+        .where('zohoSynced', '==', false).limit(20).get(),
+      db.collection('events').doc(eventId).collection('participants')
+        .where('zohoSyncPending', '==', true).limit(20).get(),
+    ]);
+
+    // Deduplicate by doc ID
+    const docMap = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
+    for (const doc of [...unsyncedSnap.docs, ...pendingSnap.docs]) docMap.set(doc.id, doc);
+    const query = { docs: Array.from(docMap.values()) };
 
     console.log(`[Zoho Retry] Found ${query.docs.length} participants with sync errors`);
 

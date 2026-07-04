@@ -1,9 +1,21 @@
 // src/app/api/admin/retry-registration/route.ts
 import { NextResponse } from "next/server";
+import { FieldValue } from 'firebase-admin/firestore';
 import { finalizeRegistration } from "@/lib/registrationEngine/finalizeRegistration";
 import { getAuthInstance, getFirestoreInstance } from '@/lib/firebaseAdmin';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 export async function POST(req: Request) {
+  // Safety check for Firebase configuration
+  if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+    return NextResponse.json(
+      { success: false, message: 'Firebase not configured', status: 'unavailable' },
+      { status: 503 }
+    );
+  }
+  
   try {
     // Admin check
     const authHeader = req.headers.get('Authorization');
@@ -25,7 +37,44 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, message: "Order ID required" }, { status: 400 });
     }
 
-    const result = await finalizeRegistration(orderId);
+    const attemptRef = adminDb.collection('registrationAttempts').doc(orderId);
+    const attemptSnap = await attemptRef.get();
+    if (!attemptSnap.exists) {
+      return NextResponse.json({ success: false, message: 'Registration attempt not found.' }, { status: 404 });
+    }
+
+    const attempt = attemptSnap.data() as any;
+    const amountPaidPaisa = Number(attempt?.amountPaidPaisa || 0);
+    const hasCapturedPaymentRef = !!String(attempt?.transactionId || '').trim();
+    const currentStatus = String(attempt?.status || '').trim();
+    const isPaymentCapturedStatus = currentStatus === 'PaymentCaptured' || currentStatus === 'Completed';
+
+    // Safety: for paid attempts, do not allow manual finalization retry without captured payment evidence.
+    if (amountPaidPaisa > 0 && !hasCapturedPaymentRef && !isPaymentCapturedStatus) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: 'Retry blocked: paid attempt has no captured payment reference. Use payment verification first.',
+        },
+        { status: 400 }
+      );
+    }
+
+    // If admin is retrying a previously failed attempt that already has a payment ID,
+    // restore the attempt to PaymentCaptured before calling finalization. This lets the
+    // normal duplicate/manual participant cross-check inside finalizeRegistration run.
+    if (hasCapturedPaymentRef && currentStatus !== 'Completed') {
+      await attemptRef.set({
+        status: 'PaymentCaptured',
+        specificPaymentMethod: String(attempt?.specificPaymentMethod || '').trim() || 'Online',
+        lastError: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp(),
+        adminRetryPreparedAt: FieldValue.serverTimestamp(),
+        adminRetryPreparedBy: decodedToken.uid,
+      }, { merge: true });
+    }
+
+    const result = await finalizeRegistration(orderId, 'admin.retry-registration');
 
     return NextResponse.json(result);
   } catch (error: any) {

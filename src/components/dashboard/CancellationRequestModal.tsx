@@ -112,6 +112,12 @@ const CancellationRequestModal: React.FC<CancellationRequestModalProps> = ({
     );
   }, [eventDetail]);
 
+  const isUsdPayment = (eventDetail?.currency || 'INR') === 'USD';
+  const paymentMethodText = String(eventDetail?.paymentMethod || '').toLowerCase();
+  const isRazorpayOnlinePayment =
+    paymentMethodText.includes('razorpay') ||
+    String(eventDetail?.paymentId || '').startsWith('pay_');
+
   useEffect(() => {
     if (isOpen && eventDetail) {
       bankDetailsForm.reset(); 
@@ -134,6 +140,9 @@ const CancellationRequestModal: React.FC<CancellationRequestModalProps> = ({
       return;
     }
 
+    const currency = eventDetail.currency || 'INR';
+    const isUsd = currency === 'USD';
+
     setIsLoading(true);
     try {
       const result = await processCancellationRequestAction(
@@ -144,11 +153,12 @@ const CancellationRequestModal: React.FC<CancellationRequestModalProps> = ({
         eventDetail.eventName,
         eventDetail.eventDate!, 
         eventDetail.amountPaidPaisa || 0, // Use amountPaidPaisa for the record
-        bankData || null, 
+        (isUsd || isRazorpayOnlinePayment) ? null : (bankData || null),
         refundDetails.refundAmountPaisa,
         refundDetails.policyApplied,
-        eventDetail.gstPaid || null,
-        eventDetail.processingFeePaidPaisa ?? null
+        isUsd ? 'No' : (eventDetail.gstPaid || null),
+        isUsd ? null : (eventDetail.processingFeePaidPaisa ?? null),
+        currency
       );
 
       if (result.success) {
@@ -230,19 +240,44 @@ const CancellationRequestModal: React.FC<CancellationRequestModalProps> = ({
 
         <div className="py-4 space-y-4 max-h-[65vh] overflow-y-auto pr-2 custom-scrollbar">
           {renderCountdown()}
+          {(() => {
+            const isUsd = isUsdPayment;
+            const currencySymbol = isUsd ? '$' : '₹';
+            const fmtAmount = (paisa: number) => `${currencySymbol}${(paisa / 100).toFixed(2)}`;
+            return (
+              <>
           <Alert variant="default" className="bg-yellow-50 border-yellow-200 text-yellow-700 text-xs">
             <AlertTriangle className="h-4 w-4 !text-yellow-600" />
             <AlertTitle className="text-yellow-700 font-semibold">Please Review Carefully</AlertTitle>
             <p>Ensure all details are correct before submitting. Cancellation is final once processed.</p>
-            <p className="mt-1">Original amount paid (incl. GST & fees if any): <strong>₹{((eventDetail.amountPaidPaisa || 0) / 100).toFixed(2)}</strong></p>
+            <p className="mt-1">Original amount paid (incl. {isUsd ? 'Stripe fees' : 'GST & fees'} if any): <strong>{fmtAmount(eventDetail.amountPaidPaisa || 0)}</strong></p>
             <p className="font-semibold mt-1">Policy: {refundDetails.policyApplied}</p>
-            <p className="font-bold text-base mt-1">Calculated Refund (Excl. GST/Fees): ₹{((refundDetails.refundAmountPaisa || 0) / 100).toFixed(2)} ({refundDetails.percentage}%)</p>
+            <p className="font-bold text-base mt-1">Calculated Refund (Excl. {isUsd ? 'Stripe fees' : 'GST/Fees'}): {fmtAmount(refundDetails.refundAmountPaisa || 0)} ({refundDetails.percentage}%)</p>
           </Alert>
 
           {refundDetails.refundAmountPaisa > 0 && (
+            (isUsd || isRazorpayOnlinePayment) ? (
+              <div className="p-4 border border-green-200 bg-green-50 rounded-md space-y-2">
+                <p className="text-sm font-semibold text-green-800">💳 {isUsd ? 'Stripe' : 'Razorpay'} Refund</p>
+                <p className="text-xs text-green-700">
+                  Your refund of <strong>{fmtAmount(refundDetails.refundAmountPaisa)}</strong> will be processed back to your original {isUsd ? 'Stripe' : 'Razorpay'} payment method within 7–14 business days after approval.
+                </p>
+                <p className="text-xs text-muted-foreground">No bank details are required for {isUsd ? 'Stripe' : 'Razorpay'} online payments.</p>
+                <div className="flex items-center space-x-2 pt-2">
+                  <Checkbox id="cancellation-terms-usd" checked={agreedToTerms} onCheckedChange={(checked) => setAgreedToTerms(checked as boolean)} disabled={isLoading} />
+                  <CheckboxLabel htmlFor="cancellation-terms-usd" className="text-xs cursor-pointer text-muted-foreground leading-tight">
+                    I have read and agree to the Cancellation Policy &amp; Refund Rules.
+                  </CheckboxLabel>
+                </div>
+                <Button type="button" className="w-full mt-3 bg-destructive hover:bg-destructive/90 text-destructive-foreground" onClick={() => handleSubmitCancellation()} disabled={isLoading || !agreedToTerms}>
+                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Banknote className="mr-2 h-4 w-4" />}
+                  Confirm Cancellation &amp; Request {isUsd ? 'Stripe' : 'Razorpay'} Refund
+                </Button>
+              </div>
+            ) : (
             <Form {...bankDetailsForm}>
               <form onSubmit={bankDetailsForm.handleSubmit(onFormSubmit)} className="space-y-3 p-3 border rounded-md bg-muted/20">
-                <h4 className="text-sm font-semibold text-foreground">Bank Account Details for Refund:</h4>
+                <h4 className="text-sm font-semibold text-foreground">Bank Account Details for Refund (Offline / Google Form):</h4>
                 <FormField
                   control={bankDetailsForm.control}
                   name="accountHolderName"
@@ -301,15 +336,16 @@ const CancellationRequestModal: React.FC<CancellationRequestModalProps> = ({
                  <div className="flex items-center space-x-2 pt-2">
                     <Checkbox id="cancellation-terms-bank" checked={agreedToTerms} onCheckedChange={(checked) => setAgreedToTerms(checked as boolean)} disabled={isLoading} />
                     <CheckboxLabel htmlFor="cancellation-terms-bank" className="text-xs cursor-pointer text-muted-foreground leading-tight">
-                        I have read and agree to the Cancellation Policy & Refund Rules.
+                        I have read and agree to the Cancellation Policy &amp; Refund Rules.
                     </CheckboxLabel>
                 </div>
                 <Button type="submit" className="w-full mt-3 bg-destructive hover:bg-destructive/90 text-destructive-foreground" disabled={isLoading || !agreedToTerms}>
                   {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Banknote className="mr-2 h-4 w-4" />}
-                  Confirm Cancellation & Submit Bank Details for Refund
+                  Confirm Cancellation &amp; Submit Bank Details for Refund
                 </Button>
               </form>
             </Form>
+            )
           )}
 
           {refundDetails.refundAmountPaisa <= 0 && (
@@ -323,7 +359,7 @@ const CancellationRequestModal: React.FC<CancellationRequestModalProps> = ({
               <div className="flex items-center space-x-2 pt-3">
                 <Checkbox id="cancellation-terms-no-refund" checked={agreedToTerms} onCheckedChange={(checked) => setAgreedToTerms(checked as boolean)} disabled={isLoading} />
                 <CheckboxLabel htmlFor="cancellation-terms-no-refund" className="text-xs cursor-pointer text-muted-foreground leading-tight">
-                    I have read and agree to the Cancellation Policy & Refund Rules, and understand no monetary refund is due.
+                    I have read and agree to the Cancellation Policy &amp; Refund Rules, and understand no monetary refund is due.
                 </CheckboxLabel>
               </div>
               <Button type="button" className="w-full mt-3" variant="destructive" onClick={onConfirmNoRefund} disabled={isLoading || !agreedToTerms}>
@@ -339,6 +375,9 @@ const CancellationRequestModal: React.FC<CancellationRequestModalProps> = ({
                {cancellationPolicyText.trim().split('\n').map((line, index) => (<p key={index}>{line}</p>))}
             </div>
           </div>
+          </>
+          );
+          })()}
         </div>
 
         <DialogFooter className="sm:justify-end gap-2 pt-4 border-t">

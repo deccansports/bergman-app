@@ -38,17 +38,20 @@ import { Label } from '@/components/ui/label';
 import { getCountryFlagEmoji, toDateStringSafe, isValidImageUrl, getInitials } from '@/lib/utils';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { ClubPolicyAcceptance } from '@/components/club/ClubPolicyAcceptance';
 
 function RegisterClubFormForModal({ onSuccess, onClose }: { onSuccess: (newClub: Club) => void, onClose: () => void }) {
   const { currentUser } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const [dialCode, setDialCode] = useState('+91');
+  const [policyAccepted, setPolicyAccepted] = useState(false);
 
   const form = useForm<RegisterClubExistingUserInput>({
     resolver: zodResolver(RegisterClubExistingUserSchema),
     defaultValues: { 
         clubName: '', 
+        coachName: '',
         clubContactEmail: '', 
         clubContactMobile: '', 
         instagramUrl: '', 
@@ -87,9 +90,9 @@ function RegisterClubFormForModal({ onSuccess, onClose }: { onSuccess: (newClub:
   return (
      <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 text-left">
-        <ScrollArea className="max-h-[60vh] pr-4">
-            <div className="space-y-4 py-2">
+        <div className="max-h-[45vh] overflow-y-auto pr-4 space-y-4 py-2">
                 <FormField control={form.control} name="clubName" render={({ field }) => ( <FormItem><FormLabel>Club Name</FormLabel><FormControl><Input {...field} placeholder="Official Name" disabled={isLoading} /></FormControl><FormMessage /></FormItem> )} />
+                <FormField control={form.control} name="coachName" render={({ field }) => ( <FormItem><FormLabel>Coach / Owner Name</FormLabel><FormControl><Input {...field} value={field.value || ""} placeholder="Your full name" disabled={isLoading} /></FormControl><FormMessage /></FormItem> )} />
                 <FormField control={form.control} name="clubContactEmail" render={({ field }) => ( <FormItem><FormLabel>Public Contact Email</FormLabel><FormControl><Input type="email" {...field} value={field.value || ""} disabled={isLoading} /></FormControl><FormMessage /></FormItem> )} />
                 
                 <div className="space-y-1 text-left">
@@ -144,11 +147,11 @@ function RegisterClubFormForModal({ onSuccess, onClose }: { onSuccess: (newClub:
                         </FormItem>
                     )} />
                 )}
+                <ClubPolicyAcceptance accepted={policyAccepted} onAcceptChange={setPolicyAccepted} />
             </div>
-        </ScrollArea>
         <DialogFooter className="pt-4 border-t">
           <Button type="button" variant="ghost" onClick={onClose} disabled={isLoading}>Cancel</Button>
-          <Button type="submit" disabled={isLoading}>{isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Register Club</Button>
+          <Button type="submit" disabled={isLoading || !policyAccepted}>{isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Register Club</Button>
         </DialogFooter>
       </form>
     </Form>
@@ -271,6 +274,7 @@ export function UserProfile({ user: initialUser, onUpdate }: { user: User | null
 
   const filteredClubs = allClubs.filter(club => club.name.toLowerCase().includes(clubSearchTerm.toLowerCase()));
   const validPhotoUrl = isValidImageUrl(user.photoURL) ? user.photoURL : undefined;
+  const countryFlag = getCountryFlagEmoji(user.country);
 
   return (
      <Card className="w-full shadow-xl relative overflow-hidden rounded-xl border-t-4 border-primary/50 text-left">
@@ -368,7 +372,10 @@ export function UserProfile({ user: initialUser, onUpdate }: { user: User | null
               </Button>
               <input type="file" ref={fileInputRef} onChange={handleFileChange} accept="image/*" className="hidden" />
           </div>
-          <CardTitle className="text-3xl font-bold tracking-tight text-foreground text-center">{user.name || 'Athlete Profile'}</CardTitle>
+          <CardTitle className="text-3xl font-bold tracking-tight text-foreground text-center inline-flex items-center justify-center gap-2">
+            {countryFlag ? <span aria-hidden="true">{countryFlag}</span> : null}
+            <span>{user.name || 'Athlete Profile'}</span>
+          </CardTitle>
       </CardHeader>
       
       <CardContent className="p-6 space-y-3 text-sm text-left">
@@ -389,53 +396,6 @@ export function UserProfile({ user: initialUser, onUpdate }: { user: User | null
                 {user.state ? `, ${user.state}` : ''}
             </span>
         </div>
-        
-        {user.ownedClubId ? (
-            <Alert className="bg-primary/5 border-primary/20 text-left mt-4 rounded-xl">
-                <ShieldAlert className="h-4 w-4 text-primary" />
-                <AlertTitle className="font-bold">Club Owner Status</AlertTitle>
-                <AlertDescription className="text-xs text-left">You are the owner of <strong>{user.ownedClubName}</strong>. Affiliation is locked to your own club.</AlertDescription>
-            </Alert>
-        ) : (
-          <div className="space-y-3 pt-4 text-left">
-            <Label className="flex items-center gap-2 font-bold text-sm uppercase tracking-tight text-muted-foreground">
-                <Users className="h-4 w-4 text-primary"/>
-                Current Club: <span className="text-primary">{user.clubName || 'None / Unaffiliated'}</span>
-            </Label>
-            <div className="flex gap-2">
-                <Select onValueChange={setSelectedClubId} value={selectedClubId || "NONE"}>
-                    <SelectTrigger className="flex-grow bg-muted/20 border-none shadow-none"><SelectValue placeholder="Select club..." /></SelectTrigger>
-                    <SelectContent>
-                        <div className='p-2'><Input placeholder='Search Club...' className='w-full' onChange={(e) => setClubSearchTerm(e.target.value)} value={clubSearchTerm} /></div>
-                        <SelectItem value="NONE">No Affiliation</SelectItem>
-                        {filteredClubs.map(club => (<SelectItem key={club.id} value={club.id}>{club.name}</SelectItem>))}
-                    </SelectContent>
-                </Select>
-                <Button onClick={handleClubChange} disabled={isLoading || selectedClubId === (user?.clubId || null)} className="shrink-0 h-10 font-bold">Update</Button>
-            </div>
-            <div className="text-center pt-2">
-                <Dialog open={isClubModalOpen} onOpenChange={setIsClubModalOpen}>
-                    <DialogTrigger asChild>
-                        <button type="button" className="text-xs font-semibold text-muted-foreground hover:text-primary underline">Is your club not listed? Register it here.</button>
-                    </DialogTrigger>
-                    <DialogContent className="sm:max-w-md text-left">
-                      <DialogHeader>
-                        <DialogTitle>Register Your Club</DialogTitle>
-                        <DialogDescription>Become an owner and manage your squad on Bergman.</DialogDescription>
-                      </DialogHeader>
-                      <RegisterClubFormForModal 
-                        onSuccess={(newClub) => { 
-                            toast({ title: "Club Registered" }); 
-                            if (onUpdate) onUpdate({ ownedClubId: newClub.id, ownedClubName: newClub.name, clubId: newClub.id, clubName: newClub.name }); 
-                            setIsClubModalOpen(false); 
-                        }} 
-                        onClose={() => setIsClubModalOpen(false)} 
-                      />
-                    </DialogContent>
-                </Dialog>
-            </div>
-          </div>
-        )}
       </CardContent>
     </Card>
   );

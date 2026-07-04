@@ -55,18 +55,18 @@ export type ClubSocialLinksUpdateActionInput = z.infer<typeof ClubSocialLinksUpd
 
 export const RegisterClubExistingUserSchema = z.object({
   clubName: z.string().min(3, "Club name is too short"),
-  coachName: z.string().min(2, "Coach name is required"),
+  coachName: z.string().min(2, "Coach / Owner name is required"),
   clubContactEmail: z.string().email("Invalid email"),
   clubContactMobile: z.string().min(10, "Invalid mobile number"),
   instagramUrl: z.string().url("Invalid URL").or(z.literal('')).optional().nullable(),
   facebookUrl: z.string().url("Invalid URL").or(z.literal('')).optional().nullable(),
   country: z.string().min(2, "Country required"),
   city: z.string().min(2, "City required"),
-  state: z.string().min(2, "State required"),
+  state: z.string().optional().nullable(),
 });
 
 // --- Registration & Events ---
-export const PublicEventRegistrationSchema = z.object({
+const PublicEventRegistrationSchemaBase = z.object({
   name: z.string().min(2, 'Name is required'),
   email: z.string().email('Invalid email'),
   mobile: z.string().min(10, 'Mobile is required'),
@@ -77,7 +77,7 @@ export const PublicEventRegistrationSchema = z.object({
   emergencyContactNumber: z.string().min(10, 'Emergency contact is required'),
   address: z.string().min(5, 'Address is required'),
   city: z.string().min(2, 'City is required'),
-  state: z.string().min(2, 'State is required'),
+  state: z.string().optional().nullable(),
   pincode: z.string().min(6, 'Pincode is required'),
   country: z.string().min(2, 'Country is required'),
   ticketId: z.string().min(1, 'Please select a ticket'),
@@ -101,6 +101,19 @@ export const PublicEventRegistrationSchema = z.object({
   previousTimingCertificateUrl: z.string().optional().nullable(),
 });
 
+export const PublicEventRegistrationSchema = PublicEventRegistrationSchemaBase.superRefine((data, ctx) => {
+  const normalizedCountry = (data.country || '').trim().toLowerCase();
+  const normalizedState = (data.state || '').trim();
+
+  if (normalizedCountry === 'india' && normalizedState.length < 2) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['state'],
+      message: 'State is required for India',
+    });
+  }
+});
+
 export type PublicEventRegistrationFormInputClient = z.infer<typeof PublicEventRegistrationSchema>;
 
 // --- Admin & Support ---
@@ -108,11 +121,47 @@ export const ContactUsSchema = z.object({
   name: z.string().min(2, "Name is required"),
   email: z.string().email("Invalid email"),
   mobile: z.string().regex(internationalMobileRegex, "Invalid mobile format"),
+  about: z.enum(['Registration', 'General Enquiry', 'About Event'], { message: 'Please select a query type' }),
+  selectedEventId: z.string().optional().nullable(),
+  selectedEventName: z.string().optional().nullable(),
   message: z.string().min(10, "Message must be at least 10 characters"),
+}).superRefine((data, ctx) => {
+  if ((data.about === 'Registration' || data.about === 'About Event') && !String(data.selectedEventId || '').trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['selectedEventId'],
+      message: 'Please select an upcoming event',
+    });
+  }
 });
 export type ContactUsFormInput = z.infer<typeof ContactUsSchema>;
 
-export const AdminParticipantEditSchema = PublicEventRegistrationSchema.partial().extend({
+const OptionalNullableOrEmptyString = z.string().optional().nullable().or(z.literal(''));
+
+export const AdminParticipantEditSchema = PublicEventRegistrationSchemaBase.partial().extend({
+    name: OptionalNullableOrEmptyString,
+    email: z.string().email('Invalid email').optional().nullable().or(z.literal('')),
+    mobile: OptionalNullableOrEmptyString,
+    dob: OptionalNullableOrEmptyString,
+    gender: z.enum(['Male', 'Female', 'Other']).optional().nullable(),
+    bloodGroup: OptionalNullableOrEmptyString,
+    tshirtSize: OptionalNullableOrEmptyString,
+    emergencyContactNumber: OptionalNullableOrEmptyString,
+    address: OptionalNullableOrEmptyString,
+    city: OptionalNullableOrEmptyString,
+    state: OptionalNullableOrEmptyString,
+    pincode: OptionalNullableOrEmptyString,
+    country: OptionalNullableOrEmptyString,
+    ticketId: OptionalNullableOrEmptyString,
+    selectedSubCategory: OptionalNullableOrEmptyString,
+    billingType: z.enum(['personal', 'business']).optional().nullable(),
+    businessName: OptionalNullableOrEmptyString,
+    gstin: OptionalNullableOrEmptyString,
+    businessAddress: OptionalNullableOrEmptyString,
+    businessEmail: OptionalNullableOrEmptyString,
+    businessMobile: OptionalNullableOrEmptyString,
+    confirmGstDetails: z.boolean().optional().nullable(),
+    clubId: OptionalNullableOrEmptyString,
     bibNumber: z.string().optional().nullable(),
     ticketStatus: z.string().optional().nullable(),
     amountPaidPaisa: z.number().optional().nullable(),
@@ -124,6 +173,7 @@ export const AdminParticipantEditSchema = PublicEventRegistrationSchema.partial(
     sendConfirmation: z.boolean().optional().nullable(),
     clubAffiliationDate: z.string().optional().nullable(),
     personalRaceEmail: z.string().optional().nullable(),
+    ageCategory: z.string().optional().nullable(),
 });
 export type AdminParticipantEditFormInput = z.infer<typeof AdminParticipantEditSchema>;
 
@@ -186,6 +236,7 @@ export const AnnouncementSchema = z.object({
   type: z.enum(['global', 'athlete', 'club']),
   priority: z.enum(['low', 'medium', 'high']),
   isTicker: z.boolean(),
+  tickerSpeedSeconds: z.coerce.number().min(5).max(40).optional().nullable(),
   isModal: z.boolean(),
   linkUrl: z.string().optional().nullable(),
   startDate: z.string(),
@@ -234,7 +285,7 @@ export type VolunteerAssignmentFormInput = z.infer<typeof VolunteerAssignmentSch
 
 export const CouponCreateSchema = z.object({
   code: z.string().min(1),
-  couponType: z.enum(['Discount Code', 'Group Discount', 'Access Code', 'Early Bird / Sale', 'Club Coupon', 'Previous Participant', 'Feedback Coupon']),
+  couponType: z.enum(['Discount Code', 'Group Discount', 'Access Code', 'Early Bird / Sale', 'Club Coupon', 'Previous Participant', 'Feedback Coupon', 'Birthday Coupon']),
   discountType: z.enum(['percentage', 'fixed']),
   discountValue: z.number().min(0),
   usageLimit: z.number().min(1),
@@ -244,7 +295,9 @@ export const CouponCreateSchema = z.object({
   applicableEventIds: z.array(z.string()),
   sourceEventIds: z.array(z.string()),
   applicableTicketIds: z.array(z.string()),
+  applicableClubIds: z.array(z.string()).optional().default([]),
   minCartValue: z.number().optional().nullable(),
+  email: z.string().email('Invalid email').optional().nullable(),
 });
 export type CouponCreateFormInput = z.infer<typeof CouponCreateSchema>;
 export const CouponUpdateSchema = CouponCreateSchema.partial();
@@ -253,9 +306,12 @@ export type CouponUpdateFormInput = z.infer<typeof CouponUpdateSchema>;
 export const TicketDefinitionSchema = z.object({
   ticketName: z.string().min(1, "Name required"),
   description: z.string().optional().nullable(),
+  registrationType: z.enum(["individual", "relay", "both"]).default("individual"),
   eventDate: z.string().optional().nullable(),
   openDate: z.string().min(1, "Open date required"),
+  startTime: z.string().optional().nullable(),
   closeDate: z.string().min(1, "Close date required"),
+  endTime: z.string().optional().nullable(),
   price: z.number().optional().nullable(),
   ticketType: z.enum(["Paid", "Free"]),
   maxQuantity: z.number().optional().nullable(),
@@ -265,7 +321,7 @@ export const TicketDefinitionSchema = z.object({
   ticketCategory: z.enum(["Triathlon", "Duathlon", "Marathon", "Cycling", "Swimming", "Other"]),
   applicableAgeGroups: z.union([z.string(), z.array(z.string())]).optional().nullable(),
   hsnCode: z.string().optional().nullable(),
-  gstPercent: z.number().default(18),
+  gstPercent: z.number().optional().nullable(),
   order: z.number().default(0),
   cutoffs: z.object({
     mode: z.enum(['overall', 'segment']).default('overall'),

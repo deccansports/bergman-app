@@ -16,7 +16,7 @@ export default function AthleteHubLoader() {
 
 const styles: { [key: string]: React.CSSProperties } = {
   wrapper: {
-    position: 'fixed',
+    position: 'absolute',
     top: 0,
     left: 0,
     width: '100vw',

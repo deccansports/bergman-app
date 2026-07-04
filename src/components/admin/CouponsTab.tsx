@@ -12,8 +12,9 @@ import {
   updateCouponAction,
   deleteCouponAction,
   getAllCouponsAction,
+  getAllClubs,
 } from '@/lib/actions';
-import type { Coupon, EventCalendarEntry, TicketDefinition } from '@/lib/types';
+import type { Club, Coupon, EventCalendarEntry, TicketDefinition } from '@/lib/types';
 import { CouponCreateSchema, type CouponCreateFormInput, CouponUpdateSchema, type CouponUpdateFormInput } from '@/lib/schemas';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -52,6 +53,9 @@ export default function CouponsTab({ events, isLoadingEvents }: CouponsTabProps)
   const [editingCoupon, setEditingCoupon] = useState<Coupon | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [couponTypeFilter, setCouponTypeFilter] = useState<string>('all');
+  const [clubs, setClubs] = useState<Club[]>([]);
+  const [clubSearchTerm, setClubSearchTerm] = useState('');
 
   const form = useForm<CouponCreateFormInput>({
     resolver: zodResolver(CouponCreateSchema),
@@ -67,6 +71,7 @@ export default function CouponsTab({ events, isLoadingEvents }: CouponsTabProps)
       applicableEventIds: [],
       sourceEventIds: [],
       applicableTicketIds: [],
+      applicableClubIds: [],
     },
   });
   
@@ -99,6 +104,15 @@ export default function CouponsTab({ events, isLoadingEvents }: CouponsTabProps)
   }, [fetchCoupons]);
 
   useEffect(() => {
+    (async () => {
+      const result = await getAllClubs();
+      if (result.success && result.clubs) {
+        setClubs(result.clubs);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
     if (isModalOpen) {
         if (editingCoupon) {
           form.reset({
@@ -113,13 +127,14 @@ export default function CouponsTab({ events, isLoadingEvents }: CouponsTabProps)
             applicableEventIds: editingCoupon.applicableEventIds,
             sourceEventIds: editingCoupon.sourceEventIds || [],
             applicableTicketIds: editingCoupon.applicableTicketIds,
+            applicableClubIds: editingCoupon.applicableClubIds || [],
             minCartValue: editingCoupon.minCartValue || undefined,
           });
         } else {
           form.reset({
               code: '', couponType: 'Discount Code', discountType: 'percentage', discountValue: 10,
               usageLimit: 100, startDate: '', expiryDate: '', isActive: true,
-              applicableEventIds: [], sourceEventIds: [], applicableTicketIds: [], minCartValue: undefined
+              applicableEventIds: [], sourceEventIds: [], applicableTicketIds: [], applicableClubIds: [], minCartValue: undefined
           });
         }
     }
@@ -146,10 +161,28 @@ export default function CouponsTab({ events, isLoadingEvents }: CouponsTabProps)
       window.location.href = `/api/admin/download-coupon-usage?couponCode=${encodeURIComponent(couponCode)}`;
   };
 
+  const couponTypeOptions = useMemo(() => {
+    const uniqueTypes = Array.from(new Set(coupons.map((c) => c.couponType).filter(Boolean)));
+    return uniqueTypes.sort((a, b) => a.localeCompare(b));
+  }, [coupons]);
+
   const filteredCoupons = useMemo(() => {
-    if (!searchTerm) return coupons;
-    return coupons.filter(c => c.code.toLowerCase().includes(searchTerm.toLowerCase()));
-  }, [coupons, searchTerm]);
+    const normalizedSearch = searchTerm.trim().toLowerCase();
+    return coupons.filter((c) => {
+      const matchesSearch = !normalizedSearch || c.code.toLowerCase().includes(normalizedSearch);
+      const matchesType = couponTypeFilter === 'all' || c.couponType === couponTypeFilter;
+      return matchesSearch && matchesType;
+    });
+  }, [coupons, searchTerm, couponTypeFilter]);
+
+  const filteredClubs = useMemo(() => {
+    const term = clubSearchTerm.trim().toLowerCase();
+    if (!term) return clubs;
+    return clubs.filter((club) =>
+      club.name?.toLowerCase().includes(term) ||
+      club.email?.toLowerCase().includes(term)
+    );
+  }, [clubs, clubSearchTerm]);
 
   return (
     <>
@@ -162,7 +195,27 @@ export default function CouponsTab({ events, isLoadingEvents }: CouponsTabProps)
             <Button size="sm" onClick={() => { setEditingCoupon(null); setIsModalOpen(true); }}><PlusCircle className="mr-2 h-4 w-4"/>Create Coupon</Button>
         </CardHeader>
         <CardContent className="space-y-4">
-          <Input placeholder="Search coupon code..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="max-w-sm"/>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center">
+            <Input
+              placeholder="Search coupon code..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="max-w-sm"
+            />
+            <Select value={couponTypeFilter} onValueChange={setCouponTypeFilter}>
+              <SelectTrigger className="w-full md:w-[240px]">
+                <SelectValue placeholder="Filter by coupon type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Types</SelectItem>
+                {couponTypeOptions.map((type) => (
+                  <SelectItem key={`coupon-type-filter-${type}`} value={type}>
+                    {type}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div className="rounded-md border max-h-[60vh] overflow-auto">
             <Table>
               <TableHeader>
@@ -272,12 +325,21 @@ export default function CouponsTab({ events, isLoadingEvents }: CouponsTabProps)
                  <FormField control={form.control} name="code" render={({field})=>(<FormItem><FormLabel>Coupon Code</FormLabel><Input {...field} disabled={!!editingCoupon} /></FormItem>)} />
                  <div className="grid grid-cols-2 gap-4">
                   <FormField control={form.control} name="couponType" render={({field})=>(<FormItem><FormLabel>Coupon Type</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="Discount Code">Discount</SelectItem><SelectItem value="Group Discount">Group</SelectItem><SelectItem value="Access Code">Access</SelectItem><SelectItem value="Early Bird / Sale">Sale</SelectItem><SelectItem value="Club Coupon">Club Coupon</SelectItem><SelectItem value="Previous Participant">Previous Participant</SelectItem><SelectItem value="Feedback Coupon">Feedback Coupon</SelectItem></SelectContent></Select></FormItem>)}/>
-                  <FormField control={form.control} name="discountType" render={({field})=>(<FormItem><FormLabel>Discount Type</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="percentage">Percentage</SelectItem><SelectItem value="fixed">Fixed</SelectItem></SelectContent></Select></FormItem>)}/>
+                  {watchedCouponType !== 'Access Code' && (
+                    <FormField control={form.control} name="discountType" render={({field})=>(<FormItem><FormLabel>Discount Type</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="percentage">Percentage</SelectItem><SelectItem value="fixed">Fixed</SelectItem></SelectContent></Select></FormItem>)}/>
+                  )}
                  </div>
+                 {watchedCouponType !== 'Access Code' && (
                  <div className="grid grid-cols-2 gap-4">
                   <FormField control={form.control} name="discountValue" render={({field})=>(<FormItem><FormLabel>Discount Value</FormLabel><Input type="number" {...field} onChange={e => field.onChange(Number(e.target.value))}/></FormItem>)}/>
                   <FormField control={form.control} name="minCartValue" render={({field})=>(<FormItem><FormLabel>Min Cart Value (Paisa)</FormLabel><Input type="number" {...field} value={field.value ?? ''} onChange={e=>field.onChange(e.target.value==='' ? null : parseInt(e.target.value, 10))}/></FormItem>)}/>
                  </div>
+                 )}
+                 {watchedCouponType === 'Access Code' && (
+                   <div className="bg-blue-50 border border-blue-200 rounded-md p-3 text-sm text-blue-800">
+                     <p className="font-medium">Access codes unlock hidden tickets without applying a discount.</p>
+                   </div>
+                 )}
                  <div className="grid grid-cols-2 gap-4">
                   <FormField control={form.control} name="startDate" render={({field})=>(<FormItem><FormLabel>Start Date</FormLabel><Input type="date" {...field} value={field.value || ''}/></FormItem>)}/>
                   <FormField control={form.control} name="expiryDate" render={({field})=>(<FormItem><FormLabel>Expiry Date</FormLabel><Input type="date" {...field} value={field.value || ''}/></FormItem>)}/>
@@ -308,6 +370,68 @@ export default function CouponsTab({ events, isLoadingEvents }: CouponsTabProps)
                                   <FormLabel className="text-sm font-normal">{event.eventName}</FormLabel>
                                 </FormItem>
                               ))}
+                          </div>
+                        </FormItem>
+                      )}
+                    />
+                  )}
+
+                  {watchedCouponType === 'Club Coupon' && (
+                    <FormField
+                      control={form.control}
+                      name="applicableClubIds"
+                      render={({ field }) => (
+                        <FormItem>
+                          <div className="flex items-center justify-between gap-2">
+                            <FormLabel>Applicable Clubs</FormLabel>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="xs"
+                                onClick={() => field.onChange(clubs.map((c) => c.id))}
+                                disabled={clubs.length === 0}
+                              >
+                                Select All
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="xs"
+                                onClick={() => field.onChange([])}
+                                disabled={(field.value || []).length === 0}
+                              >
+                                Clear
+                              </Button>
+                            </div>
+                          </div>
+                          <FormDescription>Select one or multiple clubs eligible for this club coupon.</FormDescription>
+                          <Input
+                            placeholder="Search club by name or email..."
+                            value={clubSearchTerm}
+                            onChange={(e) => setClubSearchTerm(e.target.value)}
+                            className="h-9"
+                          />
+                          <div className="max-h-40 overflow-y-auto rounded-md border p-2 space-y-1">
+                            {filteredClubs.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">No clubs found.</p>
+                            ) : (
+                              filteredClubs.map((club) => (
+                                <FormItem key={`club-item-${club.id}`} className="flex flex-row items-start space-x-3 space-y-0">
+                                  <FormControl>
+                                    <Checkbox
+                                      checked={(field.value || []).includes(club.id)}
+                                      onCheckedChange={(checked) => {
+                                        return checked
+                                          ? field.onChange([...(field.value || []), club.id])
+                                          : field.onChange((field.value || []).filter((value: string) => value !== club.id));
+                                      }}
+                                    />
+                                  </FormControl>
+                                  <FormLabel className="text-sm font-normal">{club.name}</FormLabel>
+                                </FormItem>
+                              ))
+                            )}
                           </div>
                         </FormItem>
                       )}
@@ -354,7 +478,9 @@ export default function CouponsTab({ events, isLoadingEvents }: CouponsTabProps)
                         <FormItem>
                           <FormLabel>Applicable Tickets (Optional)</FormLabel>
                           <FormDescription>
-                            Select specific tickets this coupon applies to. If none are selected, it applies to all tickets in the selected events.
+                            {watchedCouponType === 'Access Code'
+                              ? 'Select the hidden tickets this access code should unlock. Access codes do not unlock all hidden tickets by default.'
+                              : 'Select specific tickets this coupon applies to. If none are selected, it applies to all tickets in the selected events.'}
                           </FormDescription>
                           <div className="max-h-40 overflow-y-auto rounded-md border p-2 space-y-1">
                             {availableTicketsForSelection.map((ticket) => (

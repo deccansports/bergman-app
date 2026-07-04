@@ -4,14 +4,15 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import type { EventCalendarEntry, EventParticipant, CancellationEntry, OverviewMetrics, EventTicketStats } from '@/lib/types';
-import { getEventRegistrationOverviewMetricsAction } from '@/lib/actions/analyticsActions';
-import { getTicketStatsAction } from '@/lib/actions/ticketActions';
+import { getEventRegistrationOverviewMetricsAction, computeCountryRegistrationMetricsAction, computeEventRegistrationMetricsAction } from '@/lib/actions/analyticsActions';
+import { getTicketStatsAction, refreshTicketStatsCacheAction } from '@/lib/actions/ticketActions';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Loader2, TrendingDown, IndianRupee, History } from 'lucide-react';
+import { Loader2, TrendingDown, IndianRupee, History, RefreshCw, Zap } from 'lucide-react';
 import { format, parseISO, isAfter, startOfDay, isBefore } from 'date-fns';
 
 interface OverviewTabProps {
@@ -27,6 +28,12 @@ export default function OverviewTab({ events, isLoadingEvents }: OverviewTabProp
   const [ticketStats, setTicketStats] = useState<EventTicketStats[]>([]);
   const [isTicketStatsLoading, setIsTicketStatsLoading] = useState(true);
   const [activeCurrency, setActiveCurrency] = useState<'INR' | 'USD'>('INR');
+  const [isRefreshingCache, setIsRefreshingCache] = useState(false);
+  const [isAnalyticsSyncing, setIsAnalyticsSyncing] = useState(false);
+
+  const normalizeCurrency = (value?: string | null): 'INR' | 'USD' => {
+    return String(value || '').trim().toUpperCase() === 'USD' ? 'USD' : 'INR';
+  };
 
   const upcomingEvents = useMemo(() => {
     if (!events) return [];
@@ -41,9 +48,9 @@ export default function OverviewTab({ events, isLoadingEvents }: OverviewTabProp
     });
   }, [events]);
 
-  const fetchOverviewMetrics = useCallback((params: { eventId?: string, country?: 'IN' | 'US' }) => {
+  const fetchOverviewMetrics = useCallback((params: { eventId?: string, country?: 'IN' | 'US', currency?: 'INR' | 'USD' }) => {
     setIsMetricsLoading(true);
-    const currency = params.country === 'US' ? 'USD' : 'INR';
+    const currency = params.currency || (params.country === 'US' ? 'USD' : 'INR');
     setActiveCurrency(currency);
 
     getEventRegistrationOverviewMetricsAction({} as any, params.eventId, params.country)
@@ -80,6 +87,92 @@ export default function OverviewTab({ events, isLoadingEvents }: OverviewTabProp
       .finally(() => setIsTicketStatsLoading(false));
   }, [toast]);
 
+  const handleRefreshKVCache = useCallback(async (country?: 'IN' | 'US', eventId?: string) => {
+    setIsRefreshingCache(true);
+    try {
+      let result;
+      if (eventId) {
+        result = await computeEventRegistrationMetricsAction(eventId);
+      } else if (country) {
+        result = await computeCountryRegistrationMetricsAction(country);
+      } else {
+        throw new Error('Invalid parameters');
+      }
+
+      if (result.success) {
+        const target = eventId ? 'Event' : country === 'IN' ? 'India' : 'USA';
+        toast({ title: 'Cache Refreshed', description: `KV cache updated for ${target}.` });
+        // Re-fetch metrics after refreshing cache
+        if (eventId) {
+          fetchOverviewMetrics({ eventId });
+        } else if (selectedEventIdForStats === 'all-in' && country === 'IN') {
+          fetchOverviewMetrics({ country: 'IN' });
+        } else if (selectedEventIdForStats === 'all-us' && country === 'US') {
+          fetchOverviewMetrics({ country: 'US' });
+        }
+      } else {
+        toast({ variant: 'destructive', title: 'Refresh Failed', description: result.message });
+      }
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Error', description: error.message });
+    } finally {
+      setIsRefreshingCache(false);
+    }
+  }, [selectedEventIdForStats, toast, fetchOverviewMetrics]);
+
+  const handleAnalyticsSyncAll = useCallback(async () => {
+    setIsAnalyticsSyncing(true);
+    try {
+      const errors: string[] = [];
+
+      // Re-compute ticket stats from Firestore and persist to KV
+      const ticketStatsResult = await refreshTicketStatsCacheAction();
+      if (!ticketStatsResult.success) {
+        errors.push(`Ticket Stats: ${ticketStatsResult.message}`);
+      } else if (ticketStatsResult.eventTicketStats) {
+        setTicketStats(ticketStatsResult.eventTicketStats);
+      }
+
+      const inResult = await computeCountryRegistrationMetricsAction('IN');
+      if (!inResult.success) errors.push(`IN: ${inResult.message}`);
+
+      const usResult = await computeCountryRegistrationMetricsAction('US');
+      if (!usResult.success) errors.push(`US: ${usResult.message}`);
+
+      for (const event of upcomingEvents) {
+        const eventResult = await computeEventRegistrationMetricsAction(event.id);
+        if (!eventResult.success) {
+          errors.push(`${event.eventName}: ${eventResult.message}`);
+        }
+      }
+
+      if (errors.length > 0) {
+        throw new Error(`Partial sync failures (${errors.length}).`);
+      }
+
+      toast({
+        title: 'Analytics Synced',
+        description: `KV cache updated for ticket stats, IN, US, and ${upcomingEvents.length} upcoming event(s).`,
+      });
+
+      // Refresh ticket stats after sync to update Ticket Sales & Stats card
+      fetchTicketStats();
+
+      // Refresh current metrics
+      if (selectedEventIdForStats === 'all-in') {
+        fetchOverviewMetrics({ country: 'IN' });
+      } else if (selectedEventIdForStats === 'all-us') {
+        fetchOverviewMetrics({ country: 'US' });
+      } else if (selectedEventIdForStats && selectedEventIdForStats !== 'all') {
+        fetchOverviewMetrics({ eventId: selectedEventIdForStats });
+      }
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Sync Failed', description: error.message });
+    } finally {
+      setIsAnalyticsSyncing(false);
+    }
+  }, [selectedEventIdForStats, toast, fetchOverviewMetrics, fetchTicketStats, upcomingEvents]);
+
   useEffect(() => {
     fetchTicketStats();
   }, [fetchTicketStats]);
@@ -94,8 +187,9 @@ export default function OverviewTab({ events, isLoadingEvents }: OverviewTabProp
     }
     else {
       const event = events.find(e => e.id === selectedEventIdForStats);
-      setActiveCurrency((event?.currency || 'INR') as 'INR' | 'USD');
-      fetchOverviewMetrics({ eventId: selectedEventIdForStats });
+      const eventCurrency = normalizeCurrency(event?.currency);
+      setActiveCurrency(eventCurrency);
+      fetchOverviewMetrics({ eventId: selectedEventIdForStats, currency: eventCurrency });
     }
   }, [selectedEventIdForStats, fetchOverviewMetrics, events]);
 
@@ -132,26 +226,120 @@ export default function OverviewTab({ events, isLoadingEvents }: OverviewTabProp
   };
   
   const selectedEventForTicketStats = useMemo(() => {
-    if (selectedEventIdForStats === 'all' || selectedEventIdForStats === 'all-in' || selectedEventIdForStats === 'all-us') return null;
-    return ticketStats.find(stat => stat.eventId === selectedEventIdForStats);
-  }, [ticketStats, selectedEventIdForStats]);
+    const normalizeCountryCode = (eventCountry?: string | null, eventCurrency?: string | null): 'IN' | 'US' | null => {
+      const c = (eventCountry || '').trim().toLowerCase();
+      const curr = (eventCurrency || '').trim().toUpperCase();
+      if (c === 'in' || c === 'india' || curr === 'INR') return 'IN';
+      if (c === 'us' || c === 'usa' || c === 'united states' || c === 'united states of america' || curr === 'USD') return 'US';
+      return null;
+    };
+
+    if (selectedEventIdForStats === 'all' || selectedEventIdForStats === 'all-in' || selectedEventIdForStats === 'all-us') {
+      const eventMetaById = new Map(events.map(e => [e.id, e]));
+
+      const filteredStats = ticketStats.filter(stat => {
+        const meta = eventMetaById.get(stat.eventId);
+        if (!meta) return false;
+        const mappedCountry = normalizeCountryCode(meta.country, meta.currency || null);
+
+        if (selectedEventIdForStats === 'all-in') return mappedCountry === 'IN';
+        if (selectedEventIdForStats === 'all-us') return mappedCountry === 'US';
+        return true;
+      });
+
+      const ticketMap = new Map<string, { sold: number; remaining: number | 'Unlimited' }>();
+      let totalRevenueFromEventPaisa = 0;
+      let totalTicketsSoldInEvent = 0;
+
+      for (const stat of filteredStats) {
+        totalRevenueFromEventPaisa += stat.totalRevenueFromEventPaisa || 0;
+        totalTicketsSoldInEvent += stat.totalTicketsSoldInEvent || 0;
+
+        for (const ticket of stat.tickets || []) {
+          const existing = ticketMap.get(ticket.ticketName) || { sold: 0, remaining: 0 };
+          const existingRemaining = existing.remaining;
+          const nextRemaining = ticket.remaining;
+
+          let mergedRemaining: number | 'Unlimited' = 0;
+          if (existingRemaining === 'Unlimited' || nextRemaining === 'Unlimited') {
+            mergedRemaining = 'Unlimited';
+          } else {
+            mergedRemaining = Number(existingRemaining || 0) + Number(nextRemaining || 0);
+          }
+
+          ticketMap.set(ticket.ticketName, {
+            sold: (existing.sold || 0) + (ticket.sold || 0),
+            remaining: mergedRemaining,
+          });
+        }
+      }
+
+      return {
+        eventId: selectedEventIdForStats,
+        eventName:
+          selectedEventIdForStats === 'all'
+            ? 'All Upcoming Events (Global)'
+            : selectedEventIdForStats === 'all-in'
+              ? 'Upcoming Events (India)'
+              : 'Upcoming Events (USA)',
+        totalRevenueFromEventPaisa,
+        totalTicketsSoldInEvent,
+        tickets: Array.from(ticketMap.entries())
+          .map(([ticketName, t], idx) => ({
+            ticketDefinitionId: `${ticketName}-${idx}`,
+            ticketName,
+            sold: t.sold,
+            remaining: t.remaining,
+          }))
+          .sort((a, b) => b.sold - a.sold),
+      } as any;
+    }
+
+    return ticketStats.find(stat => stat.eventId === selectedEventIdForStats) || null;
+  }, [ticketStats, selectedEventIdForStats, events]);
 
   return (
     <div className="space-y-6">
        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
          <h3 className="text-lg font-semibold text-foreground">Registration Overview</h3>
-         <Select value={selectedEventIdForStats} onValueChange={setSelectedEventIdForStats} disabled={isLoadingEvents}>
-             <SelectTrigger className="w-full sm:w-[250px] text-xs h-9">
-                 <SelectValue placeholder="Select an Event to View Stats..." />
-             </SelectTrigger>
-             <SelectContent>
-                 <SelectItem value="all-in">Upcoming Events (India)</SelectItem>
-                 <SelectItem value="all-us">Upcoming Events (USA)</SelectItem>
-                 <SelectItem value="all">All Upcoming Events (Global)</SelectItem>
-                 <hr className="my-1"/>
+         <div className="flex gap-2 w-full sm:w-auto">
+           <Select value={selectedEventIdForStats} onValueChange={setSelectedEventIdForStats} disabled={isLoadingEvents}>
+               <SelectTrigger className="flex-1 sm:flex-none sm:w-[250px] text-xs h-9">
+                   <SelectValue placeholder="Select an Event to View Stats..." />
+               </SelectTrigger>
+               <SelectContent>
+                   <SelectItem value="all-in">Upcoming Events (India)</SelectItem>
+                   <SelectItem value="all-us">Upcoming Events (USA)</SelectItem>
+                   <SelectItem value="all">All Upcoming Events (Global)</SelectItem>
+                   <hr className="my-1"/>
                  {upcomingEvents.map(e => <SelectItem key={e.id} value={e.id}>{e.eventName}</SelectItem>)}
-             </SelectContent>
-         </Select>
+               </SelectContent>
+           </Select>
+           <Button 
+             size="sm" 
+             variant={isRefreshingCache ? 'default' : 'outline'}
+             onClick={() => {
+               if (selectedEventIdForStats === 'all-in') handleRefreshKVCache('IN');
+               else if (selectedEventIdForStats === 'all-us') handleRefreshKVCache('US');
+               else if (selectedEventIdForStats !== 'all') handleRefreshKVCache(undefined, selectedEventIdForStats);
+             }}
+             disabled={isRefreshingCache || selectedEventIdForStats === 'all'}
+             className="h-9"
+             title="Refresh KV cache for selected event/country"
+           >
+             <RefreshCw className={`h-4 w-4 ${isRefreshingCache ? 'animate-spin' : ''}`} />
+           </Button>
+           <Button 
+             size="sm" 
+             variant={isAnalyticsSyncing ? 'default' : 'outline'}
+             onClick={handleAnalyticsSyncAll}
+             disabled={isAnalyticsSyncing}
+             className="h-9 bg-amber-600 hover:bg-amber-700"
+             title="Auto-sync all analytics metrics to KV for upcoming events"
+           >
+             <Zap className={`h-4 w-4 ${isAnalyticsSyncing ? 'animate-spin' : ''}`} />
+           </Button>
+         </div>
      </div>
       
       {isMetricsLoading ? <Skeleton className="h-24 w-full" /> : overviewMetrics ? (
@@ -174,7 +362,7 @@ export default function OverviewTab({ events, isLoadingEvents }: OverviewTabProp
                               <h4 className="font-semibold">{selectedEventForTicketStats.eventName}</h4>
                               <p className="text-sm text-muted-foreground">Total Revenue: {formatCurrency(selectedEventForTicketStats.totalRevenueFromEventPaisa)} | Total Sold: {selectedEventForTicketStats.totalTicketsSoldInEvent}</p>
                               <ul className="list-disc pl-5 mt-2 text-sm space-y-1">
-                                  {selectedEventForTicketStats.tickets.map(ticket => (
+                                  {selectedEventForTicketStats.tickets.map((ticket: any) => (
                                       <li key={ticket.ticketDefinitionId}>
                                           {ticket.ticketName}: <span className="font-medium">{ticket.sold} sold</span> (Remaining: {ticket.remaining})
                                       </li>

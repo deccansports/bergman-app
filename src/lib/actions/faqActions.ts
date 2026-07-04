@@ -7,9 +7,37 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { revalidatePath } from 'next/cache';
 import type { FaqEntry } from '@/lib/types';
 import { toIsoStringSafe } from '@/lib/utils';
+import { getKV, putKV } from '@/lib/cloudflare/kv';
 
 const FAQ_COLLECTION = 'faqs';
 const AI_LOGS_COLLECTION = 'aiLogs';
+
+/**
+ * Sync all FAQs to KV cache after any changes
+ */
+async function _syncFaqsToKV(): Promise<void> {
+  const actionName = '_syncFaqsToKV';
+  try {
+    const adminDb = getFirestoreInstance();
+    const snapshot = await adminDb.collection(FAQ_COLLECTION).get();
+    
+    const faqs: FaqEntry[] = snapshot.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        question: data.question,
+        answer: data.answer,
+        createdAt: toIsoStringSafe(data.createdAt) || new Date().toISOString(),
+      };
+    });
+
+    faqs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    await putKV('faqs:all', faqs, actionName);
+  } catch (error) {
+    console.warn(`[${actionName}] Failed to sync FAQs to KV:`, error);
+  }
+}
+
 
 export async function addFaqAction(
   data: { question: string; answer: string }
@@ -26,6 +54,10 @@ export async function addFaqAction(
       answer: data.answer,
       createdAt: FieldValue.serverTimestamp(),
     });
+    
+    // 🔥 Sync FAQs to KV cache
+    await _syncFaqsToKV();
+    
     revalidatePath('/admin/dashboard');
     return { success: true, message: 'FAQ added successfully.', faqId: newFaqRef.id };
   } catch (e: any) {
@@ -52,6 +84,10 @@ export async function updateFaqAction(
       answer: data.answer,
       updatedAt: FieldValue.serverTimestamp(),
     });
+    
+    // 🔥 Sync FAQs to KV cache
+    await _syncFaqsToKV();
+    
     revalidatePath('/admin/dashboard');
     return { success: true, message: 'FAQ updated successfully.' };
   } catch (e: any) {
@@ -67,6 +103,13 @@ export async function getFaqsAction(): Promise<{
 }> {
   const actionName = 'getFaqsAction';
   try {
+    // Try to fetch from KV cache first for performance
+    const kvFaqs = await getKV<FaqEntry[]>('faqs:all', actionName);
+    if (kvFaqs && kvFaqs.length > 0) {
+      return { success: true, message: 'FAQs fetched from cache.', faqs: kvFaqs };
+    }
+
+    // Fallback: Fetch from Firestore
     const adminDb = getFirestoreInstance();
     const snapshot = await adminDb.collection(FAQ_COLLECTION).get();
     
@@ -86,6 +129,9 @@ export async function getFaqsAction(): Promise<{
 
     faqs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
+    // Sync to KV for future requests
+    await putKV('faqs:all', faqs, actionName).catch(err => console.warn('FAQ KV sync failed:', err));
+
     return { success: true, message: 'FAQs fetched.', faqs };
   } catch (e: any) {
     console.error(`[${actionName}] Error:`, e);
@@ -103,6 +149,10 @@ export async function deleteFaqAction(
     try {
         const adminDb = getFirestoreInstance();
         await adminDb.collection(FAQ_COLLECTION).doc(id).delete();
+        
+        // 🔥 Sync FAQs to KV cache
+        await _syncFaqsToKV();
+        
         revalidatePath('/admin/dashboard');
         return { success: true, message: 'FAQ deleted successfully.' };
     } catch (e: any) {

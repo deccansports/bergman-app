@@ -4,6 +4,7 @@ import { db } from "../firebaseAdmin";
 import { sendAiSensyMessage } from "../auth/aisensyService";
 import { FieldValue, FieldPath } from "firebase-admin/firestore";
 import * as logger from "firebase-functions/logger";
+import { getKVJsonDirect } from "../kv-service";
 
 const TOKEN_MAP: Record<string, string> = {
   '{{name}}': 'name',
@@ -81,12 +82,12 @@ export const processWhatsAppCampaign = onDocumentCreated({
                 if (u.mobile) recipients.push({ name: u.name, mobile: u.mobile, email: u.email, uid: doc.id });
             });
         } else if (targetType === 'event' && eventId) {
-            const eventSnap = await db.collection('events').doc(eventId).get();
-            logEventName = eventSnap.data()?.eventName || 'Event Broadcast';
+            const cachedCalendar = await getKVJsonDirect<any[]>('calendar:snapshot');
+            logEventName = cachedCalendar?.find((event) => event?.id === eventId)?.eventName || 'Event Broadcast';
+            const cachedParticipants = await getKVJsonDirect<any[]>(`event:${eventId}:participants:index`);
 
             if (excludeRegistered) {
-                const registeredSnapshot = await db.collection('events').doc(eventId).collection('participants').select('email').get();
-                const registeredEmails = new Set(registeredSnapshot.docs.map(doc => doc.data().email?.toLowerCase()).filter(Boolean));
+                const registeredEmails = new Set((cachedParticipants || []).map((participant) => participant?.email?.toLowerCase()).filter(Boolean));
                 
                 const allUsersSnapshot = await db.collection('users').get();
                 allUsersSnapshot.forEach(doc => {
@@ -96,18 +97,12 @@ export const processWhatsAppCampaign = onDocumentCreated({
                     }
                 });
             } else {
-                let query: FirebaseFirestore.Query = db.collection('events').doc(eventId).collection('participants');
-                
-                // CRITICAL FIX: Only apply 'in' filter if ticketIds is NOT empty
-                if (Array.isArray(ticketIds) && ticketIds.length > 0) {
-                    query = query.where('ticketId', 'in', ticketIds);
-                }
-                
-                const snapshot = await query.get();
-                snapshot.forEach(doc => {
-                    const d = doc.data();
-                    // Manual filter for status to keep query simple and handle potential empty statusFilter
-                    if (d.mobile && (!statusFilter || statusFilter.length === 0 || statusFilter.includes(d.ticketStatus))) {
+                const sourceParticipants = cachedParticipants || [];
+                sourceParticipants.forEach((d: any) => {
+                    if (Array.isArray(ticketIds) && ticketIds.length > 0 && !ticketIds.includes(d?.ticketId)) {
+                        return;
+                    }
+                    if (d?.mobile && (!statusFilter || statusFilter.length === 0 || statusFilter.includes(d.ticketStatus))) {
                         recipients.push({ 
                             name: d.name, 
                             mobile: d.mobile, 
@@ -116,7 +111,7 @@ export const processWhatsAppCampaign = onDocumentCreated({
                             ticketName: d.ticketName,
                             bookingId: d.bookingId,
                             eventName: logEventName,
-                            id: doc.id 
+                            id: d.id || d.bookingId 
                         });
                     }
                 });

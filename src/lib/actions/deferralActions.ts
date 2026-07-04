@@ -14,12 +14,37 @@ import type { DeferralEntry, User, DeferralStats, EventParticipant, PricingInput
 import { _mirrorParticipantToKV } from './dataSyncActions';
 import { applyPaymentToInvoice } from '../zoho/payments';
 import { markInvoiceAsSent } from '../zoho/invoice';
-import { createServiceFeeInvoiceAction, sendServiceFeeWhatsAppAction } from './invoiceActions';
+import { createServiceFeeInvoiceAction, sendServiceFeeWhatsAppAction, sendInvoiceEmailBrevoAction } from './invoiceActions';
 import { calculatePricing } from '@/lib/pricingEngine';
 import { PAYMENT_GATEWAY_FEE_PERCENTAGE, PLATFORM_FEE_PAISA, GST_PERCENTAGE, NO_CLUB_SELECTED_VALUE } from '@/lib/constants';
 
 const DEFERRALS_COLLECTION = 'deferrals';
 const USERS_COLLECTION = 'users';
+const DASHBOARD_VISIBLE_DEFERRAL_STATUSES: Array<DeferralEntry['status']> = ['Pending Ticket Selection', 'Expired'];
+
+function mapDeferralToActiveInfo(deferralId: string, data: Partial<DeferralEntry>) {
+  return {
+    deferralId,
+    participantName: data.participantName || null,
+    originalEventName: data.originalEventName || 'Unknown Event',
+    originalEventId: data.originalEventId || null,
+    originalEventDate: data.originalEventDate || null,
+    originalTicketId: data.originalTicketId || null,
+    originalAmountPaidPaisa: data.originalAmountPaidPaisa ?? null,
+    estimatedOriginalBasePricePaisa: data.estimatedOriginalBasePricePaisa ?? null,
+    status: (data.status || 'TBD') as DeferralEntry['status'],
+    deferralDate: data.deferralDate || null,
+    expiryDate: data.expiryDate || null,
+    deferredToEventId: data.deferredToEventId || null,
+    deferredToEventName: data.deferredToEventName || null,
+    deferredToTicketId: data.deferredToTicketId || null,
+    deferredToTicketName: data.deferredToTicketName || null,
+    amountDueForUpgradePaisa: data.amountDueForUpgradePaisa ?? null,
+    upgradePaymentOrderId: data.upgradePaymentOrderId || null,
+    upgradePaymentStatus: data.upgradePaymentStatus || null,
+    code: data.code || null,
+  };
+}
 
 async function sendAdminDeferralRequestNotificationEmail(
   deferralData: Omit<DeferralEntry, 'id' | 'createdAt' | 'updatedAt'> & { createdAt: string }
@@ -81,11 +106,17 @@ export async function handleDeferral(
     const raceCategory = (participantData.ticketName || '').toUpperCase();
     const typeKey = raceCategory.includes('SWIM') ? 'Swimming' : (raceCategory.includes('DUATHLON') ? 'Duathlon' : 'Triathlon');
 
-    const baseFee = sanitizeMoney(
-      (globalFees as any)?.[typeKey]?.deferralFeePaisa ?? 
-      (globalFees as any)?.deferralFeePaisa ?? 
-      200000
-    );
+    const baseFee = isUsd
+      ? sanitizeMoney(
+          (globalFees as any)?.[typeKey]?.deferralFeeUsdCents ??
+          (globalFees as any)?.deferralFeeUsdCents ??
+          5000
+        )
+      : sanitizeMoney(
+          (globalFees as any)?.[typeKey]?.deferralFeePaisa ??
+          (globalFees as any)?.deferralFeePaisa ??
+          200000
+        );
 
     const pricingInput: PricingInput = {
         basePrice: baseFee,
@@ -170,6 +201,8 @@ export async function handleDeferral(
               userState
             });
 
+            const invoiceNumber = invoice.invoiceNumber || invoice.invoice_id;
+
             await markInvoiceAsSent(invoice.invoice_id);
             
             const appliedAmount = Math.max(1, Math.round(pricingBreakdown.totalPayable / 100));
@@ -186,7 +219,7 @@ export async function handleDeferral(
             await newDeferralRef.update({ 
                 zohoSyncStatus: 'success', 
                 invoiceId: invoice.invoice_id, 
-                invoiceNumber: invoice.invoiceNumber 
+              invoiceNumber 
             });
 
             // 🔥 Trigger WhatsApp Delivery for Service Fee
@@ -196,12 +229,26 @@ export async function handleDeferral(
                 await sendServiceFeeWhatsAppAction({
                     orderId: newDeferralRef.id,
                     invoiceId: invoice.invoice_id,
-                    invoiceNumber: invoice.invoiceNumber,
+                  invoiceNumber,
                     mobile: mobileToSend,
                     name: participantData.name || "Athlete",
                     serviceType: 'Deferral',
                     eventName: participantData.eventName || 'Event'
                 });
+            }
+
+            // 🔥 Trigger Brevo Invoice Email (template 256)
+            if (participantData.email) {
+                sendInvoiceEmailBrevoAction({
+                    invoiceId: invoice.invoice_id,
+                  invoiceNumber,
+                    recipientEmail: participantData.email,
+                    name: participantData.name || 'Athlete',
+                    eventName: participantData.eventName || 'Event',
+                    category: participantData.ticketName || 'N/A',
+                    eventDate: participantData.eventDate || null,
+                    amountPaisa: pricingBreakdown.totalPayable,
+                }).catch(e => console.warn('[handleDeferral] Brevo invoice email failed:', e.message));
             }
           }
         } catch (zohoErr: any) {
@@ -280,19 +327,183 @@ export async function updateDeferralAction(deferralId: string, data: AdminDeferr
     const adminDb = getFirestoreInstance();
     const validation = AdminDeferralEditSchema.safeParse(data);
     if (!validation.success) return { success: false, message: validation.error.errors[0].message };
-    
+
+    const existingDoc = await adminDb.collection(DEFERRALS_COLLECTION).doc(deferralId).get();
+    if (!existingDoc.exists) {
+      return { success: false, message: 'Deferral not found.' };
+    }
+
+    const existingData = existingDoc.data() as DeferralEntry;
     const vD = validation.data;
-    const updatePayload: any = { 
-        ...vD, 
-        updatedAt: FieldValue.serverTimestamp(),
-        expiryDate: vD.expiryDate ? format(vD.expiryDate, 'yyyy-MM-dd') : undefined
+    const normalizeOptionalSelection = (value?: string) => {
+      const trimmed = String(value || '').trim();
+      if (!trimmed || trimmed === 'NONE' || trimmed === '--no-assignment-placeholder--') return null;
+      return trimmed;
     };
 
+    const updatePayload: any = {
+      updatedAt: FieldValue.serverTimestamp(),
+    };
+
+    if (vD.participantName !== undefined) updatePayload.participantName = vD.participantName;
+    if (vD.participantEmail !== undefined) updatePayload.participantEmail = vD.participantEmail;
+    if (vD.status !== undefined) updatePayload.status = vD.status;
+    if (vD.expiryDate !== undefined) updatePayload.expiryDate = vD.expiryDate ? format(vD.expiryDate, 'yyyy-MM-dd') : null;
+    if (vD.estimatedOriginalBasePricePaisa !== undefined) updatePayload.estimatedOriginalBasePricePaisa = vD.estimatedOriginalBasePricePaisa;
+    if (vD.originalAmountPaidPaisa !== undefined) updatePayload.originalAmountPaidPaisa = vD.originalAmountPaidPaisa;
+    if (vD.adminNotes !== undefined) updatePayload.notes = vD.adminNotes || null;
+
+    if (vD.deferredToEventId !== undefined) {
+      const normalizedEventId = normalizeOptionalSelection(vD.deferredToEventId);
+      updatePayload.deferredToEventId = normalizedEventId;
+
+      if (!normalizedEventId) {
+        updatePayload.deferredToEventName = null;
+        updatePayload.deferredToTicketId = null;
+        updatePayload.deferredToTicketName = null;
+      } else {
+        const eventSnap = await adminDb.collection('events').doc(normalizedEventId).get();
+        updatePayload.deferredToEventName = eventSnap.exists
+          ? String(eventSnap.data()?.eventName || existingData.deferredToEventName || 'Unknown Event')
+          : (existingData.deferredToEventName || 'Unknown Event');
+      }
+    }
+
+    if (vD.deferredToTicketId !== undefined) {
+      const normalizedTicketId = normalizeOptionalSelection(vD.deferredToTicketId);
+      updatePayload.deferredToTicketId = normalizedTicketId;
+
+      if (!normalizedTicketId) {
+        updatePayload.deferredToTicketName = null;
+      } else {
+        const eventIdForTicket = normalizeOptionalSelection(vD.deferredToEventId) || existingData.deferredToEventId || null;
+        if (eventIdForTicket) {
+          const ticketSnap = await adminDb
+            .collection('events')
+            .doc(eventIdForTicket)
+            .collection('ticketDefinitions')
+            .doc(normalizedTicketId)
+            .get();
+          updatePayload.deferredToTicketName = ticketSnap.exists
+            ? String(ticketSnap.data()?.ticketName || existingData.deferredToTicketName || 'Unknown Ticket')
+            : (existingData.deferredToTicketName || 'Unknown Ticket');
+        }
+      }
+    }
+
     await adminDb.collection(DEFERRALS_COLLECTION).doc(deferralId).update(updatePayload);
+
+    // Keep users/{uid}.activeDeferral in sync with edited deferral records.
+    const updatedDoc = await adminDb.collection(DEFERRALS_COLLECTION).doc(deferralId).get();
+    if (updatedDoc.exists) {
+      const updatedData = updatedDoc.data() as DeferralEntry;
+      const status = updatedData.status as DeferralEntry['status'];
+      const userId = updatedData.userId;
+
+      if (userId) {
+        if (DASHBOARD_VISIBLE_DEFERRAL_STATUSES.includes(status)) {
+          await adminDb.collection(USERS_COLLECTION).doc(userId).set({
+            activeDeferral: mapDeferralToActiveInfo(deferralId, updatedData),
+            updatedAt: FieldValue.serverTimestamp(),
+          }, { merge: true });
+        } else {
+          await adminDb.collection(USERS_COLLECTION).doc(userId).set({
+            activeDeferral: FieldValue.delete(),
+            updatedAt: FieldValue.serverTimestamp(),
+          }, { merge: true });
+        }
+      }
+    }
+
     revalidatePath('/admin/dashboard');
     return { success: true, message: 'Updated.' };
   } catch (e: any) {
     return { success: false, message: e.message };
+  }
+}
+
+export async function getActiveDeferralForUserAction(uid?: string | null, email?: string | null): Promise<{ success: boolean; message: string; activeDeferral?: any | null }> {
+  try {
+    const adminDb = getFirestoreInstance();
+    const cleanUid = String(uid || '').trim();
+    const cleanEmail = String(email || '').trim().toLowerCase();
+
+    if (!cleanUid && !cleanEmail) {
+      return { success: false, message: 'UID or email is required.', activeDeferral: null };
+    }
+
+    const candidateDocs: Array<{ id: string; data: DeferralEntry }> = [];
+
+    if (cleanUid) {
+      const byUid = await adminDb
+        .collection(DEFERRALS_COLLECTION)
+        .where('userId', '==', cleanUid)
+        .get();
+      byUid.docs.forEach((doc) => candidateDocs.push({ id: doc.id, data: doc.data() as DeferralEntry }));
+    }
+
+    if (cleanEmail) {
+      const byEmail = await adminDb
+        .collection(DEFERRALS_COLLECTION)
+        .where('participantEmail', '==', cleanEmail)
+        .get();
+      byEmail.docs.forEach((doc) => {
+        if (!candidateDocs.some((c) => c.id === doc.id)) {
+          candidateDocs.push({ id: doc.id, data: doc.data() as DeferralEntry });
+        }
+      });
+    }
+
+    if (candidateDocs.length === 0) {
+      return { success: true, message: 'No deferral found.', activeDeferral: null };
+    }
+
+    const statusPriority: DeferralEntry['status'][] = ['Pending Ticket Selection', 'Pending Upgrade Payment', 'Pending', 'Processing', 'ProcessingConfirmation', 'Expired'];
+
+    const sorted = candidateDocs.sort((a, b) => {
+      const aIdx = statusPriority.indexOf(a.data.status as DeferralEntry['status']);
+      const bIdx = statusPriority.indexOf(b.data.status as DeferralEntry['status']);
+      const aPriority = aIdx === -1 ? 999 : aIdx;
+      const bPriority = bIdx === -1 ? 999 : bIdx;
+      if (aPriority !== bPriority) return aPriority - bPriority;
+
+      const aTs = new Date(String(a.data.updatedAt || a.data.createdAt || 0)).getTime();
+      const bTs = new Date(String(b.data.updatedAt || b.data.createdAt || 0)).getTime();
+      return bTs - aTs;
+    });
+
+    const picked = sorted[0];
+    const enrichedPickedData: Partial<DeferralEntry> = { ...picked.data };
+
+    if ((!enrichedPickedData.originalEventName || enrichedPickedData.originalEventName === 'Unknown Event') && enrichedPickedData.originalEventId) {
+      const eventSnap = await adminDb.collection('events').doc(enrichedPickedData.originalEventId).get();
+      if (eventSnap.exists) {
+        const eventData = eventSnap.data() as any;
+        enrichedPickedData.originalEventName = String(eventData?.eventName || enrichedPickedData.originalEventName || 'Unknown Event');
+        enrichedPickedData.originalEventDate = enrichedPickedData.originalEventDate || (eventData?.eventDate ? String(eventData.eventDate) : null);
+
+        await adminDb.collection(DEFERRALS_COLLECTION).doc(picked.id).set({
+          originalEventName: enrichedPickedData.originalEventName,
+          originalEventDate: enrichedPickedData.originalEventDate || null,
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+    }
+
+    const activeDeferral = mapDeferralToActiveInfo(picked.id, enrichedPickedData);
+
+    // Self-heal missing user.activeDeferral (best effort)
+    const userIdToSync = cleanUid || picked.data.userId || '';
+    if (userIdToSync && DASHBOARD_VISIBLE_DEFERRAL_STATUSES.includes(activeDeferral.status)) {
+      await adminDb.collection(USERS_COLLECTION).doc(userIdToSync).set({
+        activeDeferral,
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    return { success: true, message: 'Fetched.', activeDeferral: serializeValue(activeDeferral) };
+  } catch (e: any) {
+    return { success: false, message: e.message, activeDeferral: null };
   }
 }
 
@@ -320,11 +531,18 @@ export async function addManualDeferralAction(data: AdminManualDeferralCreateFor
     if (userQuery.empty) throw new Error("User not found with this email.");
     const userId = userQuery.docs[0].id;
 
+    const originalEventSnap = await adminDb.collection('events').doc(vD.originalEventId).get();
+    const originalEventData = originalEventSnap.exists ? originalEventSnap.data() : null;
+    const originalEventName = String(originalEventData?.eventName || 'Unknown Event');
+    const originalEventDate = originalEventData?.eventDate ? String(originalEventData.eventDate) : null;
+
     const deferralEntryData = {
       userId,
       participantEmail: vD.email.toLowerCase(),
       participantName: vD.name,
+      originalEventName,
       originalEventId: vD.originalEventId,
+      originalEventDate,
       originalAmountPaidPaisa: vD.originalAmountPaidPaisa,
       estimatedOriginalBasePricePaisa: vD.estimatedOriginalBasePricePaisa,
       deferralDate: format(vD.deferralDate, 'yyyy-MM-dd'),
@@ -355,7 +573,15 @@ export async function getDeferralDetailsByIdAction(deferralId: string): Promise<
         const adminDb = getFirestoreInstance();
         const doc = await adminDb.collection(DEFERRALS_COLLECTION).doc(deferralId).get();
         if (!doc.exists) return { success: false, message: "Not found." };
-        return { success: true, message: 'Fetched.', deferral: serializeValue({ id: doc.id, ...doc.data() }) };
+
+        const deferral = serializeValue({ id: doc.id, ...doc.data() }) as DeferralEntry;
+        const status = String(deferral.status || '').trim();
+        const allowedStatuses = new Set<DeferralEntry['status'] | string>(['Pending', 'Pending Ticket Selection']);
+        if (!allowedStatuses.has(status)) {
+            return { success: false, message: `This deferral is already ${status || 'used'} and cannot be applied again.` };
+        }
+
+        return { success: true, message: 'Fetched.', deferral };
     } catch (e: any) {
         return { success: false, message: e.message };
     }

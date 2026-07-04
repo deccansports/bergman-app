@@ -7,13 +7,18 @@ import { Textarea } from '@/components/ui/textarea';
 import { cn, isDuathlonEvent } from '@/lib/utils';
 import { getFaqsAction, logAiInteractionAction } from '@/lib/actions/faqActions';
 import { getCalendarEventsAction } from '@/lib/actions/eventActions';
+import { getAthleteRankingData } from '@/lib/actions/athleteRankingActions';
+import { getClubRankingData } from '@/lib/actions/clubActions';
 import type { FaqEntry, EventCalendarEntry } from '@/lib/types';
 import { useAuth } from '@/context/AuthContext';
 import { askEliteAi } from '@/ai/flows/faq-flow';
+import { getUpcomingRacesFromKV } from '@/lib/chatMemory';
 import { ScrollArea } from './ui/scroll-area';
 import ReactMarkdown from 'react-markdown';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { isBefore, parseISO, startOfDay } from 'date-fns';
+import { createPortal } from 'react-dom';
 
 interface Message {
   id: number;
@@ -22,8 +27,99 @@ interface Message {
   isSuggestion?: boolean;
 }
 
+const AI_TIMEOUT_MS = 7000;
+
+const isCutoffQuestion = (text: string) => {
+    const q = text.toLowerCase();
+    return q.includes('cutoff') || q.includes('cut off') || q.includes('time limit') || q.includes('time-limit');
+};
+
+const getCutoffAnswer = (events: EventCalendarEntry[]) => {
+    const rows: string[] = [];
+
+    for (const event of events) {
+        for (const ticket of event.ticketDefinitions || []) {
+            const c = ticket.cutoffs;
+            if (!c) continue;
+
+            if (c.mode === 'segment') {
+                const segment = [
+                    c.swim ? `Swim: ${c.swim}` : null,
+                    c.bike ? `Bike: ${c.bike}` : null,
+                    c.run ? `Run: ${c.run}` : null,
+                    c.run1 ? `Run1: ${c.run1}` : null,
+                    c.run2 ? `Run2: ${c.run2}` : null,
+                ].filter(Boolean).join(', ');
+
+                if (segment) {
+                    rows.push(`- **${event.eventName}** → **${ticket.ticketName}**: ${segment}`);
+                }
+            } else if (c.overall) {
+                rows.push(`- **${event.eventName}** → **${ticket.ticketName}**: Overall ${c.overall}`);
+            }
+        }
+    }
+
+    if (rows.length === 0) {
+        return "I couldn't find published cutoff data in the current schedule. Please check [Contact Us](/contact-us) for official confirmation.";
+    }
+
+    return `Here are the latest published cutoff timings:\n\n${rows.slice(0, 20).join('\n')}\n\nFor full rules, please verify on the race page or [Contact Us](/contact-us).`;
+};
+
+const getQuickIntentReply = (text: string, upcomingRaceNames: string[], isLoggedIn: boolean) => {
+    const q = text.toLowerCase();
+
+        if (
+            q.includes('policy') ||
+            q.includes('deferral') ||
+            q.includes('cancellation') ||
+            q.includes('cancel') ||
+            q.includes('refund') ||
+            q.includes('transfer') ||
+            q.includes('category change') ||
+            q.includes('explore the website')
+        ) {
+            return [
+                'Here are the best pages for detailed policy information:',
+                '',
+                '- **Deferral / cancellation / refund / transfer rules:** [Refund Policy](/refund-policy)',
+                '- **Full race legal terms & conditions:** [Terms & Conditions](/terms-and-conditions)',
+                '- **Athlete standings:** [Athlete Rankings](/athlete-rankings)',
+                '- **Club standings:** [Club Rankings](/club-rankings)',
+                '',
+                'If you want, I can also summarize the key policy points here in 5 bullets.'
+            ].join('\n');
+        }
+
+    if (q.includes('next race') || q.includes('upcoming race') || q.includes('my race')) {
+        if (!isLoggedIn) {
+            return 'Please **[log in](/login)** to view your registered and upcoming races.';
+        }
+        if (upcomingRaceNames.length === 0) {
+            return "I couldn't find an upcoming race in your profile right now. You can verify from [Dashboard](/dashboard).";
+        }
+        return `Your upcoming races:\n\n${upcomingRaceNames.slice(0, 5).map((r, i) => `${i + 1}. **${r}**`).join('\n')}\n\nSee full details in [Dashboard](/dashboard).`;
+    }
+
+    if (q.includes('points') || q.includes('my points') || q.includes('check my points')) {
+        if (!isLoggedIn) {
+            return 'Please **[log in](/login)** to view your points and performance stats.';
+        }
+        return 'You can check your latest points and performance stats in [Dashboard](/dashboard).';
+    }
+
+    if (q.includes('club ranking') || q.includes('club rankings') || q.includes('rankings')) {
+        return 'You can view the latest club leaderboard on [Club Rankings](/club-rankings) and athlete standings on [Athlete Rankings](/athlete-rankings).';
+    }
+
+    return null;
+};
+
 export default function FaqChatbot() {
+    const pathname = usePathname();
   const { currentUser } = useAuth();
+    const [isClientMounted, setIsClientMounted] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -32,8 +128,12 @@ export default function FaqChatbot() {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [allFaqs, setAllFaqs] = useState<FaqEntry[]>([]);
   const [allEvents, setAllEvents] = useState<EventCalendarEntry[]>([]);
+    const [upcomingRaceNames, setUpcomingRaceNames] = useState<string[]>([]);
+    const responseCacheRef = useRef<Map<string, string>>(new Map());
 
   const initialGreetingSent = useRef(false);
+
+    const isLedCleanRoute = pathname?.startsWith('/athlete-journey');
 
   const fetchAppData = useCallback(async () => {
     try {
@@ -77,6 +177,35 @@ export default function FaqChatbot() {
     }
   }, [isOpen, fetchAppData, currentUser]);
 
+    useEffect(() => {
+        setIsClientMounted(true);
+    }, []);
+
+    useEffect(() => {
+        let active = true;
+
+        const fetchUpcomingRaces = async () => {
+            if (!isOpen || !currentUser?.email) {
+                setUpcomingRaceNames([]);
+                return;
+            }
+
+            try {
+                const races = await getUpcomingRacesFromKV(currentUser.email);
+                if (!active) return;
+                setUpcomingRaceNames((races || []).map(r => r.eventName).filter(Boolean));
+            } catch (error) {
+                if (!active) return;
+                console.warn('Upcoming races prefetch failed:', error);
+            }
+        };
+
+        fetchUpcomingRaces();
+        return () => {
+            active = false;
+        };
+    }, [isOpen, currentUser?.email]);
+
   const scrollToBottom = useCallback(() => {
       if (scrollAreaRef.current) {
          const scrollableViewport = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
@@ -99,6 +228,13 @@ export default function FaqChatbot() {
     setIsLoading(true);
 
     try {
+        const cacheKey = userMessage.toLowerCase().trim();
+        const cachedReply = responseCacheRef.current.get(cacheKey);
+        if (cachedReply) {
+            setMessages(prev => [...prev, { id: Date.now() + 1, text: cachedReply, from: 'bot' }]);
+            return;
+        }
+
         // Ensure we have context data, fetch if empty
         let faqs = allFaqs;
         let events = allEvents;
@@ -113,7 +249,24 @@ export default function FaqChatbot() {
             if (eventResult.success && eventResult.events) events = eventResult.events;
         }
         
-        const context = faqs.map(f => ({ question: f.question, answer: f.answer }));
+                const queryTerms = userMessage
+                    .toLowerCase()
+                    .split(/[^a-z0-9]+/)
+                    .filter(t => t.length > 2);
+
+                const rankedFaqs = [...faqs]
+                    .map(f => {
+                        const hay = `${f.question} ${f.answer}`.toLowerCase();
+                        const score = queryTerms.reduce((acc, term) => acc + (hay.includes(term) ? 1 : 0), 0);
+                        return { faq: f, score };
+                    })
+                    .sort((a, b) => b.score - a.score);
+
+                const selectedFaqs = rankedFaqs.some(r => r.score > 0)
+                    ? rankedFaqs.filter(r => r.score > 0).slice(0, 25).map(r => r.faq)
+                    : rankedFaqs.slice(0, 15).map(r => r.faq);
+
+                const context = selectedFaqs.map(f => ({ question: f.question, answer: f.answer }));
         
         // FILTER: Only include UPCOMING events in the context
         const today = startOfDay(new Date());
@@ -126,7 +279,92 @@ export default function FaqChatbot() {
             }
         });
 
-        const eventContext = upcomingEvents.map(e => {
+                if (isCutoffQuestion(userMessage)) {
+                        const fastCutoffReply = getCutoffAnswer(upcomingEvents);
+                    responseCacheRef.current.set(cacheKey, fastCutoffReply);
+                        setMessages(prev => [...prev, { id: Date.now() + 1, text: fastCutoffReply, from: 'bot' }]);
+                        return;
+                }
+
+                const quickIntentReply = getQuickIntentReply(userMessage, upcomingRaceNames, !!currentUser?.uid);
+                if (quickIntentReply) {
+                    responseCacheRef.current.set(cacheKey, quickIntentReply);
+                    setMessages(prev => [...prev, { id: Date.now() + 1, text: quickIntentReply, from: 'bot' }]);
+                    return;
+                }
+
+                                const lowerMessage = userMessage.toLowerCase();
+                                const asksTopAthlete =
+                                    lowerMessage.includes('rank number one') ||
+                                    lowerMessage.includes('number one') ||
+                                    lowerMessage.includes('top athlete') ||
+                                    lowerMessage.includes('who is ranked') ||
+                                    lowerMessage.includes('athlete ranking');
+                                const asksTopClub =
+                                    lowerMessage.includes('top club') ||
+                                    lowerMessage.includes('club holds the top') ||
+                                    lowerMessage.includes('club ranking') ||
+                                    lowerMessage.includes('club rankings');
+
+                                if (asksTopAthlete || asksTopClub) {
+                                    try {
+                                        const [athleteRes, clubRes] = await Promise.all([
+                                            asksTopAthlete ? getAthleteRankingData({}) : Promise.resolve(null as any),
+                                            asksTopClub ? getClubRankingData({}) : Promise.resolve(null as any),
+                                        ]);
+
+                                        const topAthlete = asksTopAthlete
+                                            ? (athleteRes?.rankings || []).find((a: any) => a.overallRank === 1) || (athleteRes?.rankings || [])[0]
+                                            : null;
+                                        const topClub = asksTopClub
+                                            ? (clubRes?.rankings || []).find((c: any) => c.overallRank === 1) || (clubRes?.rankings || [])[0]
+                                            : null;
+
+                                        const rankingLines: string[] = [];
+                                        if (asksTopAthlete) {
+                                            rankingLines.push(
+                                                topAthlete
+                                                    ? `- **Current #1 Athlete:** ${topAthlete.name} (${topAthlete.totalPoints || 0} pts)`
+                                                    : '- **Current #1 Athlete:** Not available right now.'
+                                            );
+                                        }
+                                        if (asksTopClub) {
+                                            rankingLines.push(
+                                                topClub
+                                                    ? `- **Current #1 Club:** ${topClub.clubName} (${topClub.totalPoints || 0} pts)`
+                                                    : '- **Current #1 Club:** Not available right now.'
+                                            );
+                                        }
+
+                                        rankingLines.push('', '- Full tables: [Athlete Rankings](/athlete-rankings) | [Club Rankings](/club-rankings)');
+                                        const rankingReply = rankingLines.join('\n');
+
+                                        responseCacheRef.current.set(cacheKey, rankingReply);
+                                        setMessages(prev => [...prev, { id: Date.now() + 1, text: rankingReply, from: 'bot' }]);
+                                        return;
+                                    } catch (rankingError) {
+                                        console.warn('Ranking quick lookup failed:', rankingError);
+                                        const fallbackRankingReply = 'You can view the latest leaderboard here: [Athlete Rankings](/athlete-rankings) and [Club Rankings](/club-rankings).';
+                                        responseCacheRef.current.set(cacheKey, fallbackRankingReply);
+                                        setMessages(prev => [...prev, { id: Date.now() + 1, text: fallbackRankingReply, from: 'bot' }]);
+                                        return;
+                                    }
+                                }
+
+                const selectedEvents = queryTerms.length > 0
+                    ? upcomingEvents
+                            .map(e => {
+                                const hay = `${e.eventName} ${e.description || ''} ${e.customRules || ''}`.toLowerCase();
+                                const score = queryTerms.reduce((acc, term) => acc + (hay.includes(term) ? 1 : 0), 0);
+                                return { event: e, score };
+                            })
+                            .sort((a, b) => b.score - a.score)
+                    : upcomingEvents.map(e => ({ event: e, score: 0 }));
+
+                const eventContext = selectedEvents
+                    .filter((e, idx) => e.score > 0 || idx < 8)
+                    .slice(0, 8)
+                    .map(({ event: e }) => {
             const cutoffs = e.ticketDefinitions?.map(t => {
                 const c = t.cutoffs;
                 const mode = c?.mode || 'overall';
@@ -146,18 +384,25 @@ export default function FaqChatbot() {
         const userProfile = currentUser ? {
             name: currentUser.name,
             tier: currentUser.role || 'Athlete',
-            points: 0, 
-            upcomingRaces: currentUser.upcomingEvents?.map(e => e.eventName) || [],
+            points: 0,
+            uid: currentUser.uid,
+            upcomingRaces: upcomingRaceNames,
         } : null;
-
+        
         try {
-            const reply = await askEliteAi({
-                question: userMessage,
-                context,
-                userProfile,
-                eventContext
-            });
+            const reply = await Promise.race<string>([
+                askEliteAi({
+                    question: userMessage,
+                    context,
+                    userProfile,
+                    eventContext
+                }),
+                new Promise<string>((_, reject) =>
+                    setTimeout(() => reject(new Error('AI response timed out')), AI_TIMEOUT_MS)
+                )
+            ]);
 
+            responseCacheRef.current.set(cacheKey, reply);
             setMessages(prev => [...prev, { id: Date.now() + 1, text: reply, from: 'bot' }]);
             
             logAiInteractionAction({
@@ -165,19 +410,19 @@ export default function FaqChatbot() {
                 userName: currentUser?.name || 'Guest',
                 question: userMessage,
                 answer: reply
-            });
+            }).catch(err => console.warn('Log interaction failed:', err));
         } catch (aiError) {
             // Fallback: Search FAQs manually if AI fails
             console.error("AI Error, attempting FAQ fallback:", aiError);
-            
-            const lowerQuery = userMessage.toLowerCase();
-            const relevantFaqs = faqs.filter(f => 
-                f.question.toLowerCase().includes(lowerQuery) ||
-                f.answer.toLowerCase().includes(lowerQuery)
-            ).slice(0, 2);
+
+            const relevantFaqs = rankedFaqs
+                .filter(r => r.score > 0)
+                .slice(0, 2)
+                .map(r => r.faq);
             
             if (relevantFaqs.length > 0) {
                 const fallbackResponse = `**Based on our knowledge base:**\n\n${relevantFaqs.map(f => `**Q: ${f.question}**\n${f.answer}`).join('\n\n')}\n\n---\n*If you need more help, please visit [Contact Us](/contact-us).*`;
+                responseCacheRef.current.set(cacheKey, fallbackResponse);
                 setMessages(prev => [...prev, { id: Date.now() + 1, text: fallbackResponse, from: 'bot' }]);
             } else {
                 const errorMsg = aiError instanceof Error ? aiError.message : 'Unknown error';
@@ -192,7 +437,7 @@ export default function FaqChatbot() {
     } finally {
         setIsLoading(false);
     }
-  }, [isLoading, allFaqs, allEvents, currentUser]);
+    }, [isLoading, allFaqs, allEvents, currentUser, upcomingRaceNames]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -201,7 +446,8 @@ export default function FaqChatbot() {
     }
   };
 
-  const getInternalActions = (text: string) => {
+  const getInternalActions = (text: string | undefined) => {
+      if (!text) return [];
       const actions: { label: string, url: string }[] = [];
       const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
       let match;
@@ -217,7 +463,15 @@ export default function FaqChatbot() {
       return actions;
   };
 
-  return (
+    if (isLedCleanRoute) {
+        return null;
+    }
+
+    if (!isClientMounted) {
+        return null;
+    }
+
+    return createPortal(
     <>
       <div className={cn("fixed bottom-4 right-4 z-50 transition-all duration-300", {
         'opacity-0 translate-y-2 pointer-events-none': isOpen,
@@ -225,31 +479,30 @@ export default function FaqChatbot() {
       })}>
         <Button
           size="lg"
-          className="rounded-full w-16 h-16 p-0 shadow-2xl bg-slate-900 border-2 border-primary/50 hover:scale-110 transition-transform flex items-center justify-center overflow-hidden"
+          className="rounded-full w-16 h-16 p-0 shadow-2xl bg-orange-500 border-2 border-orange-600 hover:scale-110 transition-transform flex items-center justify-center overflow-hidden hover:bg-orange-600"
           onClick={() => setIsOpen(true)}
         >
-          <div className="absolute inset-0 bg-gradient-to-tr from-primary/20 to-transparent animate-pulse" />
-          <Bot className="h-8 w-8 text-primary relative z-10" />
+          <Bot className="h-8 w-8 text-white relative z-10" />
         </Button>
       </div>
 
       <div className={cn(
-        "fixed bottom-4 right-4 z-50 w-[calc(100vw-2rem)] sm:w-[450px] h-[75vh] sm:h-[650px] flex flex-col bg-slate-950 border border-primary/20 rounded-3xl shadow-[0_0_50px_rgba(11,94,215,0.2)] transition-all duration-500 transform",
+        "fixed bottom-4 right-4 z-50 w-[calc(100vw-2rem)] sm:w-[450px] h-[75vh] sm:h-[650px] flex flex-col bg-slate-950 border border-orange-500/20 rounded-3xl shadow-[0_0_50px_rgba(249,115,22,0.2)] transition-all duration-500 transform",
         {
           'opacity-100 translate-y-0 scale-100': isOpen,
           'opacity-0 translate-y-8 scale-95 pointer-events-none': !isOpen,
         }
       )}>
-        <div className="flex items-center justify-between p-5 border-b border-primary/10 bg-primary/5 rounded-t-3xl">
+        <div className="flex items-center justify-between p-5 border-b border-orange-500/10 bg-orange-500/5 rounded-t-3xl">
           <div className="flex items-center gap-3 text-left">
-            <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center border border-primary/20">
-                <Bot className="h-6 w-6 text-primary" />
+            <div className="h-10 w-10 rounded-xl flex items-center justify-center">
+                <Bot className="h-6 w-6 text-orange-500" />
             </div>
             <div className="text-left">
                 <h3 className="text-sm font-black uppercase italic tracking-tighter text-white flex items-center gap-2">
                     Elite Bergman AI <Sparkles className="h-3 w-3 text-yellow-400 fill-yellow-400" />
                 </h3>
-                <p className="text-[10px] font-black uppercase tracking-widest text-primary/70">Context Aware Assistant</p>
+                <p className="text-[10px] font-black uppercase tracking-widest text-orange-400">Context Aware Assistant</p>
             </div>
           </div>
           <Button variant="ghost" size="icon" onClick={() => setIsOpen(false)} className="rounded-full h-8 w-8 text-slate-400 hover:text-white">
@@ -270,30 +523,35 @@ export default function FaqChatbot() {
                         'items-start': message.from === 'bot',
                         })}
                     >
-                        <div className={cn("flex items-end gap-3 w-full", message.from === 'user' ? "justify-end" : "justify-start")}>
+                        <div
+                            className={cn(
+                                "min-w-0 w-full",
+                                message.from === 'user'
+                                    ? "flex items-end gap-3 justify-end"
+                                    : "grid grid-cols-[2rem_minmax(0,1fr)] items-end gap-3"
+                            )}
+                        >
                             {message.from === 'bot' && (
                                 <div className="h-8 w-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mb-1">
                                     <Bot className="h-4 w-4 text-primary" />
                                 </div>
                             )}
                             <div
-                            className={cn("max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm", {
-                                'bg-primary text-white font-bold rounded-br-none': message.from === 'user',
-                                'bg-slate-900 text-slate-200 border border-white/5 rounded-bl-none': message.from === 'bot',
-                            })}
+                            className={cn("rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm min-w-0 max-w-full", message.from === 'user' ? "bg-primary text-white font-bold rounded-br-none" : "w-full bg-slate-900 text-slate-200 border border-white/5 rounded-bl-none")}
+                            style={{ maxWidth: message.from === 'user' ? '80%' : '100%' }}
                             >
                                 <ReactMarkdown 
-                                    className="markdown-container"
+                                    className="markdown-container block w-full max-w-full min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
                                     components={{
-                                        p: ({node, ...props}) => <p className="mb-2 last:mb-0" {...props} />,
+                                        p: ({node, ...props}) => <p className="mb-2 last:mb-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]" {...props} />,
                                         ul: ({node, ...props}) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
                                         ol: ({node, ...props}) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
-                                        li: ({node, ...props}) => <li className="mb-0.5" {...props} />,
-                                        strong: ({node, ...props}) => <strong className={cn("font-black", message.from === 'bot' ? "text-primary" : "text-white")} {...props} />,
-                                        h1: ({node, ...props}) => <h1 className="text-lg font-black uppercase italic mb-2" {...props} />,
-                                        h2: ({node, ...props}) => <h2 className="text-base font-black uppercase italic mb-2" {...props} />,
-                                        h3: ({node, ...props}) => <h3 className="text-sm font-black uppercase italic mb-1" {...props} />,
-                                        a: ({node, ...props}) => <span className="text-primary font-bold">{props.children}</span>, 
+                                        li: ({node, ...props}) => <li className="mb-0.5 whitespace-pre-wrap break-words [overflow-wrap:anywhere]" {...props} />,
+                                        strong: ({node, ...props}) => <strong className={cn("font-black break-words", message.from === 'bot' ? "text-primary" : "text-white")} {...props} />,
+                                        h1: ({node, ...props}) => <h1 className="text-lg font-black uppercase italic mb-2 break-words" {...props} />,
+                                        h2: ({node, ...props}) => <h2 className="text-base font-black uppercase italic mb-2 break-words" {...props} />,
+                                        h3: ({node, ...props}) => <h3 className="text-sm font-black uppercase italic mb-1 break-words" {...props} />,
+                                        a: ({node, ...props}) => <span className="text-primary font-bold break-words">{props.children}</span>, 
                                     }}
                                 >
                                     {message.text}
@@ -379,5 +637,6 @@ export default function FaqChatbot() {
         </div>
       </div>
     </>
+        , document.body
   );
 }

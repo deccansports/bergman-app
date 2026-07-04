@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { getFirestoreInstance } from '@/lib/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
-import { submitPublicEventRegistrationAction } from '@/lib/actions';
+import { finalizeRegistration } from '@/lib/registrationEngine/finalizeRegistration';
 
 export const runtime = 'nodejs'; // REQUIRED for crypto
 
@@ -87,17 +87,23 @@ export async function POST(req: NextRequest) {
      * Try multiple ways to identify registrationAttempt
      */
 
-    let registrationAttemptId =
-      payment?.notes?.registrationAttemptId || null;
-
-    // Fallback: use Razorpay order_id if your Firestore doc ID = orderId
-    if (!registrationAttemptId) {
-      registrationAttemptId = payment?.order_id || null;
-      console.log(`${actionName} ⚠️ Using fallback order_id: ${registrationAttemptId}`);
+    const paymentType = String(payment?.notes?.type || '').trim().toLowerCase();
+    if (paymentType && paymentType !== 'event_registration') {
+      await logRef.update({
+        status: 'ignored',
+        detail: `Ignored payment type: ${paymentType}`,
+      });
+      return NextResponse.json({ ok: true });
     }
 
+    const registrationAttemptId = payment?.notes?.registrationAttemptId || null;
+
     if (!registrationAttemptId) {
-      throw new Error('No registrationAttemptId or order_id found in webhook');
+      await logRef.update({
+        status: 'ignored',
+        detail: 'Missing registrationAttemptId in Razorpay payment notes',
+      });
+      return NextResponse.json({ ok: true });
     }
 
     console.log(`${actionName} 🔥 Processing attempt: ${registrationAttemptId}`);
@@ -110,36 +116,50 @@ export async function POST(req: NextRequest) {
     }
 
     const attemptData = attemptSnap.data();
+    console.log(`${actionName} Fetched attempt:`, JSON.stringify(attemptData, null, 2));
 
-    // 🛑 Prevent double processing
-    if (attemptData?.status === 'PaymentCaptured') {
-      console.log(`${actionName} ⚠️ Attempt already marked PaymentCaptured`);
-      await logRef.update({ status: 'processed_duplicate' });
+    // Idempotency: only skip when already fully completed with a participant.
+    // If status is PaymentCaptured (but not completed), continue to finalize/recover.
+    if (attemptData?.status === 'Completed' && attemptData?.participantId) {
+      console.log(`${actionName} ⚠️ Attempt already completed: ${attemptData.participantId}`);
+      await logRef.update({
+        status: 'processed_duplicate',
+        participantId: attemptData.participantId,
+        detail: 'Attempt already completed',
+      });
       return NextResponse.json({ ok: true });
     }
 
-    // Update attempt
-    await attemptRef.update({
-      status: 'PaymentCaptured',
-      transactionId: paymentId,
-      specificPaymentMethod: paymentMethod || 'Online',
-      updatedAt: FieldValue.serverTimestamp(),
-    });
+    if (attemptData?.status !== 'PaymentCaptured') {
+      console.log(`${actionName} ℹ️ Updating attempt status to PaymentCaptured...`);
+      await attemptRef.update({
+        status: 'PaymentCaptured',
+        transactionId: paymentId,
+        specificPaymentMethod: paymentMethod || 'Online',
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      console.log(`${actionName} ✅ Status updated to PaymentCaptured`);
+    } else {
+      console.log(`${actionName} ♻️ Attempt already PaymentCaptured; continuing with idempotent finalization`);
+    }
 
+    console.log(`${actionName} 🚀 Calling finalizeRegistration(${registrationAttemptId})...`);
     // Create participant
-    const result = await submitPublicEventRegistrationAction(registrationAttemptId);
+    const result = await finalizeRegistration(registrationAttemptId, 'api.webhooks.razorpay');
+    console.log(`${actionName} Result:`, JSON.stringify(result, null, 2));
 
     if (!result.success) {
       throw new Error(result.message || 'Participant creation failed');
     }
 
+    console.log(`${actionName} ✅ Participant created: ${result.participantId}, Booking: ${result.bookingId}`);
     await logRef.update({
       status: 'processed',
       processedAt: FieldValue.serverTimestamp(),
       participantId: result.participantId || null,
     });
 
-    console.log(`${actionName} ✅ Registration completed`);
+    console.log(`${actionName} ✅ Registration completed successfully`);
 
     return NextResponse.json({ ok: true });
 

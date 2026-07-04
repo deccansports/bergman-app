@@ -7,6 +7,7 @@ import { FieldValue, type CollectionReference } from 'firebase-admin/firestore';
 import { revalidatePath } from 'next/cache';
 import { serializeParticipantData, toIsoStringSafe, calculateAgeGroup, serializeValue } from '../utils';
 import { _mirrorParticipantToKV } from './dataSyncActions';
+import { getEventParticipants } from '@/lib/dataLayerOptimized';
 
 /**
  * CORE LOGIC: Finds the next available BIB number for an athlete.
@@ -22,8 +23,7 @@ export async function assignNextAvailableBib(
 ): Promise<string | null> {
   const adminDb = getFirestoreInstance();
   const eventRef = adminDb.collection('events').doc(eventId);
-  let startBib: number | null = null;
-  let endBib: number | null = null;
+  let candidateRanges: Array<{ startBib: number; endBib: number }> = [];
   
   let normalizedGender: 'Male' | 'Female' | 'Any' | null = null;
   if (gender) {
@@ -36,6 +36,34 @@ export async function assignNextAvailableBib(
   // Normalize sub-category ID
   const finalSubCategory = (selectedSubCategory === "NONE" || !selectedSubCategory) ? null : selectedSubCategory;
 
+  const scoreAndSelectRules = (docs: FirebaseFirestore.QueryDocumentSnapshot[]) => {
+    const scored = docs
+      .map((doc) => {
+        const d = doc.data() as any;
+        const ageMatch = d.ageGroup === 'Any' || d.ageGroup === ageCategory;
+        const genderMatch = d.gender === 'Any' || d.gender === normalizedGender;
+        if (!ageMatch || !genderMatch) return null;
+
+        const ageScore = d.ageGroup === ageCategory ? 2 : 1;
+        const genderScore = d.gender === normalizedGender ? 2 : 1;
+        const score = ageScore + genderScore;
+
+        const startBib = Number(d.startBib);
+        const endBib = Number(d.endBib);
+        if (!Number.isFinite(startBib) || !Number.isFinite(endBib)) return null;
+
+        return { score, startBib, endBib };
+      })
+      .filter(Boolean) as Array<{ score: number; startBib: number; endBib: number }>;
+
+    if (scored.length === 0) return [] as Array<{ startBib: number; endBib: number }>;
+    const bestScore = Math.max(...scored.map((r) => r.score));
+    return scored
+      .filter((r) => r.score === bestScore)
+      .map(({ startBib, endBib }) => ({ startBib, endBib }))
+      .sort((a, b) => a.startBib - b.startBib);
+  };
+
   // 1. Try to find a rule that matches the specific Sub-Category
   if (finalSubCategory) {
     const subQuery = await eventRef.collection('bibAssignments')
@@ -44,22 +72,12 @@ export async function assignNextAvailableBib(
         .get();
     
     if (!subQuery.empty) {
-        const bestRule = subQuery.docs.find(doc => {
-            const d = doc.data();
-            const ageMatch = d.ageGroup === 'Any' || d.ageGroup === ageCategory;
-            const genderMatch = d.gender === 'Any' || d.gender === normalizedGender;
-            return ageMatch && genderMatch;
-        }) || subQuery.docs[0]; // Fallback to first rule for this subcategory if specific age/gender fails
-
-        if (bestRule) {
-            startBib = bestRule.data().startBib;
-            endBib = bestRule.data().endBib;
-        }
+        candidateRanges = scoreAndSelectRules(subQuery.docs);
     }
   }
 
   // 2. Fallback: Check Ticket-Wide Rules (where subcategory is not explicitly set)
-  if (startBib === null) {
+  if (candidateRanges.length === 0) {
     const ticketQuery = await eventRef.collection('bibAssignments')
         .where('ticketId', '==', ticketId)
         .get();
@@ -70,38 +88,62 @@ export async function assignNextAvailableBib(
             const d = doc.data();
             return !d.selectedSubCategory || d.selectedSubCategory === "NONE";
         });
-
-        const bestRule = validRules.find(doc => {
-            const d = doc.data();
-            const ageMatch = d.ageGroup === 'Any' || d.ageGroup === ageCategory;
-            const genderMatch = d.gender === 'Any' || d.gender === normalizedGender;
-            return ageMatch && genderMatch;
-        }) || (validRules.length > 0 ? validRules[0] : null);
-
-        if (bestRule) {
-            startBib = bestRule.data().startBib;
-            endBib = bestRule.data().endBib;
-        }
+        candidateRanges = scoreAndSelectRules(validRules);
     }
   }
 
-  if (startBib === null || endBib === null) {
+      if (candidateRanges.length === 0) {
       console.warn(`[assignNextAvailableBib] No BIB rule found for Event:${eventId}, Ticket:${ticketId}, SubCat:${finalSubCategory}, Age:${ageCategory}, Gender:${normalizedGender}`);
       return null;
   }
+
+  const isTerminalStatus = (participant: any) => {
+    const combined = [
+      participant?.ticketStatus,
+      participant?.registrationStatus,
+      participant?.status,
+      participant?.paymentStatus,
+    ]
+      .map((s) => String(s || '').trim().toLowerCase())
+      .filter(Boolean)
+      .join(' ');
+
+    return (
+      combined.includes('cancel') ||
+      combined.includes('defer') ||
+      combined.includes('refund') ||
+      combined.includes('inactive')
+    );
+  };
   
   const assignedNumbers = allEventBibs ?? new Set(
-    (await eventRef.collection('participants').select('bibNumber').get()).docs
-        .map(doc => doc.data().bibNumber)
-        .filter(Boolean).map(String)
+    (await getEventParticipants(eventId))
+      .filter((participant) => !isTerminalStatus(participant))
+      .map((participant) => participant?.bibNumber)
+      .filter(Boolean)
+      .map(String)
   );
 
   let bibNumber: number | null = null;
-  for (let i = startBib; i <= endBib; i++) {
-    if (!assignedNumbers.has(String(i))) {
-      bibNumber = i;
-      break;
+  for (const range of candidateRanges) {
+    for (let i = range.startBib; i <= range.endBib; i++) {
+      if (!assignedNumbers.has(String(i))) {
+        bibNumber = i;
+        break;
+      }
     }
+    if (bibNumber !== null) break;
+  }
+
+  if (!bibNumber) {
+    const rangeText = candidateRanges.map((r) => `${r.startBib}-${r.endBib}`).join(', ');
+    const occupiedInRange = Array.from(assignedNumbers).filter((b) => {
+      const n = Number(b);
+      return Number.isFinite(n) && candidateRanges.some((r) => n >= r.startBib && n <= r.endBib);
+    }).length;
+    console.warn(
+      `[assignNextAvailableBib] Range exhausted for Event:${eventId}, Ticket:${ticketId}, SubCat:${finalSubCategory}, Range:${rangeText}, OccupiedInRange:${occupiedInRange}`
+    );
   }
 
   return bibNumber ? bibNumber.toString() : null;

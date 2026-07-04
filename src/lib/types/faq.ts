@@ -15,6 +15,8 @@ export interface Enquiry {
   isSpam?: boolean;
   ipAddress?: string;
   userAgent?: string;
+  selectedEventId?: string | null;
+  selectedEventName?: string | null;
 }
 
 export interface EnquiryReply {

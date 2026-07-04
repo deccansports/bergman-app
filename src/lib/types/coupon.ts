@@ -2,7 +2,7 @@
 export interface Coupon {
   id: string;
   code: string;
-  couponType: 'Discount Code' | 'Group Discount' | 'Access Code' | 'Early Bird / Sale' | 'Club Coupon' | 'Previous Participant' | 'Feedback Coupon';
+  couponType: 'Discount Code' | 'Group Discount' | 'Access Code' | 'Early Bird / Sale' | 'Club Coupon' | 'Previous Participant' | 'Feedback Coupon' | 'Birthday Coupon';
   discountType: 'percentage' | 'fixed';
   discountValue: number;
   startDate?: string | null;
@@ -13,7 +13,9 @@ export interface Coupon {
   applicableEventIds?: string[];
   sourceEventIds?: string[];
   applicableTicketIds?: string[];
+  applicableClubIds?: string[];
   minCartValue?: number | null;
   email?: string | null;
   used?: boolean;
+  birthdayYear?: number;
 }

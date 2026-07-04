@@ -1,0 +1,1362 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8"/>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="x-apple-disable-message-reformatting"/>
+  <title>Bergman Bengaluru 2026 — Reel Brief</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=Bebas+Neue&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', Arial, sans-serif;
+      background-color: #05080e;
+      color: #eef4ff;
+      margin: 0; padding: 0;
+      -webkit-text-size-adjust: 100%;
+    }
+
+    .email-wrapper   { width: 100%; background-color: #05080e; }
+    .email-container { max-width: 640px; margin: 0 auto; background-color: #05080e; }
+
+    /* ══════════════════════
+       LOGO HEADER
+    ══════════════════════ */
+    .logo-header {
+      background-color: #080d18;
+      border-bottom: 2px solid rgba(0,200,255,0.15);
+      padding: 14px 20px;
+    }
+    .logo-header-table { width: 100%; border-collapse: collapse; }
+    .logo-td-left { vertical-align: middle; }
+    .logo-td-right { vertical-align: middle; text-align: right; white-space: nowrap; }
+    .logo-img  { width: 72px; height: 72px; object-fit: contain; display: block; }
+    .logo-right-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, #ff6b00, #bb2200);
+      color: #fff; font-size: 10px; font-weight: 800;
+      letter-spacing: 1.5px; text-transform: uppercase;
+      padding: 7px 18px; border-radius: 100px;
+    }
+
+    /* ══════════════════════
+       DEADLINE BANNER
+    ══════════════════════ */
+    .deadline-banner {
+      background: linear-gradient(90deg, rgba(245,197,24,0.10), rgba(255,107,0,0.07));
+      border-bottom: 2px solid rgba(245,197,24,0.30);
+      padding: 12px 20px;
+    }
+    .dl-table { width: 100%; border-collapse: collapse; }
+    .dl-td-icon { width: 46px; vertical-align: middle; padding-right: 10px; }
+    .dl-td-text { vertical-align: middle; }
+    .dl-td-right { vertical-align: middle; text-align: right; white-space: nowrap; padding-left: 10px; }
+    .dl-icon-wrap {
+      width: 36px; height: 36px; border-radius: 10px;
+      background-color: rgba(245,197,24,0.12);
+      border: 1px solid rgba(245,197,24,0.30);
+      display: block;
+      font-size: 18px;
+      line-height: 36px; text-align: center;
+    }
+    .dl-label {
+      font-size: 9px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 2px;
+      color: #f5c518; margin-bottom: 3px;
+    }
+    .dl-date {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 20px; letter-spacing: 2px;
+      color: #eef4ff; line-height: 1;
+    }
+    .dl-date span { color: #f5c518; }
+    .dl-right {
+      display: inline-block;
+      background-color: rgba(245,197,24,0.10);
+      border: 1px solid rgba(245,197,24,0.30);
+      border-radius: 100px; padding: 5px 14px;
+      font-size: 10px; font-weight: 800;
+      color: #f5c518; white-space: nowrap;
+    }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+
+    /* ══════════════════════
+       HERO
+    ══════════════════════ */
+    .hero {
+      background: linear-gradient(160deg, #080f1e 0%, #05080e 60%, #0a0500 100%);
+      padding: 40px 32px 34px;
+      border-left: 1px solid rgba(0,200,255,0.09);
+      border-right: 1px solid rgba(0,200,255,0.09);
+      text-align: center;
+    }
+    .hero-pill {
+      display: inline-block;
+      background-color: rgba(0,200,255,0.08);
+      border: 1px solid rgba(0,200,255,0.28);
+      border-radius: 100px; padding: 6px 18px;
+      font-size: 10px; font-weight: 800;
+      letter-spacing: 2.5px; text-transform: uppercase;
+      color: #00c8ff; margin-bottom: 18px;
+    }
+    .hero-eyebrow {
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 3px; text-transform: uppercase;
+      color: #ff6b00; margin-bottom: 10px;
+    }
+    .hero-headline {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 54px; line-height: 0.93;
+      letter-spacing: 2px; margin-bottom: 18px;
+    }
+    .hl-w { display: block; color: #eef4ff; }
+    .hl-p { display: block; color: #00c8ff; }
+    .hl-a { display: block; color: #ff6b00; }
+    .hero-sub {
+      font-size: 14px; color: #3d5068;
+      line-height: 1.8; max-width: 480px;
+      margin: 0 auto 26px;
+    }
+    .date-strip {
+      display: inline-flex; align-items: stretch;
+      border: 1px solid rgba(0,200,255,0.20);
+      border-radius: 12px; overflow: hidden;
+    }
+    .ds-item {
+      padding: 12px 24px; text-align: center;
+      border-right: 1px solid rgba(0,200,255,0.15);
+      background-color: rgba(0,200,255,0.03);
+    }
+    .ds-item:last-child { border-right: none; }
+    .ds-val {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 22px; letter-spacing: 1px; line-height: 1; color: #00c8ff;
+    }
+    .ds-lbl {
+      font-size: 9px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1.5px;
+      color: #3d5068; margin-top: 3px;
+    }
+
+    /* ══════════════════════
+       MAIN CARD
+    ══════════════════════ */
+    .main-card {
+      background-color: #080d18;
+      border: 1px solid rgba(0,200,255,0.09);
+      border-top: none; padding: 36px 32px;
+    }
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, #00c8ff, #aaff00, #ff6b00, transparent);
+      margin: 28px 0; border: none;
+    }
+    .section-label {
+      font-size: 10px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 2px;
+      color: #3d5068; margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(0,200,255,0.08);
+    }
+
+    /* ══════════════════════
+       GREETING CARD
+    ══════════════════════ */
+    .greeting-card {
+      background-color: #0c1220;
+      border: 1px solid rgba(0,200,255,0.09);
+      border-left: 3px solid #00c8ff;
+      border-radius: 14px; padding: 26px 28px;
+    }
+    .gc-to {
+      font-size: 11px; font-weight: 700; color: #3d5068;
+      letter-spacing: 2px; text-transform: uppercase; margin-bottom: 6px;
+    }
+    .gc-name {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 30px; letter-spacing: 2px;
+      color: #eef4ff; line-height: 1; margin-bottom: 18px;
+    }
+    .gc-name span { color: #00c8ff; }
+    .gc-body {
+      font-size: 14.5px; line-height: 1.9;
+      color: rgba(238,244,255,0.85);
+    }
+    .gc-body p { margin-bottom: 14px; }
+    .gc-body p:last-child { margin-bottom: 0; }
+    .gc-highlight { color: #00c8ff; font-weight: 700; }
+    .gc-accent    { color: #ff6b00; font-weight: 700; }
+
+    /* Ask box */
+    .ask-box {
+      background-color: rgba(255,107,0,0.07);
+      border: 1px solid rgba(255,107,0,0.25);
+      border-radius: 12px; padding: 16px 20px; margin: 16px 0;
+    }
+    .ask-box-head {
+      font-size: 11px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 1.5px;
+      color: #ff6b00; margin-bottom: 10px;
+    }
+    .ask-list { list-style: none; padding: 0; margin: 0; }
+    .ask-list li {
+      font-size: 13px; color: rgba(238,244,255,0.82);
+      padding: 7px 0 7px 18px; position: relative;
+      border-bottom: 1px solid rgba(255,107,0,0.08); line-height: 1.5;
+    }
+    .ask-list li:last-child { border-bottom: none; }
+    .ask-list li::before { content: '→'; color: #ff6b00; font-weight: 800; position: absolute; left: 0; }
+
+    /* Brand warning box */
+    .brand-warning {
+      background-color: rgba(245,197,24,0.06);
+      border: 1px solid rgba(245,197,24,0.28);
+      border-left: 3px solid #f5c518;
+      border-radius: 0 10px 10px 0;
+      padding: 14px 18px; margin: 16px 0;
+    }
+    .bw-head {
+      font-size: 11px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 1.5px;
+      color: #f5c518; margin-bottom: 8px;
+    }
+    .bw-text {
+      font-size: 13px; color: rgba(238,244,255,0.82); line-height: 1.7;
+    }
+    .bw-text strong { color: #f5c518; }
+
+    /* Best time to post box */
+    .post-timing-card {
+      background-color: rgba(170,255,0,0.04);
+      border: 1px solid rgba(170,255,0,0.18);
+      border-radius: 12px; padding: 18px 20px; margin: 16px 0;
+    }
+    .pt-head {
+      font-size: 11px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 1.5px;
+      color: #aaff00; margin-bottom: 14px;
+    }
+    .pt-grid { width: 100%; border-collapse: separate; border-spacing: 8px; }
+    .pt-cell {
+      background-color: rgba(170,255,0,0.06);
+      border: 1px solid rgba(170,255,0,0.15);
+      border-radius: 8px; padding: 10px 12px;
+      text-align: center; vertical-align: top; width: 33%;
+    }
+    .pt-day { font-size: 11px; font-weight: 800; color: #aaff00; margin-bottom: 4px; }
+    .pt-time { font-size: 12px; color: rgba(238,244,255,0.80); line-height: 1.5; }
+    .pt-peak {
+      display: inline-block; margin-top: 5px;
+      background-color: rgba(170,255,0,0.12);
+      border: 1px solid rgba(170,255,0,0.25);
+      border-radius: 100px; padding: 2px 8px;
+      font-size: 9px; font-weight: 800;
+      color: #aaff00; letter-spacing: 1px; text-transform: uppercase;
+    }
+    .pt-note {
+      font-size: 11px; color: #3d5068; margin-top: 12px;
+      padding-top: 10px; border-top: 1px solid rgba(170,255,0,0.10);
+      line-height: 1.6;
+    }
+
+    /* Deadline reminder inline */
+    .deadline-inline {
+      background: linear-gradient(90deg, rgba(245,197,24,0.08), rgba(255,107,0,0.05));
+      border: 1px solid rgba(245,197,24,0.25);
+      border-radius: 10px; padding: 14px 18px; margin: 16px 0;
+    }
+    .di-table  { width: 100%; border-collapse: collapse; }
+    .di-td-icon { vertical-align: middle; padding-right: 12px; width: 34px; font-size: 24px; }
+    .di-td-text { vertical-align: middle; font-size: 13px; color: rgba(238,244,255,0.85); line-height: 1.6; }
+    .di-icon { font-size: 24px; flex-shrink: 0; }
+    .di-text { font-size: 13px; color: rgba(238,244,255,0.85); line-height: 1.6; }
+    .di-text strong { color: #f5c518; }
+
+    /* Code box */
+    .code-box {
+      background: linear-gradient(135deg, rgba(0,200,255,0.08), rgba(0,200,255,0.03));
+      border: 1px solid rgba(0,200,255,0.28);
+      border-radius: 12px; padding: 18px 20px; margin: 16px 0; text-align: center;
+    }
+    .code-label {
+      font-size: 10px; font-weight: 800; text-transform: uppercase;
+      letter-spacing: 2px; color: #3d5068; margin-bottom: 10px;
+    }
+    .code-value {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 44px; letter-spacing: 10px; color: #00c8ff; line-height: 1;
+    }
+    .code-sub { font-size: 11px; color: #3d5068; margin-top: 8px; }
+
+    /* Signature */
+    .ol-sig {
+      margin-top: 22px; padding-top: 18px;
+      border-top: 1px solid rgba(0,200,255,0.09);
+    }
+    .ol-sig-regards { font-size: 12px; color: #3d5068; margin-bottom: 4px; }
+    .ol-sig-name {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 26px; letter-spacing: 2px; color: #eef4ff; line-height: 1;
+    }
+    .ol-sig-title {
+      font-size: 11px; font-weight: 700; color: #3d5068;
+      letter-spacing: 1px; text-transform: uppercase; margin-top: 3px;
+    }
+    .ol-sig-brand {
+      font-size: 12px; font-weight: 800; color: #00c8ff;
+      letter-spacing: 1px; text-transform: uppercase; margin-top: 5px;
+    }
+
+    /* ══════════════════════
+       REEL CARD
+    ══════════════════════ */
+    .reel-card {
+      background-color: #0c1220;
+      border: 1px solid rgba(0,200,255,0.10);
+      border-radius: 16px; overflow: hidden;
+    }
+    .reel-header {
+      background: linear-gradient(90deg, rgba(0,200,255,0.07), rgba(255,107,0,0.04));
+      border-bottom: 1px solid rgba(0,200,255,0.12); padding: 20px 24px;
+    }
+    .reel-header-top {
+      width: 100%; border-collapse: collapse; margin-bottom: 14px;
+    }
+    .rh-td-icon { vertical-align: middle; padding-right: 14px; width: 46px; }
+    .rh-td-info { vertical-align: middle; }
+    .rh-td-badge { vertical-align: middle; text-align: right; white-space: nowrap; padding-left: 14px; }
+    .reel-big-icon { font-size: 32px; }
+    .reel-main-title {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 22px; letter-spacing: 2px; color: #eef4ff; line-height: 1;
+    }
+    .reel-sub-title { font-size: 12px; color: #3d5068; margin-top: 3px; }
+    .reel-dur-badge {
+      margin-left: auto;
+      background-color: rgba(255,107,0,0.12);
+      border: 1px solid rgba(255,107,0,0.28);
+      border-radius: 100px; padding: 5px 14px;
+      font-size: 11px; font-weight: 800; color: #ff6b00; white-space: nowrap;
+    }
+    .reel-spec-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .spec-pill {
+      display: inline-block; padding: 4px 12px; border-radius: 100px;
+      font-size: 10px; font-weight: 700; letter-spacing: 0.5px;
+    }
+    .sp-p    { background-color: rgba(0,200,255,0.08);  border: 1px solid rgba(0,200,255,0.22);  color: #00c8ff; }
+    .sp-a    { background-color: rgba(255,107,0,0.08);  border: 1px solid rgba(255,107,0,0.22);  color: #ff6b00; }
+    .sp-g    { background-color: rgba(170,255,0,0.07);  border: 1px solid rgba(170,255,0,0.22);  color: #aaff00; }
+    .sp-gold { background-color: rgba(245,197,24,0.07); border: 1px solid rgba(245,197,24,0.22); color: #f5c518; }
+
+    .music-bar {
+      background-color: rgba(170,255,0,0.05);
+      border-bottom: 1px solid rgba(170,255,0,0.10);
+      padding: 10px 24px; font-size: 12px; font-weight: 700; color: #aaff00;
+    }
+    .reel-body { padding: 24px; }
+
+    /* Scene card */
+    .scene-card {
+      background-color: #080d18;
+      border: 1px solid rgba(0,200,255,0.08);
+      border-radius: 12px; margin-bottom: 10px; overflow: hidden;
+    }
+    .scene-head {
+      width: 100%; border-collapse: collapse;
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(0,200,255,0.06);
+      background-color: rgba(0,200,255,0.02);
+    }
+    .sh-td-num  { vertical-align: middle; padding-right: 12px; width: 42px; }
+    .sh-td-info { vertical-align: middle; }
+    .sh-td-time { vertical-align: middle; text-align: right; white-space: nowrap; padding-left: 8px; }
+    .scene-num {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 30px; letter-spacing: 1px; line-height: 1;
+      color: #00c8ff; min-width: 36px;
+    }
+    .scene-info { flex: 1; }
+    .scene-title { font-size: 13px; font-weight: 800; color: #eef4ff; line-height: 1; }
+    .scene-shot  { font-size: 11px; color: #3d5068; margin-top: 3px; }
+    .scene-time {
+      background-color: rgba(0,200,255,0.08);
+      border: 1px solid rgba(0,200,255,0.20);
+      border-radius: 100px; padding: 3px 10px;
+      font-size: 10px; font-weight: 800; color: #00c8ff;
+      font-family: monospace; white-space: nowrap;
+    }
+    .camera-box {
+      background-color: rgba(0,200,255,0.04);
+      border-left: 3px solid rgba(0,200,255,0.30);
+      padding: 10px 14px; margin: 14px 16px 10px;
+      border-radius: 0 8px 8px 0;
+    }
+    .camera-label {
+      font-size: 9px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 2px;
+      color: #00c8ff; margin-bottom: 5px;
+    }
+    .camera-text { font-size: 12px; color: rgba(238,244,255,0.70); line-height: 1.6; }
+    .dialogue-box {
+      background-color: rgba(255,107,0,0.05);
+      border-left: 3px solid #ff6b00;
+      padding: 12px 16px; margin: 0 16px 16px;
+      border-radius: 0 8px 8px 0;
+    }
+    .dialogue-label {
+      font-size: 9px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 2px;
+      color: #ff6b00; margin-bottom: 7px;
+    }
+    .dialogue-text {
+      font-size: 15px; color: rgba(238,244,255,0.92);
+      line-height: 1.9; font-style: italic;
+    }
+    .dialogue-text strong { color: #eef4ff; font-style: normal; font-weight: 800; }
+
+    /* Overlay box */
+    .overlay-box {
+      background: linear-gradient(135deg, #0a1828, #060e1c);
+      border: 1px solid rgba(0,200,255,0.20);
+      border-radius: 10px; padding: 14px 18px;
+      margin: 0 16px 16px; text-align: center;
+    }
+    .overlay-label {
+      font-size: 9px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 2px;
+      color: #3d5068; margin-bottom: 10px;
+    }
+    .overlay-line {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 20px; letter-spacing: 2px; color: #eef4ff; line-height: 1.2;
+    }
+    .overlay-line span { color: #00c8ff; }
+    .overlay-sub { font-size: 12px; color: #3d5068; margin-top: 5px; font-weight: 600; }
+
+    /* Final scene */
+    .final-scene {
+      background: linear-gradient(135deg, #091628, #05080e);
+      border: 1px solid rgba(0,200,255,0.20);
+      border-radius: 12px; overflow: hidden; margin-top: 10px;
+    }
+    .fs-top {
+      background: linear-gradient(90deg, rgba(0,200,255,0.08), transparent);
+      border-bottom: 1px solid rgba(0,200,255,0.12);
+      padding: 14px 20px; width: 100%; border-collapse: collapse;
+    }
+    .fst-td-icon  { vertical-align: middle; padding-right: 10px; width: 24px; }
+    .fst-td-label { vertical-align: middle; }
+    .fst-td-tag   { vertical-align: middle; text-align: right; white-space: nowrap; padding-left: 10px; }
+    .fs-top-label {
+      font-size: 10px; font-weight: 800;
+      text-transform: uppercase; letter-spacing: 2px; color: #00c8ff;
+    }
+    .fs-top-tag {
+      margin-left: auto;
+      background-color: rgba(0,200,255,0.10);
+      border: 1px solid rgba(0,200,255,0.25);
+      border-radius: 100px; padding: 3px 10px;
+      font-size: 10px; font-weight: 800; color: #00c8ff;
+    }
+    .fs-body { padding: 20px; text-align: center; }
+    .fs-logo-row {
+      margin: 0 auto 16px; border-collapse: collapse;
+    }
+    .fslr-td-logo { vertical-align: middle; padding-right: 10px; }
+    .fslr-td-word { vertical-align: middle; }
+    .fs-logo-img { width: 40px; height: 40px; object-fit: contain; display: block; }
+    .fs-logo-wordmark {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 28px; letter-spacing: 5px; line-height: 1;
+    }
+    .fs-berg { color: #eef4ff; }
+    .fs-man  { color: #00c8ff; }
+    .fs-event-name {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 26px; letter-spacing: 2px;
+      color: #eef4ff; line-height: 1; margin-bottom: 4px;
+    }
+    .fs-event-name span { color: #00c8ff; }
+    .fs-date-line { font-size: 13px; color: rgba(238,244,255,0.70); margin-bottom: 14px; }
+    .fs-code-pill {
+      background: linear-gradient(135deg, rgba(0,200,255,0.10), rgba(0,200,255,0.05));
+      border: 1px solid rgba(0,200,255,0.28);
+      border-radius: 10px; padding: 12px 20px; margin: 10px 0 14px;
+    }
+    .fs-code-label {
+      font-size: 10px; font-weight: 800; color: #3d5068;
+      letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px;
+    }
+    .fs-code-val {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 32px; letter-spacing: 8px; color: #00c8ff; line-height: 1;
+    }
+    .fs-url { font-size: 14px; font-weight: 700; color: #aaff00; margin-bottom: 6px; }
+    .cta-line {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 22px; letter-spacing: 2px; color: #ff6b00; margin-top: 14px;
+    }
+
+    /* ══════════════════════
+       HASHTAGS
+    ══════════════════════ */
+    .hashtag-table { width: 100%; border-collapse: separate; border-spacing: 6px; }
+    .htag {
+      padding: 9px 10px; border-radius: 100px;
+      font-size: 11px; font-weight: 700; text-align: center; vertical-align: middle;
+    }
+    .ht-1 { background-color: rgba(0,200,255,0.09);  border: 1px solid rgba(0,200,255,0.28);  color: #00c8ff; }
+    .ht-2 { background-color: rgba(255,107,0,0.09);  border: 1px solid rgba(255,107,0,0.28);  color: #ff6b00; }
+    .ht-3 { background-color: rgba(170,255,0,0.07);  border: 1px solid rgba(170,255,0,0.25);  color: #aaff00; }
+    .ht-4 { background-color: rgba(245,197,24,0.08); border: 1px solid rgba(245,197,24,0.25); color: #f5c518; }
+    .ht-5 { background-color: rgba(155,92,255,0.09); border: 1px solid rgba(155,92,255,0.25); color: #bb88ff; }
+    .ht-6 { background-color: rgba(0,200,255,0.07);  border: 1px solid rgba(0,200,255,0.18);  color: #00c8ff; }
+
+    /* ══════════════════════
+       DELIVERABLES
+    ══════════════════════ */
+    .deliverable-list { list-style: none; padding: 0; margin: 0; }
+    .deliverable-list li {
+      padding: 0; border-bottom: 1px solid rgba(0,200,255,0.07);
+      font-size: 13px; color: rgba(238,244,255,0.82); line-height: 1.5;
+    }
+    .dl-row { width: 100%; border-collapse: collapse; }
+    .dl-td-icon { vertical-align: top; padding: 14px 12px 14px 0; width: 36px; }
+    .dl-td-text { vertical-align: top; padding: 14px 0; }
+    .deliverable-list li:last-child { border-bottom: none; }
+    .dl-icon {
+      width: 36px; height: 36px; border-radius: 10px;
+      background-color: rgba(0,200,255,0.08);
+      border: 1px solid rgba(0,200,255,0.18);
+      font-size: 17px; text-align: center;
+      line-height: 36px; flex-shrink: 0;
+    }
+    .dl-text strong { color: #eef4ff; display: block; margin-bottom: 2px; }
+
+    /* ══════════════════════
+       FOOTER
+    ══════════════════════ */
+    .footer-card {
+      background-color: #0c1220;
+      border: 1px solid rgba(0,200,255,0.09);
+      border-radius: 16px; padding: 26px 28px;
+    }
+    .footer-logo-row {
+      border-collapse: collapse; margin-bottom: 18px;
+    }
+    .flr-td-logo { vertical-align: middle; padding-right: 12px; }
+    .flr-td-word { vertical-align: middle; }
+    .footer-logo-img { width: 44px; height: 44px; object-fit: contain; display: block; }
+    .footer-wordmark {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 28px; letter-spacing: 5px; line-height: 1;
+    }
+    .fw-berg { color: #eef4ff; }
+    .fw-man  { color: #00c8ff; }
+    .footer-cta {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 24px; letter-spacing: 2px;
+      color: #eef4ff; line-height: 1; margin-bottom: 5px;
+    }
+    .footer-sub { font-size: 13px; color: #3d5068; margin-bottom: 16px; }
+    .footer-pills { margin-bottom: 18px; }
+    .fpill {
+      display: inline-block; font-size: 11px; color: #3d5068;
+      background-color: #0a1020;
+      border: 1px solid rgba(0,200,255,0.09);
+      border-radius: 6px; padding: 4px 10px; margin: 2px 4px 2px 0;
+    }
+    .sig-name {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 24px; letter-spacing: 2px; color: #eef4ff; line-height: 1;
+    }
+    .sig-title { font-size: 11px; color: #3d5068; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-top: 3px; }
+    .sig-brand { font-size: 12px; font-weight: 800; color: #00c8ff; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }
+
+    .color-strip {
+      height: 5px;
+      background: linear-gradient(90deg, #00c8ff 0%, #aaff00 33%, #ff6b00 66%, #f5c518 100%);
+      border-radius: 0 0 4px 4px; margin-top: 22px;
+    }
+
+    @media only screen and (max-width:600px) {
+      /* ── Container & Layout ── */
+      .email-wrapper    { padding: 0 !important; }
+      .email-container  { width: 100% !important; max-width: 100% !important; }
+
+      /* ── Logo Header ── */
+      .logo-header      { padding: 12px 14px !important; }
+      .logo-img         { width: 54px !important; height: 54px !important; }
+      .logo-right-badge { font-size: 9px !important; padding: 5px 12px !important; }
+
+      /* ── Deadline Banner ── */
+      .deadline-banner  { padding: 10px 14px !important; }
+      .dl-td-icon       { width: 40px !important; padding-right: 8px !important; }
+      .dl-td-right      { display: none !important; }
+      .dl-icon-wrap     { width: 30px !important; height: 30px !important; font-size: 15px !important; line-height: 30px !important; }
+      .dl-label         { font-size: 8px !important; }
+      .dl-date          { font-size: 14px !important; letter-spacing: 0.5px !important; }
+
+      /* ── Hero ── */
+      .hero             { padding: 24px 16px 20px !important; }
+      .hero-pill        { font-size: 9px !important; padding: 5px 14px !important; letter-spacing: 1.5px !important; margin-bottom: 14px !important; }
+      .hero-eyebrow     { font-size: 10px !important; letter-spacing: 1.5px !important; margin-bottom: 8px !important; }
+      .hero-headline    { font-size: 34px !important; line-height: 1 !important; margin-bottom: 14px !important; }
+      .hero-sub         { font-size: 13px !important; margin-bottom: 18px !important; }
+      .date-strip       { display: block !important; width: 100% !important; border-radius: 10px !important; }
+      .ds-item          { display: inline-block !important; width: 48% !important; padding: 10px 8px !important; border-right: none !important; border-bottom: 1px solid rgba(0,200,255,0.15) !important; box-sizing: border-box !important; }
+      .ds-item:nth-child(odd)  { border-right: 1px solid rgba(0,200,255,0.15) !important; }
+      .ds-item:last-child, .ds-item:nth-last-child(2):nth-child(odd) { border-bottom: none !important; }
+      .ds-val           { font-size: 18px !important; }
+      .ds-lbl           { font-size: 8px !important; }
+
+      /* ── Main Card ── */
+      .main-card        { padding: 20px 14px !important; border-left: none !important; border-right: none !important; }
+      .section-label    { font-size: 9px !important; margin-bottom: 12px !important; }
+      .divider          { margin: 20px 0 !important; }
+
+      /* ── Greeting Card ── */
+      .greeting-card    { padding: 18px 16px !important; border-radius: 10px !important; }
+      .gc-to            { font-size: 10px !important; margin-bottom: 4px !important; }
+      .gc-name          { font-size: 24px !important; margin-bottom: 14px !important; }
+      .gc-body          { font-size: 13.5px !important; line-height: 1.8 !important; }
+
+      /* ── Ask Box ── */
+      .ask-box          { padding: 14px 14px !important; margin: 14px 0 !important; border-radius: 10px !important; }
+      .ask-box-head     { font-size: 10px !important; margin-bottom: 8px !important; }
+      .ask-list li      { font-size: 12.5px !important; padding: 8px 0 8px 18px !important; }
+
+      /* ── Deadline Inline ── */
+      .deadline-inline  { padding: 12px 14px !important; margin: 12px 0 !important; border-radius: 8px !important; }
+      .di-td-icon       { padding-right: 10px !important; }
+      .di-td-text       { font-size: 12.5px !important; }
+      .di-icon          { font-size: 20px !important; }
+      .di-text          { font-size: 12.5px !important; }
+
+      /* ── Brand Warning ── */
+      .brand-warning    { padding: 12px 14px !important; margin: 12px 0 !important; }
+      .bw-head          { font-size: 10px !important; margin-bottom: 6px !important; }
+      .bw-text          { font-size: 12.5px !important; }
+
+      /* ── Code Box ── */
+      .code-box         { padding: 16px 14px !important; margin: 12px 0 !important; border-radius: 10px !important; }
+      .code-label       { font-size: 9px !important; margin-bottom: 8px !important; }
+      .code-value       { font-size: 36px !important; letter-spacing: 6px !important; }
+      .code-sub         { font-size: 10.5px !important; }
+
+      /* ── Signature ── */
+      .ol-sig           { margin-top: 18px !important; padding-top: 14px !important; }
+      .ol-sig-name      { font-size: 22px !important; }
+
+      /* ── Post Timing Card ── */
+      .post-timing-card { padding: 14px 12px !important; border-radius: 10px !important; }
+      .pt-head          { font-size: 10px !important; margin-bottom: 10px !important; }
+      .pt-grid          { border-spacing: 4px !important; }
+      .pt-cell          { padding: 8px 6px !important; border-radius: 6px !important; }
+      .pt-day           { font-size: 9px !important; margin-bottom: 3px !important; }
+      .pt-time          { font-size: 11px !important; }
+      .pt-peak          { font-size: 8px !important; padding: 2px 6px !important; }
+      .pt-note          { font-size: 10.5px !important; margin-top: 10px !important; }
+
+      /* ── Reel Card ── */
+      .reel-card        { border-radius: 12px !important; }
+      .reel-header      { padding: 16px 14px !important; }
+      .reel-header-top  { margin-bottom: 12px !important; }
+      .rh-td-icon       { padding-right: 10px !important; width: 38px !important; }
+      .reel-big-icon    { font-size: 26px !important; flex-shrink: 0 !important; }
+      .reel-main-title  { font-size: 16px !important; letter-spacing: 1px !important; }
+      .reel-sub-title   { font-size: 11px !important; }
+      .reel-dur-badge   { display: none !important; }
+      .reel-spec-row    { gap: 5px !important; }
+      .spec-pill        { font-size: 9px !important; padding: 3px 9px !important; }
+      .music-bar        { padding: 8px 14px !important; font-size: 11px !important; }
+      .reel-body        { padding: 14px 12px !important; }
+
+      /* ── Scene Cards ── */
+      .scene-card       { margin-bottom: 8px !important; border-radius: 10px !important; }
+      .scene-head       { padding: 10px 12px !important; }
+      .sh-td-num        { padding-right: 8px !important; width: 34px !important; }
+      .sh-td-time       { padding-left: 6px !important; }
+      .scene-num        { font-size: 24px !important; min-width: 30px !important; }
+      .scene-title      { font-size: 12px !important; }
+      .scene-shot       { font-size: 10px !important; }
+      .scene-time       { display: none !important; }
+      .camera-box       { margin: 10px 12px 8px !important; padding: 8px 12px !important; }
+      .camera-label     { font-size: 8px !important; margin-bottom: 4px !important; }
+      .camera-text      { font-size: 11.5px !important; }
+      .dialogue-box     { margin: 0 12px 12px !important; padding: 10px 12px !important; }
+      .dialogue-label   { font-size: 8px !important; margin-bottom: 5px !important; }
+      .dialogue-text    { font-size: 13.5px !important; line-height: 1.8 !important; }
+
+      /* ── Overlay Box ── */
+      .overlay-box      { margin: 0 12px 12px !important; padding: 12px 14px !important; border-radius: 8px !important; }
+      .overlay-label    { font-size: 8px !important; }
+      .overlay-line     { font-size: 17px !important; letter-spacing: 1px !important; }
+      .overlay-sub      { font-size: 11px !important; }
+
+      /* ── Final Scene ── */
+      .final-scene      { border-radius: 10px !important; }
+      .fs-top           { padding: 11px 14px !important; }
+      .fst-td-icon      { padding-right: 8px !important; }
+      .fst-td-tag       { padding-left: 8px !important; }
+      .fs-top-label     { font-size: 9px !important; }
+      .fs-top-tag       { font-size: 9px !important; padding: 3px 8px !important; }
+      .fs-body          { padding: 16px 14px !important; }
+      .fs-logo-row      { margin-bottom: 12px !important; }
+      .fslr-td-logo     { padding-right: 8px !important; }
+      .fs-logo-img      { width: 32px !important; height: 32px !important; }
+      .fs-logo-wordmark { font-size: 22px !important; letter-spacing: 4px !important; }
+      .fs-event-name    { font-size: 20px !important; letter-spacing: 1.5px !important; }
+      .fs-date-line     { font-size: 11.5px !important; margin-bottom: 10px !important; }
+      .fs-code-pill     { padding: 10px 14px !important; }
+      .fs-code-label    { font-size: 9px !important; }
+      .fs-code-val      { font-size: 26px !important; letter-spacing: 6px !important; }
+      .fs-url           { font-size: 12.5px !important; }
+      .cta-line         { font-size: 18px !important; letter-spacing: 1px !important; }
+
+      /* ── Hashtag Table ── */
+      .hashtag-table    { border-spacing: 4px !important; }
+      .htag             { font-size: 10px !important; padding: 7px 6px !important; border-radius: 6px !important; }
+
+      /* ── Deliverables ── */
+      .deliverable-list li { gap: 10px !important; padding: 12px 0 !important; font-size: 12.5px !important; }
+      .dl-icon          { width: 30px !important; height: 30px !important; font-size: 14px !important; line-height: 30px !important; flex-shrink: 0 !important; border-radius: 8px !important; }
+
+      /* ── Footer ── */
+      .footer-card      { padding: 18px 16px !important; border-radius: 12px !important; }
+      .footer-logo-row  { margin-bottom: 14px !important; }
+      .flr-td-logo      { padding-right: 10px !important; }
+      .footer-logo-img  { width: 36px !important; height: 36px !important; }
+      .footer-wordmark  { font-size: 22px !important; letter-spacing: 4px !important; }
+      .footer-cta       { font-size: 19px !important; letter-spacing: 1px !important; }
+      .footer-sub       { font-size: 12px !important; margin-bottom: 12px !important; }
+      .footer-pills     { margin-bottom: 14px !important; }
+      .fpill            { font-size: 10.5px !important; padding: 4px 8px !important; margin: 2px 3px 2px 0 !important; border-radius: 5px !important; }
+      .sig-name         { font-size: 20px !important; }
+      .sig-title        { font-size: 10px !important; }
+      .sig-brand        { font-size: 11px !important; }
+      .color-strip      { margin-top: 16px !important; }
+    }
+  </style>
+</head>
+<body>
+<div class="email-wrapper">
+<div class="email-container">
+
+  <!-- ══════════════════════
+       ★ LOGO HEADER
+  ══════════════════════ -->
+  <div class="logo-header">
+    <table class="logo-header-table" role="presentation">
+      <tr>
+        <td class="logo-td-left">
+          <img class="logo-img"
+            src="https://firebasestorage.googleapis.com/v0/b/racehub-ao1fu.firebasestorage.app/o/BERGMAN%20LOGOS%2Fbm.png?alt=media&token=893533c9-e655-40d3-bfc2-9ae07c51a3b3"
+            alt="Bergman Logo" width="72" height="72" />
+        </td>
+        <td class="logo-td-right">
+          <div class="logo-right-badge">🎬 Reel Brief</div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ══════════════════════
+       ★ DEADLINE BANNER
+  ══════════════════════ -->
+  <div class="deadline-banner">
+    <table class="dl-table" role="presentation">
+      <tr>
+        <td class="dl-td-icon">
+          <div class="dl-icon-wrap">⏰</div>
+        </td>
+        <td class="dl-td-text">
+          <div class="dl-label">📅 Campaign Deadline</div>
+          <div class="dl-date">Create &amp; Share by &nbsp;<span>18th May 2026</span></div>
+        </td>
+        <td class="dl-td-right">
+          <div class="dl-right">⚡ Time Sensitive</div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ══════════════════════
+       HERO
+  ══════════════════════ -->
+  <div class="hero">
+    <div class="hero-pill">📢 &nbsp;Active Influencer Brief �� Confidential</div>
+    <div class="hero-eyebrow">🎬 Instagram Reel Campaign · Bergman Bengaluru 2026</div>
+    <div class="hero-headline">
+      <span class="hl-w">YOUR VOICE.</span>
+      <span class="hl-p">THEIR SIGN.</span>
+      <span class="hl-a">SEE YOU AT THE START LINE. 🔥</span>
+    </div>
+    <p class="hero-sub">
+      As Being the Infulencer for the Bergman here's your idea to create reel
+      Bergman Bengaluru 2026. Simple, authentic, powerful — just you
+      and the camera. Full script below.
+    </p>
+    <div class="date-strip">
+      <div class="ds-item">
+        <div class="ds-val">5–6</div>
+        <div class="ds-lbl">September</div>
+      </div>
+      <div class="ds-item">
+        <div class="ds-val">2026</div>
+        <div class="ds-lbl">Edition</div>
+      </div>
+      <div class="ds-item">
+        <div class="ds-val" style="color:#aaff00">BLR</div>
+        <div class="ds-lbl">Bengaluru</div>
+      </div>
+      <div class="ds-item">
+        <div class="ds-val" style="color:#ff6b00">45s</div>
+        <div class="ds-lbl">Max Length</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════
+       MAIN CARD
+  ══════════════════════ -->
+  <div class="main-card">
+
+    <!-- GREETING -->
+    <div class="section-label">Your Personal Brief</div>
+
+    <div class="greeting-card">
+      <div class="gc-to">Dear Influencer,</div>
+      <div class="gc-name">Hello, <span>{{ name }}</span> 👋</div>
+
+      <div class="gc-body">
+        <p>
+          We're so glad to have you as part of the
+          <span class="gc-accent">Bergman Bengaluru 2026</span> campaign.
+          This brief is simple — <span class="gc-highlight">just you, your authentic
+          voice, and 30–45 seconds</span> that could inspire someone to take on
+          their first Swimathon or Triathlon.
+        </p>
+        <p>
+          No big production needed. Shoot it on your phone.
+          Keep it real, keep it <em>you</em>. That's why we chose you.
+        </p>
+      </div>
+
+      <!-- What we need -->
+      <div class="ask-box">
+        <div class="ask-box-head">🎯 What We Need From You</div>
+        <ul class="ask-list">
+          <li>1 × Instagram Reel — <strong>30–45 seconds</strong></li>
+          <li>Story share of the Reel on the <strong>same day</strong></li>
+          <li>Your <strong>unique promo code</strong> in caption &amp; story</li>
+          <li>Tag <strong>@bergman_bengaluru</strong> &amp; <strong>@bergmantriathlon</strong> + all 6 hashtags</li>
+          <li>Registration link in bio: <strong>bergmantri.com/event-form/blr</strong></li>
+        </ul>
+      </div>
+
+      <!-- ★ DEADLINE REMINDER ★ -->
+      <div class="deadline-inline">
+        <table class="di-table" role="presentation">
+          <tr>
+            <td class="di-td-icon">⏰</td>
+            <td class="di-td-text">
+              Please <strong>create and share your Reel by 18th May 2026.</strong>
+              Posts after this date will not be part of the official campaign window.
+            </td>
+          </tr>
+        </table>
+      </div>
+
+      <!-- ★ BRAND WARNING ★ -->
+      <div class="brand-warning">
+        <div class="bw-head">⚠️ Important — Brand Guidelines</div>
+        <div class="bw-text">
+          Please <strong>do not mention any other brand names</strong> in your
+          reel — including competitors, sponsors, or personal brand partners.
+          This is a <strong>Bergman-exclusive collaboration</strong>.
+          Any mention of third-party brands will require a re-shoot.
+        </div>
+      </div>
+
+      <!-- Unique code -->
+      <div class="code-box">
+        <div class="code-label">🎟️ Your Exclusive Promo Code</div>
+        <div class="code-value">{{ unique_code }}</div>
+        <div class="code-sub">Share this with your audience · They get a discount · We track your reach 💪</div>
+      </div>
+
+      <div class="gc-body">
+        <p>
+          The script below is a <span class="gc-highlight">guide, not a rigid
+          script</span>. Feel free to say it in your own style — as long as the
+          key beats (event name, dates, promo code, website) are there, you're
+          good to go.
+        </p>
+        <p>Let's show India what Bengaluru's endurance community looks like. 🏁🔥</p>
+      </div>
+
+      </div>
+    </div><!-- /greeting-card -->
+
+    <hr class="divider"/>
+
+    <!-- ★ BEST TIME TO POST — PROFESSIONAL DASHBOARD ★ -->
+    <div class="section-label">📊 Best Time to Post — When Your Followers Are Most Active</div>
+
+    <div class="post-timing-card">
+      <div class="pt-head">
+        📈 &nbsp;Recommended Posting Windows for Maximum Reach
+      </div>
+
+      <table class="pt-grid" role="presentation">
+        <tr>
+          <td class="pt-cell">
+            <div class="pt-day">MON · WED · FRI</div>
+            <div class="pt-time">
+              <strong style="color:#eef4ff">6:00 – 8:00 AM</strong><br/>
+              Pre-workout audience<br/>
+              Commute scroll window
+            </div>
+            <span class="pt-peak">Peak</span>
+          </td>
+          <td class="pt-cell">
+            <div class="pt-day">TUE · THU</div>
+            <div class="pt-time">
+              <strong style="color:#eef4ff">12:00 – 1:00 PM</strong><br/>
+              Lunch break browsing<br/>
+              Office audience active
+            </div>
+            <span class="pt-peak">Strong</span>
+          </td>
+          <td class="pt-cell">
+            <div class="pt-day">SAT · SUN</div>
+            <div class="pt-time">
+              <strong style="color:#eef4ff">7:00 – 9:00 AM</strong><br/>
+              Morning run / ride<br/>
+              Weekend leisure scroll
+            </div>
+            <span class="pt-peak">Peak</span>
+          </td>
+        </tr>
+      </table>
+
+      <table class="pt-grid" role="presentation" style="margin-top:0">
+        <tr>
+          <td class="pt-cell" style="width:50%">
+            <div class="pt-day">🌙 Evening Window</div>
+            <div class="pt-time">
+              <strong style="color:#eef4ff">6:00 – 9:00 PM</strong> Daily<br/>
+              Post-workout · Dinner scroll<br/>
+              Highest overall engagement
+            </div>
+            <span class="pt-peak">Highest Reach</span>
+          </td>
+          <td class="pt-cell" style="width:50%">
+            <div class="pt-day">❌ Avoid These</div>
+            <div class="pt-time">
+              <strong style="color:#ff6b00">After 11:00 PM</strong><br/>
+              <strong style="color:#ff6b00">Before 6:00 AM</strong><br/>
+              Low engagement windows
+            </div>
+            <span class="pt-peak" style="background:rgba(255,107,0,0.12);border-color:rgba(255,107,0,0.25);color:#ff6b00">Low Reach</span>
+          </td>
+        </tr>
+      </table>
+
+      <div class="pt-note">
+        �� <strong style="color:#aaff00">Pro Tip:</strong>
+        Check your own Instagram Professional Dashboard →
+        <em>Insights → Total Followers → Most Active Times</em> for your
+        personalised peak hours. Post during YOUR audience's highest activity
+        window for maximum views on the Bergman Bengaluru Reel.
+        &nbsp;·&nbsp; Post Reel first, then share to Story within 30 minutes.
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- ★ REEL SCRIPT ★ -->
+    <div class="section-label">🎬 Full Instagram Reel Script</div>
+
+    <div class="reel-card">
+      <div class="reel-header">
+        <table class="reel-header-top" role="presentation">
+          <tr>
+            <td class="rh-td-icon">
+              <div class="reel-big-icon">🎬</div>
+            </td>
+            <td class="rh-td-info">
+              <div class="reel-main-title">Instagram Reel Script — Bergman Bengaluru 2026</div>
+              <div class="reel-sub-title">Simple Influencer Promo Reel · Authentic · Personal</div>
+            </td>
+            <td class="rh-td-badge">
+              <div class="reel-dur-badge">⏱ 30–45 sec</div>
+            </td>
+          </tr>
+        </table>
+        <div class="reel-spec-row">
+          <span class="spec-pill sp-p">📱 Vertical 9:16</span>
+          <span class="spec-pill sp-a">🎙️ Talking to Camera</span>
+          <span class="spec-pill sp-g">✅ Phone Shoot OK</span>
+          <span class="spec-pill sp-gold">🚫 No Other Brand Names</span>
+        </div>
+      </div>
+
+      <div class="music-bar">
+        🎵 &nbsp;Music: <strong>Chill motivational beat / trending running audio</strong>
+      </div>
+
+      <div class="reel-body">
+
+        <!-- SCENE 1 -->
+        <div class="scene-card">
+          <table class="scene-head" role="presentation">
+            <tr>
+              <td class="sh-td-num"><div class="scene-num">01</div></td>
+              <td class="sh-td-info">
+                <div class="scene-title">Walking towards camera</div>
+                <div class="scene-shot">📷 Tri suit / running outfit · holding helmet or shoes</div>
+              </td>
+              <td class="sh-td-time"><div class="scene-time">0 – 6 sec</div></td>
+            </tr>
+          </table>
+          <div class="camera-box">
+            <div class="camera-label">📷 Camera Direction</div>
+            <div class="camera-text">
+              Walk confidently towards the camera in your tri suit or running gear.
+              Hold your helmet or shoes casually.
+              Natural light preferred — early morning or golden hour.
+            </div>
+          </div>
+          <div class="dialogue-box">
+            <div class="dialogue-label">🎙️ Dialogue — Say This</div>
+            <div class="dialogue-text">
+              "People ask me why I keep doing endurance sports…"
+            </div>
+          </div>
+        </div>
+
+        <!-- SCENE 2 -->
+        <div class="scene-card">
+          <table class="scene-head" role="presentation">
+            <tr>
+              <td class="sh-td-num"><div class="scene-num">02</div></td>
+              <td class="sh-td-info">
+                <div class="scene-title">Stretching / Easy Warm-up</div>
+                <div class="scene-shot">📷 Stretching · easy jog · race sunglasses · cycling shoes close-up</div>
+              </td>
+              <td class="sh-td-time"><div class="scene-time">6 – 15 sec</div></td>
+            </tr>
+          </table>
+          <div class="camera-box">
+            <div class="camera-label">📷 Camera Direction</div>
+            <div class="camera-text">
+              Casual training shots — dynamic stretching, easy jogging,
+              putting on sunglasses. Mix wide and close-up (shoes, face).
+              Keep the energy light and relaxed.
+            </div>
+          </div>
+          <div class="dialogue-box">
+            <div class="dialogue-label">🎙️ Dialogue — Say This</div>
+            <div class="dialogue-text">
+              "Because it changes you.<br/>
+              The discipline… the people… the energy."
+            </div>
+          </div>
+        </div>
+
+        <!-- SCENE 3 -->
+        <div class="scene-card">
+          <table class="scene-head" role="presentation">
+            <tr>
+              <td class="sh-td-num"><div class="scene-num">03</div></td>
+              <td class="sh-td-info">
+                <div class="scene-title">Casual Training + Coffee Vibe</div>
+                <div class="scene-shot">📷 Running clips · coffee + training aesthetic · looking at bike</div>
+              </td>
+              <td class="sh-td-time"><div class="scene-time">15 – 24 sec</div></td>
+            </tr>
+          </table>
+          <div class="camera-box">
+            <div class="camera-label">📷 Camera Direction</div>
+            <div class="camera-text">
+              Lifestyle B-roll — sipping coffee in kit, checking your bike,
+              running on a quiet street. Relaxed, everyday athlete energy.
+              Make sure no other brand logos are visible in frame.
+            </div>
+          </div>
+          <div class="dialogue-box">
+            <div class="dialogue-label">🎙️ Dialogue — Say This</div>
+            <div class="dialogue-text">
+              "And honestly… seeing Indian endurance events grow like this
+              feels different."
+            </div>
+          </div>
+        </div>
+
+        <!-- SCENE 4 -->
+        <div class="scene-card">
+          <table class="scene-head" role="presentation">
+            <tr>
+              <td class="sh-td-num"><div class="scene-num">04</div></td>
+              <td class="sh-td-info">
+                <div class="scene-title">Direct to Camera — The Invite</div>
+                <div class="scene-shot">📷 Looking straight into camera · close-up · confident</div>
+              </td>
+              <td class="sh-td-time"><div class="scene-time">24 – 36 sec</div></td>
+            </tr>
+          </table>
+          <div class="camera-box">
+            <div class="camera-label">📷 Camera Direction</div>
+            <div class="camera-text">
+              Look directly into the camera. Hold eye contact. Speak slowly and
+              with conviction. Slight smile. This is your most powerful moment.
+            </div>
+          </div>
+          <div class="dialogue-box">
+            <div class="dialogue-label">🎙️ Dialogue — Say This</div>
+            <div class="dialogue-text">
+              "So if you've been thinking about doing your first Swimathon
+              or Triathlon…<br/>
+              <strong>this is your sign.</strong>"
+            </div>
+          </div>
+        </div>
+
+        <!-- SCENE 5 -->
+        <div class="scene-card">
+          <table class="scene-head" role="presentation">
+            <tr>
+              <td class="sh-td-num"><div class="scene-num">05</div></td>
+              <td class="sh-td-info">
+                <div class="scene-title">Text Overlay + Jogging / Smiling</div>
+                <div class="scene-shot">📷 Easy jogging · smiling at camera · text overlay on screen</div>
+              </td>
+              <td class="sh-td-time"><div class="scene-time">36 – 42 sec</div></td>
+            </tr>
+          </table>
+          <div class="camera-box">
+            <div class="camera-label">📷 Camera Direction</div>
+            <div class="camera-text">
+              Light jog towards camera or smiling wide shot.
+              Add text overlay on screen while speaking.
+            </div>
+          </div>
+          <div class="overlay-box">
+            <div class="overlay-label">📝 Text on Screen</div>
+            <div class="overlay-line">🏊 BERGMAN <span>BENGALURU</span> 2026</div>
+            <div class="overlay-sub">📅 5th &amp; 6th September 2026</div>
+          </div>
+          <div class="dialogue-box">
+            <div class="dialogue-label">🎙️ Dialogue — Say This</div>
+            <div class="dialogue-text">"Come join me at Bergman Bengaluru."</div>
+          </div>
+        </div>
+
+        <!-- FINAL SCENE -->
+        <div class="final-scene">
+          <table class="fs-top" role="presentation">
+            <tr>
+              <td class="fst-td-icon"><span style="font-size:16px">🎬</span></td>
+              <td class="fst-td-label"><span class="fs-top-label">Final Scene — 42–45 sec</span></td>
+              <td class="fst-td-tag"><span class="fs-top-tag">🔚 End Card</span></td>
+            </tr>
+          </table>
+          <div class="fs-body">
+
+            <!-- ★ REAL BERGMAN LOGO ★ -->
+            <table class="fs-logo-row" role="presentation">
+              <tr>
+                <td class="fslr-td-logo">
+                  <img
+                    class="fs-logo-img"
+                    src="https://firebasestorage.googleapis.com/v0/b/racehub-ao1fu.firebasestorage.app/o/BERGMAN%20LOGOS%2Fbm.png?alt=media&token=893533c9-e655-40d3-bfc2-9ae07c51a3b3"
+                    alt="Bergman Logo"
+                    width="40" height="40"
+                  />
+                </td>
+                <td class="fslr-td-word">
+                  <div class="fs-logo-wordmark">
+                    <span class="fs-berg">BERG</span><span class="fs-man">MAN</span>
+                  </div>
+                </td>
+              </tr>
+            </table>
+
+            <div style="background:rgba(255,107,0,0.06);border:1px solid rgba(255,107,0,0.18);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#3d5068;text-align:left">
+              📷 <strong style="color:#ff6b00">Camera Direction:</strong>
+              Point at camera screen or tie shoes. End with a confident
+              look up and a smile.
+            </div>
+
+            <div class="fs-event-name">BERGMAN <span>BENGALURU</span> 2026</div>
+            <div class="fs-date-line">
+              🏊 Swimathon &amp; 🏊🚴🏃 Triathlon &nbsp;·&nbsp;
+              📅 5th &amp; 6th September 2026
+            </div>
+
+            <div class="fs-code-pill">
+              <div class="fs-code-label">🎟️ Promo Code — Show on Screen</div>
+              <div class="fs-code-val">{{ unique_code }}</div>
+            </div>
+
+            <div class="fs-url">🌐 bergmantri.com/event-form/blr</div>
+
+            <div class="dialogue-box" style="text-align:left;margin:14px 0 0">
+              <div class="dialogue-label">🎙️ Final Dialogue</div>
+              <div class="dialogue-text">"See you at the start line."</div>
+            </div>
+
+            <div class="cta-line">SEE YOU AT THE START LINE. 🏁</div>
+          </div>
+        </div><!-- /final-scene -->
+
+      </div>
+    </div><!-- /reel-card -->
+
+    <hr class="divider"/>
+
+    <!-- HASHTAGS -->
+    <div class="section-label">🏷️ 6 Required Hashtags — Add All to Caption &amp; Story</div>
+    <table class="hashtag-table" role="presentation">
+      <tr>
+        <td class="htag ht-1">#BergmanBengaluru</td>
+        <td class="htag ht-2">#BergmanTriathlon</td>
+        <td class="htag ht-3">#SwimathonIndia</td>
+      </tr>
+      <tr>
+        <td class="htag ht-4">#TriathlonIndia</td>
+        <td class="htag ht-5">#EnduranceCommunity</td>
+        <td class="htag ht-6">#TrainRaceRepeat</td>
+      </tr>
+    </table>
+
+    <hr class="divider"/>
+
+    <!-- DELIVERABLES -->
+    <div class="section-label">📋 Deliverables Checklist</div>
+    <ul class="deliverable-list">
+      <li>
+        <table class="dl-row" role="presentation">
+          <tr>
+            <td class="dl-td-icon"><div class="dl-icon">🎬</div></td>
+            <td class="dl-td-text">
+              <strong>1 × Instagram Reel (30–45 seconds)</strong>
+              Vertical 9:16 · Authentic talking-to-camera · Phone shoot is fine
+            </td>
+          </tr>
+        </table>
+      </li>
+      <li>
+        <table class="dl-row" role="presentation">
+          <tr>
+            <td class="dl-td-icon"><div class="dl-icon">📱</div></td>
+            <td class="dl-td-text">
+              <strong>1 × Instagram Story Share — Same Day</strong>
+              Share the Reel to your story · Show promo code clearly
+            </td>
+          </tr>
+        </table>
+      </li>
+      <li>
+        <table class="dl-row" role="presentation">
+          <tr>
+            <td class="dl-td-icon"><div class="dl-icon">✍️</div></td>
+            <td class="dl-td-text">
+              <strong>Caption with Code + All 6 Hashtags</strong>
+              Code: <strong style="color:#00c8ff">{{ unique_code }}</strong>
+              · Tag @bergman_bengaluru &amp; @bergmantriathlon
+            </td>
+          </tr>
+        </table>
+      </li>
+      <li>
+        <table class="dl-row" role="presentation">
+          <tr>
+            <td class="dl-td-icon"><div class="dl-icon">🌐</div></td>
+            <td class="dl-td-text">
+              <strong>Registration Link in Bio during Campaign Week</strong>
+              bergmantri.com/event-form/blr
+            </td>
+          </tr>
+        </table>
+      </li>
+      <li>
+        <table class="dl-row" role="presentation">
+          <tr>
+            <td class="dl-td-icon"><div class="dl-icon">⏰</div></td>
+            <td class="dl-td-text">
+              <strong>Deadline — 18th May 2026</strong>
+              Create and share your Reel before this date to be part of the campaign
+            </td>
+          </tr>
+        </table>
+      </li>
+      <li>
+        <table class="dl-row" role="presentation">
+          <tr>
+            <td class="dl-td-icon"><div class="dl-icon">🚫</div></td>
+            <td class="dl-td-text">
+              <strong>No Other Brand Mentions</strong>
+              Do not name or tag any other brands — products, events, or sponsors — in the Reel or caption
+            </td>
+          </tr>
+        </table>
+      </li>
+    </ul>
+
+    <hr class="divider"/>
+
+    <!-- FOOTER -->
+    <div class="footer-card">
+
+      <!-- ★ REAL BERGMAN LOGO IN FOOTER ★ -->
+      <table class="footer-logo-row" role="presentation">
+        <tr>
+          <td class="flr-td-logo">
+            <img
+              class="footer-logo-img"
+              src="https://firebasestorage.googleapis.com/v0/b/racehub-ao1fu.firebasestorage.app/o/BERGMAN%20LOGOS%2Fbm.png?alt=media&token=893533c9-e655-40d3-bfc2-9ae07c51a3b3"
+              alt="Bergman Logo"
+              width="44" height="44"
+              style="display:block;object-fit:contain"
+            />
+          </td>
+          <td class="flr-td-word">
+            <div class="footer-wordmark"><span class="fw-berg">BERG</span><span class="fw-man">MAN</span></div>
+          </td>
+        </tr>
+      </table>
+
+      <div class="footer-cta">LET'S BUILD THIS MOVEMENT. 🏁🔥</div>
+      <div class="footer-sub">
+        India's endurance community is watching — and you're leading the charge.
+      </div>
+      <div class="footer-pills">
+        <span class="fpill">📧 info@bergmantri.com</span>
+        <span class="fpill">📍 Bengaluru, India</span>
+        <span class="fpill">📸 @bergman_bengaluru</span>
+        <span class="fpill">📸 @bergmantriathlon</span>
+        <span class="fpill">🌐 bergmantri.com/event-form/blr</span>
+        <span class="fpill">📅 Deadline: 18 May 2026</span>
+      </div>
+      <div style="border-top:1px solid rgba(0,200,255,0.09);padding-top:18px;margin-top:4px">
+        <div style="font-size:12px;color:#3d5068;margin-bottom:4px">Warm regards,</div>
+        <div class="sig-name">Vaibhav</div>
+        <div class="sig-title">Race Director</div>
+        <div class="sig-brand">Bergman · Bengaluru 2026</div>
+      </div>
+
+      <div class="color-strip"></div>
+    </div>
+
+  </div><!-- /main-card -->
+
+</div>
+</div>
+</body>
+</html>

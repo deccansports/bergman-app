@@ -93,7 +93,7 @@ export async function POST(request: Request) {
       success: true,
       message: "OTP verified successfully.",
       token: customToken,
-      isNewUser: isNewUser || !existingFirestoreData?.mobile, // Mobile check as proxy for complete profile
+      isNewUser: isNewUser || !existingFirestoreData,
     });
 
   } catch (error: any) {

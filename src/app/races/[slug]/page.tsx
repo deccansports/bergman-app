@@ -8,6 +8,7 @@ import { notFound } from 'next/navigation';
 import type { EventCalendarEntry } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export default async function DynamicRacePage({ params }: { params: { slug: string } }) {
   const { slug } = params;

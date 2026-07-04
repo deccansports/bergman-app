@@ -12,6 +12,18 @@ import { runDataSyncAction } from './dataSyncActions';
 
 const ANNOUNCEMENTS_COLLECTION = 'announcements';
 
+function normalizeStartDateIso(value: string): string {
+  // If admin saved YYYY-MM-DD from date input, treat it as start of local day.
+  if (!value.includes('T')) return `${value}T00:00:00.000`;
+  return value;
+}
+
+function normalizeEndDateIso(value: string): string {
+  // If admin saved YYYY-MM-DD from date input, keep announcement active through end of day.
+  if (!value.includes('T')) return `${value}T23:59:59.999`;
+  return value;
+}
+
 /**
  * INTERNAL: Mirror active announcements to KV.
  */
@@ -121,10 +133,13 @@ export async function getActiveAnnouncementsAction(params: {
         return { success: true, message: 'No active announcements.', announcements: [] };
     }
 
-    const now = new Date().toISOString();
+    const now = new Date();
     const filtered = allActive.filter(a => {
       // 1. Time validity
-      if (a.startDate > now || a.endDate < now) return false;
+      const start = new Date(normalizeStartDateIso(a.startDate));
+      const end = new Date(normalizeEndDateIso(a.endDate));
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
+      if (start > now || end < now) return false;
 
       // 2. Audience targeting
       if (a.type === 'global') return true;
@@ -138,7 +153,14 @@ export async function getActiveAnnouncementsAction(params: {
       return false;
     });
 
-    return { success: true, message: 'Fetched from cache.', announcements: filtered };
+    const sorted = filtered.sort((a, b) => {
+      const priorityWeight = { high: 3, medium: 2, low: 1 };
+      const diff = priorityWeight[b.priority] - priorityWeight[a.priority];
+      if (diff !== 0) return diff;
+      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    });
+
+    return { success: true, message: 'Fetched from cache.', announcements: sorted };
   } catch (e: any) {
     console.error(`[${actionName}] Error:`, e);
     return { success: false, message: e.message };

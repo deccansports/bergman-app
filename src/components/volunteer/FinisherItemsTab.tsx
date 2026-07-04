@@ -8,12 +8,15 @@ import { Loader2, Search as SearchIcon, Edit2, XCircle, CheckCircle, Medal, Shir
 import type { EventParticipant, EventCalendarEntry } from '@/lib/types';
 import { searchParticipantsForCheckInAction, markItemIssuedAction, updateParticipantTshirtSizeAction, resetIssuedItemStatusAction } from '@/lib/actions/volunteerActions';
 import { updateParticipantStatusAction } from '@/lib/actions/participantActions';
+import { getLiveTimingDataAction } from '@/lib/actions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import type { LiveAthlete } from '@/lib/types';
+import { normalizeStatus, isFinisherGoodiesEligible } from '@/lib/utils';
 
 interface FinisherItemsTabProps {
   eventId: string;
@@ -26,6 +29,8 @@ export default function FinisherItemsTab({ eventId }: FinisherItemsTabProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchedParticipant, setSearchedParticipant] = useState<EventParticipant | null>(null);
+  const [liveAthletes, setLiveAthletes] = useState<LiveAthlete[]>([]);
+  const [isLoadingLiveData, setIsLoadingLiveData] = useState(false);
   const [isIssuingItem, setIsIssuingItem] = useState<'Medal' | 'Finisher Jersey' | null>(null);
   const [isEditingTshirtSize, setIsEditingTshirtSize] = useState(false);
   const [newTshirtSize, setNewTshirtSize] = useState('');
@@ -37,6 +42,39 @@ export default function FinisherItemsTab({ eventId }: FinisherItemsTabProps) {
     setSearchedParticipant(null);
   }, [eventId]);
 
+  const fetchLiveData = useCallback(async () => {
+    if (!eventId) return;
+    setIsLoadingLiveData(true);
+    try {
+      const result = await getLiveTimingDataAction(eventId, 'live');
+      if (result.success && Array.isArray(result.participants)) {
+        setLiveAthletes(result.participants);
+      }
+    } catch {
+      // Keep search flow usable even if the live feed is temporarily unavailable.
+    } finally {
+      setIsLoadingLiveData(false);
+    }
+  }, [eventId]);
+
+  useEffect(() => {
+    fetchLiveData();
+  }, [fetchLiveData]);
+
+  const mergeLiveStatus = useCallback((participant: EventParticipant | null) => {
+    if (!participant) return null;
+    const bib = String(participant.bibNumber || '').trim();
+    const liveAthlete = liveAthletes.find((athlete) => String(athlete.bib || '').trim() === bib);
+    if (!liveAthlete) return participant;
+
+    return {
+      ...participant,
+      status: normalizeStatus(liveAthlete.status),
+      ticketName: participant.ticketName || liveAthlete.ticketName || null,
+      ticketId: participant.ticketId || liveAthlete.ticketId || null,
+    };
+  }, [liveAthletes]);
+
   const handleSearch = async (e?: React.FormEvent<HTMLFormElement>) => {
     e?.preventDefault();
     if (!eventId || !searchTerm) return;
@@ -44,9 +82,10 @@ export default function FinisherItemsTab({ eventId }: FinisherItemsTabProps) {
     setSearchedParticipant(null);
     setIsEditingTshirtSize(false);
     try {
+      await fetchLiveData();
         const result = await searchParticipantsForCheckInAction(eventId, searchTerm, 'bibNumber');
         if (result.success && result.participant) {
-            setSearchedParticipant(result.participant);
+        setSearchedParticipant(mergeLiveStatus(result.participant));
             setNewTshirtSize(result.participant.tshirtSize || '');
         } else {
             toast({ variant: "destructive", title: "Not Found", description: result.message });
@@ -66,10 +105,11 @@ export default function FinisherItemsTab({ eventId }: FinisherItemsTabProps) {
         const result = await updateParticipantStatusAction(eventId, searchedParticipant.id, status);
         if (result.success) {
             toast({ title: 'Status Updated', description: `Participant marked as ${status}.`});
+          await fetchLiveData();
             // Re-fetch participant data to show updated status
             const refreshResult = await searchParticipantsForCheckInAction(eventId, searchTerm, 'bibNumber');
             if (refreshResult.success && refreshResult.participant) {
-                setSearchedParticipant(refreshResult.participant);
+            setSearchedParticipant(mergeLiveStatus(refreshResult.participant));
             }
         } else {
             toast({ variant: 'destructive', title: 'Update Failed', description: result.message });
@@ -89,10 +129,11 @@ export default function FinisherItemsTab({ eventId }: FinisherItemsTabProps) {
         const result = await markItemIssuedAction(eventId, searchedParticipant.id, itemType);
         if (result.success) {
             toast({ title: "Success", description: result.message });
+          await fetchLiveData();
             // Re-fetch participant data to show updated status
             const refreshResult = await searchParticipantsForCheckInAction(eventId, searchTerm, 'bibNumber');
             if (refreshResult.success && refreshResult.participant) {
-                setSearchedParticipant(refreshResult.participant);
+            setSearchedParticipant(mergeLiveStatus(refreshResult.participant));
             }
         } else {
             toast({ variant: "destructive", title: "Failed", description: result.message });
@@ -112,9 +153,10 @@ export default function FinisherItemsTab({ eventId }: FinisherItemsTabProps) {
         const result = await resetIssuedItemStatusAction(eventId, searchedParticipant.id, itemType);
         if (result.success) {
             toast({ title: "Success", description: result.message });
+          await fetchLiveData();
             const refreshResult = await searchParticipantsForCheckInAction(eventId, searchTerm, 'bibNumber');
             if (refreshResult.success && refreshResult.participant) {
-                setSearchedParticipant(refreshResult.participant);
+            setSearchedParticipant(mergeLiveStatus(refreshResult.participant));
             }
         } else {
             toast({ variant: 'destructive', title: "Reset Failed", description: result.message });
@@ -142,17 +184,19 @@ export default function FinisherItemsTab({ eventId }: FinisherItemsTabProps) {
     }
   };
 
-  const didNotFinish = ['DNF', 'DNS', 'DNQ'].includes(searchedParticipant?.status || '');
+  const raceStatus = normalizeStatus(searchedParticipant?.status);
+  const finishedForGoodies = isFinisherGoodiesEligible(raceStatus);
+  const finalRaceStatus = ['Finished', 'DNF', 'DNS', 'DNQ'].includes(raceStatus) ? raceStatus : 'Unknown';
 
   return (
     <Card className="bg-background shadow-md">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-primary"><Medal className="h-5 w-5" />Finisher goodies</CardTitle>
-        <CardDescription>Search for a finisher by BIB to issue items like medals and jerseys. Uses your assigned event.</CardDescription>
+        <CardDescription>Search by BIB. Status is synced from Feibot-backed live timing data so only finishers can receive goodies.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-2">
-            <Input placeholder="Enter athlete's BIB Number..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} disabled={isSearching || !eventId} />
+            <Input placeholder="Enter athlete's BIB Number..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} disabled={isSearching || isLoadingLiveData || !eventId} />
             <Button type="submit" disabled={!searchTerm || isSearching || !eventId} className="min-w-[120px]">
                 {isSearching ? <Loader2 className="animate-spin" /> : <SearchIcon className="h-4 w-4" />}
                 <span className="ml-2">Search</span>
@@ -185,19 +229,20 @@ export default function FinisherItemsTab({ eventId }: FinisherItemsTabProps) {
                       )}
                     </div>
                     <div><p className="text-xs font-semibold text-muted-foreground">Waiver Status</p><div><Badge variant={searchedParticipant.checkInStatus === 'CheckedIn' ? 'default' : 'destructive'}>{searchedParticipant.checkInStatus || 'Pending'}</Badge></div></div>
-                    <div><p className="text-xs font-semibold text-muted-foreground">Race Status</p><div><Badge variant={didNotFinish ? 'destructive' : 'default'}>{searchedParticipant.status || 'Unknown'}</Badge></div></div>
+                    <div><p className="text-xs font-semibold text-muted-foreground">Race Status</p><div><Badge variant={finalRaceStatus === 'Finished' ? 'default' : 'destructive'}>{finalRaceStatus}</Badge></div></div>
                     <div><p className="text-xs font-semibold text-muted-foreground">Medal Status</p><div><Badge variant={searchedParticipant.medalIssued ? 'default' : 'secondary'}>{searchedParticipant.medalIssued ? 'Issued' : 'Not Issued'}</Badge></div></div>
                     <div><p className="text-xs font-semibold text-muted-foreground">Finisher Jersey</p><div><Badge variant={!searchedParticipant.isEligibleForFinisherJersey ? 'secondary' : searchedParticipant.finisherJerseyIssued ? 'default' : 'secondary'}>
                       {!searchedParticipant.isEligibleForFinisherJersey ? 'Not Eligible' : searchedParticipant.finisherJerseyIssued ? 'Issued' : 'Not Issued'}
                     </Badge></div></div>
                 </div>
-                {searchedParticipant.checkInStatus !== 'CheckedIn' && (<Alert variant="destructive" className="mt-4 text-xs"><AlertTriangle className="h-4 w-4" /><AlertTitle>Waiver Pending</AlertTitle><AlertDescription>Athlete must complete waiver check-in before items can be issued.</AlertDescription></Alert>)}
+                  {searchedParticipant.checkInStatus !== 'CheckedIn' && (<Alert variant="destructive" className="mt-4 text-xs"><AlertTriangle className="h-4 w-4" /><AlertTitle>Waiver Pending</AlertTitle><AlertDescription>Athlete must complete waiver check-in before items can be issued.</AlertDescription></Alert>)}
+                  {finalRaceStatus !== 'Finished' && finalRaceStatus !== 'Unknown' && (<Alert className="mt-4 text-xs border-orange-200 bg-orange-50 text-orange-900"><Ban className="h-4 w-4" /><AlertTitle>Not Eligible for Goodies</AlertTitle><AlertDescription>This athlete is marked as {finalRaceStatus}. Goodies can only be issued to finishers.</AlertDescription></Alert>)}
                 <div className="mt-4 pt-4 border-t flex flex-col md:flex-row gap-2">
-                    <Button className="flex-1" onClick={() => handleMarkItemIssued('Medal')} disabled={isIssuingItem === 'Medal' || searchedParticipant.medalIssued || searchedParticipant.checkInStatus !== 'CheckedIn' || didNotFinish}>
+                    <Button className="flex-1" onClick={() => handleMarkItemIssued('Medal')} disabled={isIssuingItem === 'Medal' || searchedParticipant.medalIssued || searchedParticipant.checkInStatus !== 'CheckedIn' || !finishedForGoodies}>
                         {isIssuingItem === 'Medal' ? <Loader2 className="animate-spin" /> : <Medal className="h-4 w-4" />}
                         <span className="ml-2">{searchedParticipant.medalIssued ? 'Medal Issued' : 'Mark Medal Issued'}</span>
                     </Button>
-                    <Button className="flex-1" onClick={() => handleMarkItemIssued('Finisher Jersey')} disabled={isIssuingItem === 'Finisher Jersey' || !searchedParticipant.isEligibleForFinisherJersey || searchedParticipant.finisherJerseyIssued || searchedParticipant.checkInStatus !== 'CheckedIn' || didNotFinish}>
+                    <Button className="flex-1" onClick={() => handleMarkItemIssued('Finisher Jersey')} disabled={isIssuingItem === 'Finisher Jersey' || !searchedParticipant.isEligibleForFinisherJersey || searchedParticipant.finisherJerseyIssued || searchedParticipant.checkInStatus !== 'CheckedIn' || !finishedForGoodies}>
                          {isIssuingItem === 'Finisher Jersey' ? <Loader2 className="animate-spin" /> : <Shirt className="h-4 w-4" />}
                         <span className="ml-2">{searchedParticipant.finisherJerseyIssued ? 'Jersey Issued' : 'Mark Jersey Issued'}</span>
                     </Button>
@@ -215,10 +260,10 @@ export default function FinisherItemsTab({ eventId }: FinisherItemsTabProps) {
                     )}
                 </div>
                 <div className="mt-4 pt-4 border-t flex flex-col sm:flex-row gap-2">
-                    <Button className="flex-1" variant="destructive" onClick={() => handleUpdateStatus('DNF')} disabled={isUpdatingStatus || didNotFinish}>
+                    <Button className="flex-1" variant="destructive" onClick={() => handleUpdateStatus('DNF')} disabled={isUpdatingStatus || !finishedForGoodies}>
                         {isUpdatingStatus && <Loader2 className="animate-spin" />}<span className="ml-2">Mark as DNF</span>
                     </Button>
-                    <Button className="flex-1" variant="outline" onClick={() => handleUpdateStatus('Finished')} disabled={isUpdatingStatus || !didNotFinish}>
+                    <Button className="flex-1" variant="outline" onClick={() => handleUpdateStatus('Finished')} disabled={isUpdatingStatus || finishedForGoodies}>
                         {isUpdatingStatus && <Loader2 className="animate-spin" />}<span className="ml-2">Reset DNF Status</span>
                     </Button>
                 </div>

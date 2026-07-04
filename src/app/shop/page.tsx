@@ -128,7 +128,13 @@ export default function ShopPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
                 {filteredProducts.map((p) => {
                     const mainImage = p.images?.[0];
-                    const lowestPrice = Math.min(...(p.variants?.map(v => v.salePrice) || [0]));
+                    const variants = p.variants || [];
+                    const sortedBySale = [...variants].sort((a, b) => a.salePrice - b.salePrice);
+                    const cheapestVariant = sortedBySale[0];
+                    const lowestPrice = cheapestVariant?.salePrice || 0;
+                    const lowestMrp = cheapestVariant?.mrp || 0;
+                    const hasDiscount = lowestMrp > lowestPrice;
+                    const discountPct = hasDiscount ? Math.round(((lowestMrp - lowestPrice) / lowestMrp) * 100) : 0;
                     const isOutOfStock = p.variants?.every(v => v.stock <= 0);
 
                     return (
@@ -177,7 +183,13 @@ export default function ShopPage() {
                                         <div className="mt-6 flex items-center justify-between">
                                             <div className="text-left">
                                                 <p className="text-[10px] font-bold text-muted-foreground uppercase leading-none">Starting from</p>
-                                                <p className="text-2xl font-black text-foreground italic tracking-tighter">₹{lowestPrice}</p>
+                                                                                                <p className="text-2xl font-black text-foreground italic tracking-tighter">₹{lowestPrice.toLocaleString()}</p>
+                                                                                                {hasDiscount ? (
+                                                                                                    <div className="mt-1 flex items-center gap-2 text-xs leading-none">
+                                                                                                        <span className="text-muted-foreground line-through font-bold">₹{lowestMrp.toLocaleString()}</span>
+                                                                                                        <span className="text-emerald-700 font-black">{discountPct}% OFF</span>
+                                                                                                    </div>
+                                                                                                ) : null}
                                             </div>
                                             <div className="h-10 w-10 rounded-2xl bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all duration-300">
                                                 <ArrowRight className="h-5 w-5" />

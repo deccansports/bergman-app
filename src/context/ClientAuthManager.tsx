@@ -18,9 +18,13 @@ const PUBLIC_AUTH_ROUTES = [
 
 const PUBLIC_VIEW_ROUTES = [
     '/races',
+  '/race-photos',
+    '/athlete-journey',
     '/event-form',
     '/food',
     '/results',
+  '/certificate',
+  '/elite-league',
     '/club-rankings',
     '/athlete-rankings',
     '/rewards',
@@ -50,17 +54,19 @@ export default function ClientAuthManager({ children }: { children: React.ReactN
 
     const isRoot = pathname === '/';
     const isPublicAuthRoute = PUBLIC_AUTH_ROUTES.some(route => pathname.startsWith(route));
+    const isDynamicContentRoute = pathname.startsWith('/content/');
     const isPublicViewRoute = isRoot || PUBLIC_VIEW_ROUTES.some(route => pathname.startsWith(route));
     const isApiRoute = pathname.startsWith('/api/') || pathname.startsWith('/__/');
 
     let targetPath: string | null = null;
 
     if (currentUser) {
-      // PROFILES ARE CONSIDERED INCOMPLETE IF NO MOBILE IS SET
-      const isProfileIncomplete = !currentUser.mobile;
+      const isPrivilegedUser = !!currentUser.isAdmin || !!currentUser.ownedClubId || !!currentUser.isVolunteer;
+      // Only enforce mobile completion for regular athlete accounts
+      const requiresProfileCompletion = !isPrivilegedUser && !currentUser.mobile;
 
       // 2. Redirect away from login/auth pages ONLY if profile is complete
-      if (!isProfileIncomplete && isPublicAuthRoute && pathname !== '/__/auth/action') {
+      if (!requiresProfileCompletion && isPublicAuthRoute && pathname !== '/__/auth/action') {
         const redirectQuery = searchParams.get('redirect');
         if (redirectQuery && redirectQuery !== pathname) {
             targetPath = redirectQuery;
@@ -68,17 +74,50 @@ export default function ClientAuthManager({ children }: { children: React.ReactN
             // Pick default dashboard based on role for fresh logins
             if (currentUser.isAdmin) targetPath = '/admin/dashboard';
             else if (currentUser.ownedClubId) targetPath = '/club-dashboard';
-            else if (currentUser.isVolunteer) targetPath = '/volunteer/dashboard';
+            else if (currentUser.isVolunteer && currentUser.volunteerActive !== false) targetPath = '/volunteer/dashboard';
             else targetPath = '/dashboard';
         }
       }
       
       // 3. Force profile completion if logged in but missing mobile
-      if (isProfileIncomplete && !isPublicAuthRoute && !isPublicViewRoute && !isApiRoute && pathname !== '/complete-profile') {
+        if (requiresProfileCompletion && !isPublicAuthRoute && !isPublicViewRoute && !isApiRoute && pathname !== '/complete-profile') {
           targetPath = '/complete-profile';
       }
 
     } else {
+      if (isDynamicContentRoute) {
+        const slug = pathname.replace('/content/', '').split('/')[0];
+        if (!slug) return;
+
+        // Resolve per-page access mode from CMS.
+        fetch(`/api/pages/access?slug=${encodeURIComponent(slug)}`, { cache: 'no-store' })
+          .then((res) => res.ok ? res.json() : Promise.resolve({ success: false, requiresLogin: true }))
+          .then((data) => {
+            const requiresLogin = data?.requiresLogin !== false;
+            if (requiresLogin && !isRedirecting.current) {
+              const redirectQueryParam = encodeURIComponent(pathname + (searchParams.toString() ? `?${searchParams.toString()}` : ''));
+              const nextPath = `/login?redirect=${redirectQueryParam}`;
+              isRedirecting.current = true;
+              router.replace(nextPath);
+              setTimeout(() => {
+                isRedirecting.current = false;
+              }, 1000);
+            }
+          })
+          .catch(() => {
+            if (!isRedirecting.current) {
+              const redirectQueryParam = encodeURIComponent(pathname + (searchParams.toString() ? `?${searchParams.toString()}` : ''));
+              const nextPath = `/login?redirect=${redirectQueryParam}`;
+              isRedirecting.current = true;
+              router.replace(nextPath);
+              setTimeout(() => {
+                isRedirecting.current = false;
+              }, 1000);
+            }
+          });
+        return;
+      }
+
       // 4. Redirect to login if on a protected route
       const isProtectedRoute = !isPublicAuthRoute && !isPublicViewRoute && !isApiRoute;
       if (isProtectedRoute) {

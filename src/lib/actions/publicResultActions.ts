@@ -4,7 +4,7 @@
 import type { RaceResult, EventCalendarEntry } from '@/lib/types';
 import { getFirestoreInstance } from '@/lib/firebaseAdmin';
 import { serializeValue, toDateStringSafe } from '@/lib/utils';
-import { getKV } from '../cloudflare/kv';
+import { getKV, batchGetKV, putKV } from '../cloudflare/kv';
 import { isBefore, parseISO, startOfDay, format } from 'date-fns';
 
 /**
@@ -74,22 +74,20 @@ export async function _internal_fetchAllRaceDataFromKV(): Promise<{
   const actionName = '[publicResultActions][_internal_fetchAllRaceDataFromKV]';
   try {
     const eventsWithResults = await getKV<EventCalendarEntry[]>('events:with-results', actionName);
-    if (!eventsWithResults || !Array.isArray(eventsWithResults) || eventsWithResults.length === 0) {
-      return { success: true, message: 'No events with results found in KV.', races: [] };
-    }
-
-    const eventIds = eventsWithResults.map(e => e.id);
+    const eventIds = Array.isArray(eventsWithResults) ? eventsWithResults.map(e => e.id) : [];
     const allRaces: RaceResult[] = [];
 
-    const racePromises = eventIds.map(eventId => getKV<RaceResult[]>(`results:${eventId}`, actionName));
-    const eventResultsArray = await Promise.all(racePromises);
+    if (eventIds.length > 0) {
+      const racePromises = eventIds.map(eventId => getKV<RaceResult[]>(`results:${eventId}`, actionName));
+      const eventResultsArray = await Promise.all(racePromises);
 
-    eventResultsArray.forEach(eventRaces => {
-      if (eventRaces && Array.isArray(eventRaces)) {
-        allRaces.push(...eventRaces);
-      }
-    });
-    
+      eventResultsArray.forEach(eventRaces => {
+        if (eventRaces && Array.isArray(eventRaces)) {
+          allRaces.push(...eventRaces);
+        }
+      });
+    }
+
     allRaces.sort((a, b) => new Date(b.raceDate!).getTime() - new Date(a.raceDate!).getTime());
 
     return { success: true, message: 'All race data fetched successfully from KV.', races: allRaces };
@@ -117,18 +115,14 @@ export async function getPublicFinalResultsAction(
   const actionName = '[publicResultActions][getPublicFinalResultsAction]';
 
   try {
-    const results = await getKV<RaceResult[]>(
+    let results = await getKV<RaceResult[]>(
       `results:${eventId}`,
       `${actionName}:${eventId}`
     );
 
     if (!results || !Array.isArray(results)) {
-      console.warn(`[${actionName}] KV cache miss or non-array for results:${eventId}`);
-      return {
-        success: true,
-        message: "No results found for this event.",
-        participants: [],
-      };
+      console.warn(`[${actionName}] KV cache miss or non-array for results:${eventId}; returning empty results.`);
+      results = [];
     }
 
     let filteredResults = results;
@@ -229,6 +223,7 @@ export async function getDistinctEventsFromResultsAction(): Promise<{
         .sort((a, b) => {
             const dateA = a.date ? new Date(a.date).getTime() : 0;
             const dateB = b.date ? new Date(b.date).getTime() : 0;
+            // Sort newest (latest) first for past events
             return dateB - dateA;
         });
 
@@ -253,35 +248,148 @@ export async function getDistinctEventsFromResultsAction(): Promise<{
  * ============================================================
  */
 export async function getAthleteRaceHistoryAction(
-  email: string
+  email: string,
+  athleteUid?: string,
+  mobile?: string
 ): Promise<{ success: boolean; message: string; races?: RaceResult[] }> {
   const actionName = '[publicResultActions][getAthleteRaceHistoryAction]';
-  if (!email) {
-    return { success: false, message: 'Email is required to fetch race history.' };
+  if (!email && !athleteUid && !mobile) {
+    return { success: false, message: 'Email, athlete UID, or mobile is required to fetch race history.' };
   }
 
   try {
-    // 1. Get all event IDs that have results from KV
-    const eventsWithResults = await getKV<{ id: string }[]>('events:with-results', actionName);
-    if (!eventsWithResults || !Array.isArray(eventsWithResults) || eventsWithResults.length === 0) {
-      return { success: true, message: 'No events with race results found.', races: [] };
+    // Resolve additional identity signals from the user's Firestore profile when UID is available.
+    const normalizedUid = String(athleteUid || '').trim();
+    const identityEmails = new Set<string>();
+    const identityMobiles = new Set<string>();
+
+    const normalizedInputEmail = String(email || '').toLowerCase().trim();
+    if (normalizedInputEmail) identityEmails.add(normalizedInputEmail);
+
+    const normalizedInputMobile = String(mobile || '').replace(/\D/g, '');
+    if (normalizedInputMobile) {
+      identityMobiles.add(normalizedInputMobile);
+      if (normalizedInputMobile.length >= 10) identityMobiles.add(normalizedInputMobile.slice(-10));
     }
 
-    const eventIds = eventsWithResults.map(e => e.id);
+    if (normalizedUid) {
+      try {
+        const db = getFirestoreInstance();
+        const userSnap = await db.collection('users').doc(normalizedUid).get();
+        if (userSnap.exists) {
+          const profile = userSnap.data() || {};
+          const profileEmails = [profile?.email, profile?.personalRaceEmail]
+            .map((v: any) => String(v || '').toLowerCase().trim())
+            .filter(Boolean);
+          profileEmails.forEach((e: string) => identityEmails.add(e));
+
+          const profileMobile = String(profile?.mobile || '').replace(/\D/g, '');
+          if (profileMobile) {
+            identityMobiles.add(profileMobile);
+            if (profileMobile.length >= 10) identityMobiles.add(profileMobile.slice(-10));
+          }
+        }
+      } catch (profileErr: any) {
+        console.warn(`[${actionName}] Unable to load user profile for identity enrichment:`, profileErr?.message || profileErr);
+      }
+    }
+
+    // 1. Get all event IDs that have results from KV
+    const eventsWithResults = await getKV<{ id: string }[]>('events:with-results', actionName);
+    const eventIds = Array.isArray(eventsWithResults) ? eventsWithResults.map(e => e.id) : [];
     const allRaces: RaceResult[] = [];
 
-    // 2. Fetch results for each event from KV
-    const racePromises = eventIds.map(eventId => getKV<RaceResult[]>(`results:${eventId}`, actionName));
-    const eventResultsArray = await Promise.all(racePromises);
+    // 2. 🔥 Fetch results for each event from KV using SEQUENTIAL reads (not parallel)
+    // This prevents hitting Cloudflare's 429 rate limit
+    const resultKeys = eventIds.map(id => `results:${id}`);
+    const eventResultsArray = resultKeys.length > 0
+      ? await batchGetKV<RaceResult[]>(resultKeys, actionName)
+      : [];
 
     // 3. Filter and combine results for the user
-    const lowerCaseEmail = email.toLowerCase();
+    const emailCandidates = Array.from(identityEmails);
+    const mobileCandidates = Array.from(identityMobiles);
     eventResultsArray.forEach(eventRaces => {
       if (eventRaces && Array.isArray(eventRaces)) {
-        const userRaces = eventRaces.filter(race => race.emailLower === lowerCaseEmail);
+        const userRaces = eventRaces.filter((race: any) => {
+          const raceUid = String(race?.athleteUid || '').trim();
+          const raceEmailLower = String(race?.emailLower || '').toLowerCase().trim();
+          const raceEmail = String(race?.email || '').toLowerCase().trim();
+          const raceMobileDigits = String(race?.mobile || '').replace(/\D/g, '');
+          const raceMobileLast10 = raceMobileDigits.length >= 10 ? raceMobileDigits.slice(-10) : raceMobileDigits;
+          const emailMatch = emailCandidates.some((candidate) => candidate && (raceEmailLower === candidate || raceEmail === candidate));
+          const mobileMatch = mobileCandidates.some((candidate) => {
+            if (!candidate) return false;
+            return raceMobileDigits === candidate || raceMobileLast10 === candidate;
+          });
+          return (
+            (!!normalizedUid && raceUid === normalizedUid) ||
+            emailMatch ||
+            mobileMatch
+          );
+        });
         allRaces.push(...userRaces);
       }
     });
+
+    // Fallback: if KV has no rows for this athlete, query Firestore raceResults directly.
+    if (allRaces.length === 0) {
+      try {
+        const db = getFirestoreInstance();
+        const candidates: RaceResult[] = [];
+
+        if (normalizedUid) {
+          const byUid = await db.collection('raceResults').where('athleteUid', '==', normalizedUid).get();
+          byUid.docs.forEach((doc) => {
+            candidates.push(serializeValue({
+              ...doc.data(),
+              docId: doc.id,
+              raceDate: toDateStringSafe(doc.data().raceDate),
+              uploadedAt: toDateStringSafe(doc.data().uploadedAt),
+            }) as RaceResult);
+          });
+        }
+
+        for (const candidateEmail of emailCandidates) {
+          const [byEmailLower, byEmail] = await Promise.all([
+            db.collection('raceResults').where('emailLower', '==', candidateEmail).get(),
+            db.collection('raceResults').where('email', '==', candidateEmail).get(),
+          ]);
+          [byEmailLower, byEmail].forEach((snap) => {
+            snap.docs.forEach((doc) => {
+              candidates.push(serializeValue({
+                ...doc.data(),
+                docId: doc.id,
+                raceDate: toDateStringSafe(doc.data().raceDate),
+                uploadedAt: toDateStringSafe(doc.data().uploadedAt),
+              }) as RaceResult);
+            });
+          });
+        }
+
+        for (const mobileCandidate of mobileCandidates) {
+          const byMobile = await db.collection('raceResults').where('mobile', '==', mobileCandidate).get();
+          byMobile.docs.forEach((doc) => {
+            candidates.push(serializeValue({
+              ...doc.data(),
+              docId: doc.id,
+              raceDate: toDateStringSafe(doc.data().raceDate),
+              uploadedAt: toDateStringSafe(doc.data().uploadedAt),
+            }) as RaceResult);
+          });
+        }
+
+        const deduped = new Map<string, RaceResult>();
+        candidates.forEach((race: any) => {
+          const key = String(race?.docId || `${race?.eventId || ''}:${race?.bibNumber || ''}:${race?.raceDate || ''}`);
+          deduped.set(key, race);
+        });
+
+        allRaces.push(...Array.from(deduped.values()));
+      } catch (fireErr: any) {
+        console.warn(`[${actionName}] Firestore fallback failed:`, fireErr?.message || fireErr);
+      }
+    }
 
     // 4. Sort the combined results by date
     allRaces.sort((a, b) => new Date(b.raceDate!).getTime() - new Date(a.raceDate!).getTime());

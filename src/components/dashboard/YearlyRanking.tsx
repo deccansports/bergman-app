@@ -39,7 +39,7 @@ interface YearlyRankingProps {
   currentUser: User | null;
 }
 
-const MIN_RANKING_YEAR = 2023;
+const MIN_RANKING_YEAR = 2022;
 
 export function YearlyRanking({ currentUser }: YearlyRankingProps) {
   const currentActualYear = new Date().getFullYear();

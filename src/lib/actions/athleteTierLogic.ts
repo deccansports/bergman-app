@@ -4,7 +4,7 @@ import { normalizeStatus } from '../utils';
 
 function isLongDistance(race: RaceResult): boolean {
   const n = (race.eventName || race.raceCategory || '').toLowerCase();
-  return n.includes('ironman') || n.includes('half') || n.includes('113') || n.includes('226') || n.includes('long');
+  return n.includes('bergman') || n.includes('half') || n.includes('113') || n.includes('226') || n.includes('long');
 }
 
 export function calculateAthleteTierData(mobile: string, name: string, races: RaceResult[]): AthleteTierStats {

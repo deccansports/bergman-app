@@ -60,20 +60,23 @@ export async function sendRegistrationNotifications(orderId: string, overrideBib
     const ticketDef = event.ticketDefinitions?.find(td => td.id === participant.ticketId);
     const finalEventDate = participant.eventDate || ticketDef?.eventDate || event.eventDate || null;
 
+    const tasks: Promise<unknown>[] = [];
+
     // 1. Send confirmation to athlete
     if (participant.email) {
-      await sendRegistrationConfirmationEmail(
+      tasks.push(sendRegistrationConfirmationEmail(
         participant.email, participant.name, event.eventName, participant.bookingId!,
         registrationTimestamp, participant.ticketName ?? 'N/A', event.venueName || event.address,
         finalEventDate,
         participant.address, participant.mobile, participant.emergencyContactNumber,
         participant.invoiceNumber, finalBib,
         event.organizerName, event.organizerAddress, event.organizerCompanyDescription, participant.country,
-        currency as any
-      );
+        currency as any,
+        (participant as any).invoiceId || null
+      ));
     }
     if (participant.mobile) {
-      await sendRegistrationConfirmationViaWhatsApp(
+      tasks.push(sendRegistrationConfirmationViaWhatsApp(
         participant.mobile,
         participant.name ?? null,
         event.eventName ?? null,
@@ -83,18 +86,18 @@ export async function sendRegistrationNotifications(orderId: string, overrideBib
         finalBib,
         event.venueName || null,
         finalEventDate,
-      );
+      ));
     }
-    
+
     // 2. Send notification to admin
-    await sendAdminTicketSaleNotificationEmail(
+    tasks.push(sendAdminTicketSaleNotificationEmail(
       participant.name, event.eventName, participant.bookingId!, registrationTimestamp,
       participant.ticketName!, event.venueName, finalEventDate, participant.address,
       participant.mobile, participant.emergencyContactNumber, participant.email,
       participant.invoiceNumber, finalBib, event.organizerName,
       event.organizerAddress, event.organizerCompanyDescription, participant.country,
       currency as any
-    );
+    ));
 
     // 3. Send notification to club owner if applicable (IGNORE PLACEHOLDER)
     if (participant.clubId && participant.clubId !== NO_CLUB_SELECTED_VALUE) {
@@ -107,7 +110,7 @@ export async function sendRegistrationNotifications(orderId: string, overrideBib
           if (ownerDoc.exists) {
             const ownerData = ownerDoc.data() as User;
             if (ownerData.email) {
-              await sendClubAthleteRegistrationNoticeEmail(
+              tasks.push(sendClubAthleteRegistrationNoticeEmail(
                 ownerData.email,
                 participant.name || 'An athlete',
                 (clubData as any)?.name,
@@ -115,15 +118,17 @@ export async function sendRegistrationNotifications(orderId: string, overrideBib
                 participant.ticketName ?? 'N/A',
                 event.venueName || null,
                 finalEventDate
-              );
+              ));
             }
             if (ownerData.mobile) {
-              await sendClubAthleteRegistrationNoticeWhatsApp(ownerData.mobile, participant.name || 'An athlete', event.eventName, participant.ticketName ?? 'N/A', finalEventDate);
+              tasks.push(sendClubAthleteRegistrationNoticeWhatsApp(ownerData.mobile, participant.name || 'An athlete', event.eventName, participant.ticketName ?? 'N/A', finalEventDate));
             }
           }
         }
       }
     }
+
+    await Promise.allSettled(tasks);
     
     console.log(`[${actionName}] All notifications triggered for order ${orderId}.`);
     

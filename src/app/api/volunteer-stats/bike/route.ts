@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getFirestoreInstance } from '@/lib/firebaseAdmin';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
@@ -16,27 +17,38 @@ export async function GET(request: NextRequest) {
   try {
     const adminDb = getFirestoreInstance();
     const participantsRef = adminDb.collection('events').doc(eventId).collection('participants');
-    
-    // We only count participants who have completed waiver check-in as "total" for bike check-in purposes
-    const totalQuery = participantsRef.where('checkInStatus', '==', 'CheckedIn').count().get();
-    const checkedInQuery = participantsRef.where('bikeCheckInStatus', '==', 'CheckedIn').count().get();
-    const checkedOutQuery = participantsRef.where('bikeCheckOutStatus', '==', 'CheckedOut').count().get();
 
-    const [totalSnap, checkedInSnap, checkedOutSnap] = await Promise.all([
-        totalQuery,
-        checkedInQuery,
-        checkedOutQuery
-    ]);
+    // Read once and derive counts in-memory so historical/past-event data remains visible
+    // even if check-in status fields were modified after race day.
+    const snapshot = await participantsRef.get();
 
-    const totalParticipants = totalSnap.data().count;
-    const checkedInCount = checkedInSnap.data().count;
-    const checkedOutCount = checkedOutSnap.data().count;
+    let totalParticipants = 0;
+    let checkedInCount = 0;
+    let checkedOutCount = 0;
+
+    snapshot.docs.forEach((doc) => {
+      const p = doc.data() as any;
+      const checkInStatus = p?.checkInStatus;
+      const bikeCheckInStatus = p?.bikeCheckInStatus;
+      const bikeCheckOutStatus = p?.bikeCheckOutStatus;
+
+      if (
+        checkInStatus === 'CheckedIn' ||
+        bikeCheckInStatus === 'CheckedIn' ||
+        bikeCheckOutStatus === 'CheckedOut'
+      ) {
+        totalParticipants += 1;
+      }
+
+      if (bikeCheckInStatus === 'CheckedIn') checkedInCount += 1;
+      if (bikeCheckOutStatus === 'CheckedOut') checkedOutCount += 1;
+    });
 
     const stats = {
       totalParticipants, // Total eligible for bike check-in
       checkedInCount,
       checkedOutCount,
-      remainingCount: checkedInCount - checkedOutCount, // Bikes remaining in transition
+      remainingCount: Math.max(checkedInCount - checkedOutCount, 0), // Bikes remaining in transition
     };
     
     return NextResponse.json({ success: true, stats });

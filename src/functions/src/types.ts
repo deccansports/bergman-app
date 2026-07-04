@@ -32,6 +32,13 @@ export interface TicketDefinition {
   hsnCode?: string;
   ticketName?: string;
   cutoffs?: any;
+  courseMaps?: {
+    swimSplits?: CustomSplitPoint[];
+    bikeSplits?: CustomSplitPoint[];
+    runSplits?: CustomSplitPoint[];
+    run1Splits?: CustomSplitPoint[];
+    run2Splits?: CustomSplitPoint[];
+  };
 }
 
 export type Leg = 'SWIM' | 'T1' | 'BIKE' | 'T2' | 'RUN' | 'RUN1' | 'RUN2' | 'FINISH' | 'FINISHED';
@@ -53,12 +60,32 @@ export interface Split {
 export interface LiveAthlete {
   id?: string;
   athleteUid?: string | null;
+  participantUuid?: string | null;
+  participant_uuid?: string | null;
   bib: string;
   name: string;
   category: string;
   ageGroup: string | null;
+  ageGroupUuid?: string | null;
+  ageGroupName?: string | null;
+  age_group_uuid?: string | null;
+  age_group_name?: string | null;
   gender: 'Male' | 'Female';
   country?: string | null;
+  contestUuid?: string | null;
+  contest_uuid?: string | null;
+  contestName?: string | null;
+  contest_name?: string | null;
+  providerContestUuid?: string | null;
+  providerContestName?: string | null;
+  liveTracking?: {
+    provider?: string | null;
+    participantUuid?: string | null;
+    contestUuid?: string | null;
+    contestName?: string | null;
+    bib?: string | null;
+    chip?: string | null;
+  };
   status: Status;
   leg: Leg | 'NOT_STARTED';
   splits: Split[];

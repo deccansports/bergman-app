@@ -69,7 +69,8 @@ export default function ProductDetailPage() {
       size: activeVariant.size,
       sku: activeVariant.sku,
       hsnCode: product.hsnCode,
-      gstPercent: product.gstPercent
+      gstPercent: product.gstPercent,
+      isBestseller: !!product.isBestseller,
     });
 
     toast({
@@ -99,7 +100,7 @@ export default function ProductDetailPage() {
           <div className="relative aspect-[4/5] rounded-[2.5rem] overflow-hidden bg-muted border shadow-2xl group">
             {product.isBestseller && (
                 <Badge className="absolute top-6 left-6 z-10 bg-amber-500 text-white font-black uppercase text-xs tracking-widest py-1.5 px-4 border-none shadow-2xl">
-                    <Star className="mr-2 h-4 w-4 fill-white" /> Bergman Selection
+                <Star className="mr-2 h-4 w-4 fill-white" /> Bestseller
                 </Badge>
             )}
             <Image 

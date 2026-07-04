@@ -4,6 +4,7 @@
 
 import React, { useEffect, useState, useMemo, Suspense, useCallback } from 'react';
 import { getAthleteRankingData, getLegacyAthletesAction } from '@/lib/actions/athleteRankingActions';
+import { getBelSeasonLeaderboardAction } from '@/lib/actions';
 import type { AthleteRankingEntry, RankedAthlete, LegacyAthlete, RaceResult } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -16,6 +17,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
+import EliteLeagueSection from '@/components/layout/EliteLeagueSection';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from '@/components/ui/input';
 import { getOrdinal, formatSecondsToHMS, hmsToSeconds } from '@/lib/utils';
@@ -136,10 +138,9 @@ function AthleteRankingsDisplay() {
   const [loadingLegacy, setLoadingLegacy] = useState(true);
   const [errorLegacy, setErrorLegacy] = useState<string | null>(null);
   const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [belLookup, setBelLookup] = useState<Map<string, string>>(new Map());
 
   const currentYear = new Date().getFullYear();
-  const previousYear = currentYear - 1;
-  const nextYear = currentYear + 1;
 
   const [selectedYear, setSelectedYear] = useState<string>(currentYear.toString());
 
@@ -220,6 +221,66 @@ function AthleteRankingsDisplay() {
     }
     if (selectedYear) fetchRankingsAndLegacy();
   }, [selectedYear]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function loadBelBadges() {
+      const year = parseInt(selectedYear, 10);
+      const result = await getBelSeasonLeaderboardAction(year);
+      if (!mounted || !result.success || !result.rankings) {
+        if (mounted) setBelLookup(new Map());
+        return;
+      }
+
+      const lookup = new Map<string, string>();
+      result.rankings.forEach((athlete) => {
+        if (athlete.belTier === 'Gold' || athlete.belTier === 'Silver' || athlete.belTier === 'Bronze' || athlete.belTier === 'Provisional') {
+          if (athlete.athleteId) lookup.set(`uid:${athlete.athleteId}`, athlete.belTier);
+          if (athlete.email) lookup.set(`email:${athlete.email.toLowerCase()}`, athlete.belTier);
+          if (athlete.mobile) lookup.set(`mobile:${String(athlete.mobile).replace(/\D/g, '')}`, athlete.belTier);
+        }
+      });
+
+      setBelLookup(lookup);
+    }
+
+    loadBelBadges();
+    return () => {
+      mounted = false;
+    };
+  }, [selectedYear]);
+
+  const getBelTierForAthlete = useCallback((athlete: RankedAthlete) => {
+    const athleteUid = athlete.athleteId ? `uid:${athlete.athleteId}` : null;
+    const email = athlete.email ? `email:${athlete.email.toLowerCase()}` : null;
+    const mobile = athlete.mobile ? `mobile:${String(athlete.mobile).replace(/\D/g, '')}` : null;
+    const tier = (athleteUid && belLookup.get(athleteUid)) || (email && belLookup.get(email)) || (mobile && belLookup.get(mobile)) || null;
+    if (!tier || tier === 'Unranked' || tier === 'No Tier') return null;
+    return tier;
+  }, [belLookup]);
+
+  const renderBelBadge = (athlete?: RankedAthlete) => {
+    if (!athlete) return null;
+    const tier = getBelTierForAthlete(athlete);
+    if (!tier) return null;
+
+    const badgeClass =
+      tier === 'Gold'
+        ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
+        : tier === 'Silver'
+        ? 'bg-slate-100 text-slate-700 border-slate-300'
+        : tier === 'Bronze'
+        ? 'bg-amber-100 text-amber-800 border-amber-300'
+        : 'bg-purple-100 text-purple-800 border-purple-300';
+
+    const emoji = tier === 'Gold' ? '🥇' : tier === 'Silver' ? '🥈' : tier === 'Bronze' ? '🥉' : '🔵';
+    return (
+      <Badge variant="outline" className={cn('ml-2 text-[9px] font-black uppercase tracking-widest', badgeClass)}>
+        {emoji} BEL {tier}
+      </Badge>
+    );
+  };
 
  const uniqueAgeCategories = useMemo(() => {
     if (!allRankings || allRankings.length === 0) return ['all'];
@@ -421,6 +482,7 @@ function AthleteRankingsDisplay() {
                         <AvatarFallback className="bg-slate-700 text-slate-200 text-3xl">{getInitials(athlete.name)}</AvatarFallback>
                     </Avatar>
                     <CardTitle className="text-xl mt-2 text-shadow-md">{getCountryFlagEmoji(athlete.country)} {toTitleCase(athlete.name)}</CardTitle>
+                    <div>{renderBelBadge(athlete)}</div>
                     <CardDescription className="text-white/80">{athlete.clubName || 'Unaffiliated'}</CardDescription>
                 </CardHeader>
                 <CardContent className="relative pb-4 text-center">
@@ -494,36 +556,38 @@ function AthleteRankingsDisplay() {
 
   return (
     <div className="container mx-auto py-8 px-4 flex-grow text-left">
-      
-      {/* PERFORMANCE REWARDS CALLOUT */}
-      <Card className="mb-10 overflow-hidden border-none shadow-2xl bg-gradient-to-r from-[#0B5ED7] to-[#0A2F6B] text-white relative text-left">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-blue-400/10 rounded-full blur-3xl -mr-32 -mt-32"></div>
-          <CardContent className="p-8 md:p-12 flex flex-col md:flex-row items-center justify-between gap-8 relative z-10 text-left">
-              <div className="space-y-4 max-w-2xl text-left">
-                  <Badge className="bg-white/20 text-white border-white/30 px-3 py-1 font-black uppercase tracking-widest text-[10px]">
-                      Performance Rewards
-                  </Badge>
-                  <h2 className="text-3xl md:text-5xl font-black italic uppercase tracking-tighter leading-none text-left">Points Unlock Savings</h2>
-                  <p className="text-blue-50/80 font-medium text-lg leading-relaxed text-left">
-                      Every finish counts. Your points earned in {previousYear} will automatically unlock a <strong>season-long registration discount</strong> for the {currentYear} season.
-                  </p>
-                  <div className="flex flex-wrap gap-4 pt-4 text-left">
-                      <div className="flex items-center gap-2 bg-black/20 rounded-xl px-4 py-2 border border-white/10 text-left"><Star className="h-4 w-4 text-yellow-400 fill-yellow-400" /><span className="text-xs font-bold uppercase tracking-widest">Earn Points</span></div>
-                      <div className="flex items-center gap-2 bg-black/20 rounded-xl px-4 py-2 border border-white/10 text-left"><Zap className="h-4 w-4 text-blue-400 fill-blue-400" /><span className="text-xs font-bold uppercase tracking-widest">Unlock Discount</span></div>
-                      <div className="flex items-center gap-2 bg-black/20 rounded-xl px-4 py-2 border border-white/10 text-left"><CheckCircle2 className="h-4 w-4 text-green-400" /><span className="text-xs font-bold uppercase tracking-widest">Auto-Applied</span></div>
-                  </div>
-              </div>
-              <div className="shrink-0 text-left">
-                  <Button asChild size="lg" className="bg-white text-[#0B5ED7] hover:bg-blue-50 h-16 px-10 rounded-2xl font-black uppercase tracking-widest text-base shadow-2xl transition-transform hover:scale-105 border-none">
-                      <Link href="/rewards">See Discount Tiers <Sparkles className="ml-2 h-5 w-5"/></Link>
-                  </Button>
-              </div>
-          </CardContent>
-      </Card>
 
-      {loadingLegacy ? <Skeleton className="h-64 w-full rounded-xl mb-8" /> : errorLegacy ? ( <Card className="mb-8 border-destructive bg-destructive/10 text-left"><CardHeader className="text-left border-none"><CardTitle className="text-destructive flex items-center gap-2 text-left"><Trophy className="h-6 w-6"/> Legacy Athlete Status</CardTitle></CardHeader><CardContent className="text-left"><p className="text-sm text-destructive-foreground text-left">Error loading legacy athlete data: {errorLegacy}</p></CardContent></Card> ) : legacyAthletes.length > 0 ? ( <LegacyAthleteDisplayCard legacyAthletes={legacyAthletes} /> ) : ( <Card className="mb-8 border-primary/30 bg-primary/5 text-left"><CardHeader className="text-left border-none"><CardTitle className="text-primary flex items-center gap-2 text-left"><Trophy className="h-6 w-6"/> Bergman Legacy Athletes</CardTitle></CardHeader><CardContent className="text-left"><p className="text-sm text-muted-foreground text-left">No athletes currently meet the Legacy criteria (3 finishes over 3 consecutive years). Keep racing to achieve this honor!</p></CardContent></Card> )}
+      {/* Navigation Buttons */}
+      <div className="mb-12 flex flex-wrap gap-4 justify-center md:justify-start items-center">
+        <Button 
+          onClick={() => document.getElementById('about-bel')?.scrollIntoView({ behavior: 'smooth' })}
+          className="bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white rounded-xl h-11 px-6 font-black uppercase tracking-widest shadow-lg shadow-purple-600/30 border-none transition-all duration-200"
+        >
+          📚 About BEL
+        </Button>
+        <Button 
+          onClick={() => document.getElementById('athlete-rankings')?.scrollIntoView({ behavior: 'smooth' })}
+          className="bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-500 hover:to-amber-600 text-slate-900 rounded-xl h-11 px-6 font-black uppercase tracking-widest shadow-lg shadow-amber-600/30 border-none transition-all duration-200"
+        >
+          🏆 Athlete Rankings
+        </Button>
+        <Button 
+          onClick={() => document.getElementById('legacy-athletes')?.scrollIntoView({ behavior: 'smooth' })}
+          className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white rounded-xl h-11 px-6 font-black uppercase tracking-widest shadow-lg shadow-orange-600/30 border-none transition-all duration-200"
+        >
+          👑 Legacy Athletes
+        </Button>
+      </div>
+
+      <div id="about-bel" className="mb-10 scroll-mt-20">
+        <EliteLeagueSection />
+      </div>
+
+      <div id="legacy-athletes" className="scroll-mt-20">
+        {loadingLegacy ? <Skeleton className="h-64 w-full rounded-xl mb-8" /> : errorLegacy ? ( <Card className="mb-8 border-destructive bg-destructive/10 text-left"><CardHeader className="text-left border-none"><CardTitle className="text-destructive flex items-center gap-2 text-left"><Trophy className="h-6 w-6"/> Legacy Athlete Status</CardTitle></CardHeader><CardContent className="text-left"><p className="text-sm text-destructive-foreground text-left">Error loading legacy athlete data: {errorLegacy}</p></CardContent></Card> ) : legacyAthletes.length > 0 ? ( <LegacyAthleteDisplayCard legacyAthletes={legacyAthletes} /> ) : ( <Card className="mb-8 border-primary/30 bg-primary/5 text-left"><CardHeader className="text-left border-none"><CardTitle className="text-primary flex items-center gap-2 text-left"><Trophy className="h-6 w-6"/> Bergman Legacy Athletes</CardTitle></CardHeader><CardContent className="text-left"><p className="text-sm text-muted-foreground text-left">No athletes currently meet the Legacy criteria (3 finishes over 3 consecutive years). Keep racing to achieve this honor!</p></CardContent></Card> )}
+      </div>
       
-      <Card className="shadow-xl rounded-xl overflow-hidden border-t-4 border-accent text-left border-none">
+      <Card id="athlete-rankings" className="shadow-xl rounded-xl overflow-hidden border-t-4 border-accent text-left border-none scroll-mt-20">
         <CardHeader className="bg-accent/5 text-center py-6 text-left border-none">
           <UsersIcon className="h-12 w-12 text-accent mx-auto mb-3" />
           <CardTitle className="text-3xl font-bold text-accent text-center">Athlete Rankings {selectedCountry === 'all' ? '- Global' : `- ${selectedCountry}`}</CardTitle>
@@ -589,6 +653,7 @@ function AthleteRankingsDisplay() {
                                               <AvatarFallback className="bg-muted text-muted-foreground">{getInitials(athlete.name)}</AvatarFallback>
                                           </Avatar>
                                           <div className="text-left"><span className="mr-1">{getCountryFlagEmoji(athlete.country)}</span>{toTitleCase(athlete.name)}</div>
+                                            {renderBelBadge(athlete)}
                                           {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                                       </div>
                                   </TableCell>

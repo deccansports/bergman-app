@@ -4,6 +4,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from "react";
 import type { EventCalendarEntry, EventParticipant, FinancialSummary, DeferralEntry, CategoryChangeEntry } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/context/AuthContext";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 import {
@@ -68,7 +69,9 @@ import {
   sendWhatsAppInvoiceAction,
   deleteZohoInvoiceAction,
   syncPaymentToZohoAction,
-  syncOnlyPaymentToZohoAction
+    syncOnlyPaymentToZohoAction,
+    syncDeferralInvoiceToZohoAction,
+    syncCategoryChangeInvoiceToZohoAction,
 } from "@/lib/actions";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -85,8 +88,61 @@ const formatCurrency = (paisa: number) =>
     maximumFractionDigits: 2,
   })}`;
 
+const formatCurrencyByCode = (minorUnits: number, currency: 'INR' | 'USD' = 'INR') => {
+    const amount = (minorUnits || 0) / 100;
+    if (currency === 'USD') {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+        }).format(amount);
+    }
+
+    return new Intl.NumberFormat('en-IN', {
+        style: 'currency',
+        currency: 'INR',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    }).format(amount);
+};
+
+const isOfflineOrBulkPayment = (paymentMethod?: string | null): boolean => {
+    const lower = String(paymentMethod || '').toLowerCase();
+    return (
+        lower.includes('offline') ||
+        lower.includes('cash') ||
+        lower.includes('bulk') ||
+        lower.includes('admin') ||
+        lower.includes('google form') ||
+        lower.includes('google_form') ||
+        lower.includes('form upload') ||
+        lower.includes('manual')
+    );
+};
+
+const getRegistrationMethod = (paymentMethod?: string | null): { label: string; variant: 'default' | 'secondary' | 'outline' } => {
+    const lower = String(paymentMethod || '').toLowerCase();
+
+    if (!lower) {
+        return { label: 'Unknown', variant: 'outline' };
+    }
+
+    if (lower.includes('upi') || lower.includes('razorpay') || lower.includes('card') || lower.includes('online') || lower.includes('netbanking')) {
+        return { label: 'Online', variant: 'default' };
+    }
+
+    if (lower.includes('admin') || lower.includes('offline') || lower.includes('cash') || lower.includes('manual') || lower.includes('bulk') || lower.includes('google form') || lower.includes('google_form')) {
+        return { label: 'Offline', variant: 'secondary' };
+    }
+
+    return { label: paymentMethod || 'Other', variant: 'outline' };
+};
+
 export default function AccountingTab({ events, isLoadingEvents }: AccountingTabProps) {
   const { toast } = useToast();
+  const { currentUser } = useAuth();
+  const isViewOnlyAdmin = !!(currentUser?.isAdmin && currentUser?.adminAccessMode === 'view');
   const isMobile = useIsMobile();
 
   const [selectedEventId, setSelectedEventId] = useState<string>("all");
@@ -141,7 +197,13 @@ export default function AccountingTab({ events, isLoadingEvents }: AccountingTab
   const handleManualSync = async (id: string, type: 'registration' | 'deferral' | 'categoryChange', bookingId: string, eventId: string) => {
     setIsRetryingSync(id);
     try {
-      const result = await syncPaymentToZohoAction(eventId, id);
+            const result =
+                type === 'registration'
+                    ? await syncPaymentToZohoAction(eventId, id)
+                    : type === 'deferral'
+                    ? await syncDeferralInvoiceToZohoAction(id)
+                    : await syncCategoryChangeInvoiceToZohoAction(id);
+
       if (result.success) {
         toast({ title: "Sync Successful", description: result.message });
         fetchAllAccountingData();
@@ -195,7 +257,7 @@ export default function AccountingTab({ events, isLoadingEvents }: AccountingTab
     let list = registrations.filter(r => {
         const matchesSearch = !searchTerm || r.name.toLowerCase().includes(searchTerm.toLowerCase()) || r.email?.toLowerCase().includes(searchTerm.toLowerCase()) || r.bookingId?.toLowerCase().includes(searchTerm.toLowerCase());
         
-        const isOnline = r.paymentMethod?.toLowerCase() !== 'offline/bulk' && r.paymentMethod?.toLowerCase() !== 'cash' && r.paymentMethod?.toLowerCase() !== 'admin entry';
+                const isOnline = !isOfflineOrBulkPayment(r.paymentMethod);
         const matchesType = paymentTypeFilter === 'all' || (paymentTypeFilter === 'online' ? isOnline : !isOnline);
         
         return matchesSearch && matchesType;
@@ -212,6 +274,20 @@ export default function AccountingTab({ events, isLoadingEvents }: AccountingTab
     let list = categoryChanges.filter(c => !searchTerm || c.participantName?.toLowerCase().includes(searchTerm.toLowerCase()) || c.participantEmail.toLowerCase().includes(searchTerm.toLowerCase()));
     return list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
   }, [categoryChanges, searchTerm]);
+
+    const summaryCurrency = useMemo<'INR' | 'USD'>(() => {
+        if (selectedEventId !== 'all') {
+            const selectedEvent = events.find((e) => e.id === selectedEventId);
+            return selectedEvent?.currency === 'USD' ? 'USD' : 'INR';
+        }
+
+        const currencies = new Set(
+            (registrations || [])
+                .map((r) => String((r as any)?.pricingBreakdown?.currency || '').toUpperCase())
+                .filter(Boolean)
+        );
+        return currencies.size === 1 && currencies.has('USD') ? 'USD' : 'INR';
+    }, [selectedEventId, events, registrations]);
 
   const renderNav = () => {
     if (isMobile) {
@@ -274,9 +350,9 @@ export default function AccountingTab({ events, isLoadingEvents }: AccountingTab
 
       {summary && (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-center">
-              <Card className="bg-primary/5 border-none shadow-sm"><CardHeader className="p-3"><CardTitle className="text-xl font-black">{formatCurrency(summary.totalRevenue)}</CardTitle><CardDescription className="text-[9px] font-bold uppercase">Race Revenue</CardDescription></CardHeader></Card>
-              <Card className="bg-green-50 border-none shadow-sm"><CardHeader className="p-3"><CardTitle className="text-xl font-black text-green-700">{formatCurrency(summary.totalOnlineRevenue)}</CardTitle><CardDescription className="text-[9px] font-bold uppercase text-green-600">Online Portions</CardDescription></CardHeader></Card>
-              <Card className="bg-orange-50 border-none shadow-sm"><CardHeader className="p-3"><CardTitle className="text-xl font-black text-orange-700">{formatCurrency(summary.totalFees)}</CardTitle><CardDescription className="text-[9px] font-bold uppercase text-orange-600">Platform Costs</CardDescription></CardHeader></Card>
+              <Card className="bg-primary/5 border-none shadow-sm"><CardHeader className="p-3"><CardTitle className="text-xl font-black">{formatCurrencyByCode(summary.totalRevenue, summaryCurrency)}</CardTitle><CardDescription className="text-[9px] font-bold uppercase">Race Revenue</CardDescription></CardHeader></Card>
+              <Card className="bg-green-50 border-none shadow-sm"><CardHeader className="p-3"><CardTitle className="text-xl font-black text-green-700">{formatCurrencyByCode(summary.totalOnlineRevenue, summaryCurrency)}</CardTitle><CardDescription className="text-[9px] font-bold uppercase text-green-600">Online Portions</CardDescription></CardHeader></Card>
+              <Card className="bg-orange-50 border-none shadow-sm"><CardHeader className="p-3"><CardTitle className="text-xl font-black text-orange-700">{formatCurrencyByCode(summary.totalFees, summaryCurrency)}</CardTitle><CardDescription className="text-[9px] font-bold uppercase text-orange-600">Platform Costs</CardDescription></CardHeader></Card>
               <Card className="bg-muted border-none shadow-sm"><CardHeader className="p-3"><CardTitle className="text-xl font-black">{summary.totalTransactions}</CardTitle><CardDescription className="text-[9px] font-bold uppercase">Field Size</CardDescription></CardHeader></Card>
           </div>
       )}
@@ -322,6 +398,7 @@ export default function AccountingTab({ events, isLoadingEvents }: AccountingTab
                                     <TableHead className="pl-6 text-left"><div className="flex items-center gap-1"><CalendarDays className="h-3 w-3"/>Date</div></TableHead>
                                     <TableHead className="text-left">Athlete</TableHead>
                                     <TableHead className="text-left">Event</TableHead>
+                                    <TableHead className="text-left">Registration</TableHead>
                                     <TableHead className="text-left">Amount</TableHead>
                                     <TableHead className="text-left">Sync Status</TableHead>
                                     <TableHead className="text-left">Invoice</TableHead>
@@ -329,8 +406,8 @@ export default function AccountingTab({ events, isLoadingEvents }: AccountingTab
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
-                                {isLoading ? <TableRow><TableCell colSpan={7} className="text-center p-12"><Loader2 className="animate-spin h-8 w-8 text-primary mx-auto"/></TableCell></TableRow>
-                                : filteredRegistrations.length === 0 ? <TableRow><TableCell colSpan={7} className="text-center py-16 text-muted-foreground italic">No registration records found.</TableCell></TableRow>
+                                {isLoading ? <TableRow><TableCell colSpan={8} className="text-center p-12"><Loader2 className="animate-spin h-8 w-8 text-primary mx-auto"/></TableCell></TableRow>
+                                : filteredRegistrations.length === 0 ? <TableRow><TableCell colSpan={8} className="text-center py-16 text-muted-foreground italic">No registration records found.</TableCell></TableRow>
                                 : filteredRegistrations.map(r => (
                                     <TableRow key={r.id} className="h-14 hover:bg-muted/10 transition-colors text-xs text-left">
                                         <TableCell className="pl-6 font-mono text-[10px] text-muted-foreground text-left">
@@ -341,7 +418,13 @@ export default function AccountingTab({ events, isLoadingEvents }: AccountingTab
                                             <div className="text-[10px] text-muted-foreground lowercase text-left">{r.email}</div>
                                         </TableCell>
                                         <TableCell className="font-medium text-slate-500 uppercase text-left">{r.eventName}</TableCell>
-                                        <TableCell className="font-black text-primary text-left">{formatCurrency(r.amountPaidPaisa || 0)}</TableCell>
+                                        <TableCell className="text-left">
+                                            {(() => {
+                                                const method = getRegistrationMethod(r.paymentMethod);
+                                                return <Badge variant={method.variant} className={cn("text-[9px] font-black uppercase", method.variant === 'default' ? 'bg-blue-600 text-white' : method.variant === 'secondary' ? 'bg-purple-600 text-white' : 'bg-muted text-muted-foreground')}>{method.label}</Badge>;
+                                            })()}
+                                        </TableCell>
+                                        <TableCell className="font-black text-primary text-left">{formatCurrencyByCode(r.amountPaidPaisa || 0, String((r as any)?.pricingBreakdown?.currency || '').toUpperCase() === 'USD' ? 'USD' : 'INR')}</TableCell>
                                         <TableCell className="text-left">
                                             <Badge variant={r.zohoSynced ? 'default' : 'secondary'} className={cn("text-[9px] font-black uppercase", r.zohoSynced ? "bg-green-600" : "bg-amber-100 text-amber-700")}>
                                                 {r.zohoSynced ? "Synced" : r.zohoSyncError ? "Failed" : "Pending"}
@@ -349,22 +432,27 @@ export default function AccountingTab({ events, isLoadingEvents }: AccountingTab
                                         </TableCell>
                                         <TableCell className="font-mono text-[10px] text-left">{r.invoiceNumber || "—"}</TableCell>
                                         <TableCell className="text-right pr-6 space-x-1">
-                                            {!r.zohoSynced && (
-                                                <Button size="xs" variant="outline" className="rounded-lg h-7 px-3 font-black text-[9px] uppercase tracking-tighter" onClick={() => handleManualSync(r.id, 'registration', r.bookingId!, r.eventId!)} disabled={isRetryingSync === r.id}>
+                                            {!r.invoiceNumber && !isOfflineOrBulkPayment(r.paymentMethod) && !r.zohoSynced && (
+                                                <Button size="xs" variant="outline" className="rounded-lg h-7 px-3 font-black text-[9px] uppercase tracking-tighter" onClick={() => handleManualSync(r.id, 'registration', r.bookingId!, r.eventId!)} disabled={isRetryingSync === r.id || isViewOnlyAdmin}>
                                                     {isRetryingSync === r.id ? <Loader2 className="animate-spin h-3 w-3" /> : "Retry Sync"}
                                                 </Button>
                                             )}
-                                            {r.zohoSynced && (
+                                            {!r.invoiceNumber && isOfflineOrBulkPayment(r.paymentMethod) && !r.zohoSynced && (
+                                                <Button size="xs" variant="outline" className="rounded-lg h-7 px-3 font-black text-[9px] uppercase tracking-tighter opacity-50" disabled>
+                                                    No Sync Needed
+                                                </Button>
+                                            )}
+                                            {r.invoiceNumber && (
                                                 <div className="flex justify-end gap-1">
-                                                    <Button size="xs" variant="ghost" className="h-7 w-7 text-blue-600 hover:bg-blue-50" title="Re-sync Payment" onClick={() => handleSyncPaymentOnly(r)} disabled={isRetryingSync === r.id}>
+                                                    <Button size="xs" variant="ghost" className="h-7 w-7 text-blue-600 hover:bg-blue-50" title="Re-sync Payment" onClick={() => handleSyncPaymentOnly(r)} disabled={isRetryingSync === r.id || isViewOnlyAdmin}>
                                                         <CreditCard className="h-3.5 w-3.5" />
                                                     </Button>
-                                                    <Button size="xs" variant="ghost" className="h-7 w-7 text-green-600 hover:bg-green-50" onClick={() => sendWhatsAppInvoiceAction(r.eventId!, r.id)}>
+                                                    <Button size="xs" variant="ghost" className="h-7 w-7 text-green-600 hover:bg-green-50" onClick={() => sendWhatsAppInvoiceAction(r.eventId!, r.id)} disabled={isViewOnlyAdmin}>
                                                         <MessageSquare className="h-3.5 w-3.5" />
                                                     </Button>
                                                     <AlertDialog>
                                                         <AlertDialogTrigger asChild>
-                                                            <Button size="xs" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/5" disabled={isDeletingInvoice === r.id}>
+                                                            <Button size="xs" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/5" disabled={isDeletingInvoice === r.id || isViewOnlyAdmin}>
                                                                 <Trash2 className="h-3.5 w-3.5" />
                                                             </Button>
                                                         </AlertDialogTrigger>
@@ -377,7 +465,7 @@ export default function AccountingTab({ events, isLoadingEvents }: AccountingTab
                                                             </AlertDialogHeader>
                                                             <AlertDialogFooter className="text-left">
                                                                 <AlertDialogCancel>Back</AlertDialogCancel>
-                                                                <AlertDialogAction onClick={() => handleDeleteInvoice(r)} className="bg-destructive">Clear Mapping</AlertDialogAction>
+                                                                <AlertDialogAction onClick={() => handleDeleteInvoice(r)} className="bg-destructive" disabled={isViewOnlyAdmin}>Clear Mapping</AlertDialogAction>
                                                             </AlertDialogFooter>
                                                         </AlertDialogContent>
                                                     </AlertDialog>

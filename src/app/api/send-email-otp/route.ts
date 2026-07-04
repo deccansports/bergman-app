@@ -13,6 +13,17 @@ const SendOtpInputSchema = z.object({
   name: z.string().optional(),
 });
 
+const maskMobile = (mobile?: string | null): string | null => {
+  if (!mobile) return null;
+  const cleaned = mobile.replace(/\s+/g, '');
+  if (!cleaned) return null;
+
+  const last4 = cleaned.slice(-4);
+  const prefixLength = Math.max(0, cleaned.length - 4);
+  const prefixMasked = cleaned.slice(0, prefixLength).replace(/\d/g, '•');
+  return `${prefixMasked}${last4}`;
+};
+
 /**
  * API Route: Send OTP
  * 
@@ -44,6 +55,7 @@ export async function POST(request: Request) {
     // Check if user exists to personalize and potentially send WhatsApp
     const userQuery = await adminDb.collection('users').where('email', '==', lowerEmail).limit(1).get();
     const userProfile = userQuery.empty ? null : userQuery.docs[0].data() as User;
+    const maskedMobile = maskMobile(userProfile?.mobile);
     
     const storeResult = await storeOtp(lowerEmail);
     if (!storeResult.success || !storeResult.plainOtp) {
@@ -68,7 +80,12 @@ export async function POST(request: Request) {
     }
 
     if (emailSent || whatsappSent) {
-      return NextResponse.json({ success: true, message: "OTP sent successfully." });
+      return NextResponse.json({
+        success: true,
+        message: "OTP sent successfully.",
+        maskedMobile,
+        whatsappSent,
+      });
     } else {
       return NextResponse.json({ success: false, message: "Failed to deliver OTP. Service unavailable." }, { status: 500 });
     }

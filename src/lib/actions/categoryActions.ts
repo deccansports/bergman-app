@@ -4,7 +4,7 @@
 import { getFirestoreInstance } from "@/lib/firebaseAdmin";
 import { FieldValue } from "firebase-admin/firestore";
 import { sanitizeMoney, serializeParticipantData, normalizeToE164 } from "@/lib/utils";
-import { createServiceFeeInvoiceAction, sendServiceFeeWhatsAppAction } from "./invoiceActions";
+import { createServiceFeeInvoiceAction, sendServiceFeeWhatsAppAction, sendInvoiceEmailBrevoAction } from "./invoiceActions";
 import { applyPaymentToInvoice } from "../zoho/payments";
 import { markInvoiceAsSent } from "../zoho/invoice";
 import { updateCategoryForParticipantAction } from "./participantActions";
@@ -103,10 +103,12 @@ export async function processCategoryChangeFinal(input: any) {
     const raceCategory = (participant.ticketName || '').toUpperCase();
     const typeKey = raceCategory.includes('SWIM') ? 'Swimming' : (raceCategory.includes('DUATHLON') ? 'Duathlon' : 'Triathlon');
 
-    const serviceFee = sanitizeMoney((globalFees as any)?.[typeKey]?.categoryChangeFeePaisa ?? 200000);
-
     const eventSnap = await db.collection('events').doc(originalEventId).get();
     const isUsd = eventSnap.data()?.currency === 'USD';
+
+    const serviceFee = isUsd
+      ? sanitizeMoney((globalFees as any)?.[typeKey]?.categoryChangeFeeUsdCents ?? (globalFees as any)?.categoryChangeFeeUsdCents ?? 5000)
+      : sanitizeMoney((globalFees as any)?.[typeKey]?.categoryChangeFeePaisa ?? 200000);
 
     const pricingInput: PricingInput = {
         basePrice: upgradeAmount + serviceFee,
@@ -171,6 +173,8 @@ export async function processCategoryChangeFinal(input: any) {
             description: `Category Change Fee: ₹${serviceFee / 100}\nUpgrade Difference: ₹${upgradeAmount / 100}`
           });
 
+          const invoiceNumber = invoice.invoiceNumber || invoice.invoice_id;
+
           await markInvoiceAsSent(invoice.invoice_id);
 
           await applyPaymentToInvoice({
@@ -185,7 +189,7 @@ export async function processCategoryChangeFinal(input: any) {
           await db.collection("categoryChanges").doc(changeId).update({
             "zohoSync.status": "success",
             "zohoSync.invoiceId": invoice.invoice_id,
-            "zohoSync.invoiceNumber": invoice.invoiceNumber
+            "zohoSync.invoiceNumber": invoiceNumber
           });
 
           // 🔥 Trigger WhatsApp Delivery for Service Fee
@@ -195,12 +199,26 @@ export async function processCategoryChangeFinal(input: any) {
               await sendServiceFeeWhatsAppAction({
                   orderId: changeId,
                   invoiceId: invoice.invoice_id,
-                  invoiceNumber: invoice.invoiceNumber,
+                  invoiceNumber,
                   mobile: mobileToSend,
                   name: athleteName,
                   serviceType: 'Category Change',
                   eventName: updatedParticipantData.eventName || 'Event'
               });
+          }
+
+          // 🔥 Trigger Brevo Invoice Email (template 256)
+          if (athleteEmail) {
+              sendInvoiceEmailBrevoAction({
+                  invoiceId: invoice.invoice_id,
+                  invoiceNumber,
+                  recipientEmail: athleteEmail,
+                  name: athleteName,
+                  eventName: updatedParticipantData.eventName || 'Event',
+                  category: newTicketName,
+                  eventDate: updatedParticipantData.eventDate || null,
+                  amountPaisa: finalAmountPaisa,
+              }).catch(e => console.warn('[CategoryChange] Brevo invoice email failed:', e.message));
           }
 
         } catch (err: any) {

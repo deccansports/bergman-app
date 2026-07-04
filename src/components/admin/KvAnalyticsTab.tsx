@@ -43,12 +43,18 @@ export default function KvAnalyticsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [liveMode, setLiveMode] = useState(true);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const [totalLogs, setTotalLogs] = useState(0);
+  const [returnedLogs, setReturnedLogs] = useState(0);
+  const [newOpsSinceLastFetch, setNewOpsSinceLastFetch] = useState(0);
+  const [prevNewestTs, setPrevNewestTs] = useState<string | null>(null);
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/kv-analytics");
+      const res = await fetch("/api/admin/kv-analytics?limit=1000", { cache: 'no-store' });
       if (!res.ok) {
         throw new Error("Failed to fetch KV analytics from API.");
       }
@@ -56,19 +62,41 @@ export default function KvAnalyticsTab() {
       if (data.error) {
           throw new Error(data.error);
       }
-      setLogs(data.logs || []);
+      const nextLogs: KVLog[] = data.logs || [];
+      setLogs(nextLogs);
       setSummary(data.summary || null);
       setHighReadSources(data.highReadSources || []);
+      setLastUpdatedAt(data.generatedAt || new Date().toISOString());
+      setTotalLogs(Number(data.totalLogs || 0));
+      setReturnedLogs(Number(data.returnedLogs || (nextLogs?.length || 0)));
+
+      const newestTs = nextLogs?.[0]?.timestamp || null;
+      if (prevNewestTs && newestTs) {
+        const prev = new Date(prevNewestTs).getTime() || 0;
+        const newCount = nextLogs.filter((l) => (new Date(l.timestamp || 0).getTime() || 0) > prev).length;
+        setNewOpsSinceLastFetch(newCount);
+      } else {
+        setNewOpsSinceLastFetch(0);
+      }
+      setPrevNewestTs(newestTs);
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [prevNewestTs]);
 
   useEffect(() => {
     fetchLogs();
   }, [fetchLogs]);
+
+  useEffect(() => {
+    if (!liveMode) return;
+    const id = setInterval(() => {
+      fetchLogs();
+    }, 10000);
+    return () => clearInterval(id);
+  }, [liveMode, fetchLogs]);
 
   const filteredLogs = useMemo(() => {
     if (!searchTerm) return logs;
@@ -79,8 +107,68 @@ export default function KvAnalyticsTab() {
     );
   }, [logs, searchTerm]);
 
+    const live1mStats = useMemo(() => {
+    const oneMinAgo = Date.now() - 60 * 1000;
+    let reads1m = 0;
+    let writes1m = 0;
+    let misses1m = 0;
+    for (const l of logs) {
+      const ts = new Date(l.timestamp || 0).getTime() || 0;
+      if (ts < oneMinAgo) continue;
+      if (l.operation === 'READ') reads1m++;
+      if (l.operation === 'WRITE') writes1m++;
+      if (l.status === 'CACHE_MISS') misses1m++;
+    }
+    return { reads1m, writes1m, misses1m };
+    }, [logs]);
+
+    const recentUpdatedKeys = useMemo(() => {
+    const latestByKey = new Map<string, KVLog>();
+    for (const l of logs) {
+      if (l.operation !== 'WRITE') continue;
+      const existing = latestByKey.get(l.key);
+      const currentTs = new Date(l.timestamp || 0).getTime() || 0;
+      const existingTs = existing ? (new Date(existing.timestamp || 0).getTime() || 0) : 0;
+      if (!existing || currentTs > existingTs) {
+      latestByKey.set(l.key, l);
+      }
+    }
+    return Array.from(latestByKey.values())
+      .sort((a, b) => (new Date(b.timestamp || 0).getTime() || 0) - (new Date(a.timestamp || 0).getTime() || 0))
+      .slice(0, 20);
+    }, [logs]);
+
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <CardTitle className="flex items-center gap-2"><BarChart className="h-5 w-5 text-primary" /> Live KV Monitoring</CardTitle>
+              <CardDescription>
+                Live reads/writes and latest updated keys from KV analytics stream.
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant={liveMode ? 'default' : 'outline'} size="sm" onClick={() => setLiveMode(v => !v)}>
+                {liveMode ? 'Live: ON (10s)' : 'Live: OFF'}
+              </Button>
+              <Badge variant="outline">New Ops: {newOpsSinceLastFetch}</Badge>
+            </div>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Last Updated: {lastUpdatedAt ? format(parseISO(lastUpdatedAt), 'MMM dd, yyyy, p') : 'N/A'} · Showing {returnedLogs} / {totalLogs} logs
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Reads (1m)</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{live1mStats.reads1m.toLocaleString()}</div></CardContent></Card>
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Writes (1m)</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{live1mStats.writes1m.toLocaleString()}</div></CardContent></Card>
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Cache Misses (1m)</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{live1mStats.misses1m.toLocaleString()}</div></CardContent></Card>
+          </div>
+        </CardContent>
+      </Card>
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card>
                 <CardHeader className="pb-2">
@@ -124,6 +212,41 @@ export default function KvAnalyticsTab() {
                 </TableBody>
                 </Table>
             </div>
+            </CardContent>
+        </Card>
+
+        <Card>
+            <CardHeader>
+              <CardTitle>Recently Updated KV Keys</CardTitle>
+              <CardDescription>Latest write operation per key (live).</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-auto rounded border max-h-[30vh]">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Updated At</TableHead>
+                      <TableHead>Key</TableHead>
+                      <TableHead>Source</TableHead>
+                      <TableHead className="text-right">Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loading ? (
+                      <TableRow><TableCell colSpan={4} className="text-center p-6"><Loader2 className="animate-spin mx-auto" /></TableCell></TableRow>
+                    ) : recentUpdatedKeys.length === 0 ? (
+                      <TableRow><TableCell colSpan={4} className="text-center py-6 text-muted-foreground">No recent updates.</TableCell></TableRow>
+                    ) : recentUpdatedKeys.map((r) => (
+                      <TableRow key={`updated-${r.id}`}>
+                        <TableCell className="font-mono text-xs">{r.timestamp ? format(parseISO(r.timestamp), 'MMM dd, pp, ss.SSS') : 'N/A'}</TableCell>
+                        <TableCell className="font-mono text-xs text-primary">{r.key}</TableCell>
+                        <TableCell className="font-mono text-xs">{r.source}</TableCell>
+                        <TableCell className="text-right"><Badge variant={statusVariantMap[r.status] || 'secondary'}>{r.status}</Badge></TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </CardContent>
         </Card>
 

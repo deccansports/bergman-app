@@ -142,3 +142,17 @@ export const countriesByContinent = {
     { code: "NZ", name: "New Zealand", flag: "🇳🇿" },
   ],
 };
+
+/**
+ * Flat, sorted country list: India first, United States second, then A→Z.
+ * Use this for all public-facing country dropdowns.
+ */
+export const sortedCountries = (() => {
+  const all = Object.values(countriesByContinent).flat();
+  const pinned = ['India', 'United States'];
+  const pinnedItems = pinned.map((name) => all.find((c) => c.name === name)!).filter(Boolean);
+  const rest = all
+    .filter((c) => !pinned.includes(c.name))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return [...pinnedItems, ...rest];
+})();

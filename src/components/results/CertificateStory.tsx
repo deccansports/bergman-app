@@ -31,13 +31,6 @@ function Stat({
 export function CertificateStory({ data }: { data: any }) {
   if (!data) return null;
 
-  const isFemale =
-    data.gender?.toLowerCase() === "female" || data.gender === "F";
-
-  const headerLogo = isFemale
-    ? "/Bwwhitelogo.png"
-    : "/Bmlogowhite.png";
-
   return (
     <CertificateShell width={1080} height={1920}>
       <div
@@ -53,7 +46,7 @@ export function CertificateStory({ data }: { data: any }) {
         {/* ================= HEADER ================= */}
         <div>
           <img
-            src={headerLogo}
+            src={data.logoUrl}
             alt="Bergman Logo"
             style={{
               height: 56,
@@ -169,6 +162,7 @@ export function CertificateStory({ data }: { data: any }) {
             style={{
               marginTop: 48,
               background: "rgba(0,0,0,0.35)",
+              border: "1px solid rgba(255,255,255,0.14)",
               borderRadius: 18,
               padding: "28px 36px",
               textAlign: "left",
@@ -191,9 +185,29 @@ export function CertificateStory({ data }: { data: any }) {
               style={{
                 display: "flex",
                 flexDirection: "column",
-                gap: 14,
+                gap: 10,
               }}
             >
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto auto auto",
+                  gap: 16,
+                  fontSize: 16,
+                  alignItems: "center",
+                  fontWeight: 700,
+                  color: "#e2e8f0",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.8,
+                  paddingBottom: 12,
+                  borderBottom: "1px solid rgba(255,255,255,0.18)",
+                }}
+              >
+                <span>Segment</span>
+                <span style={{ textAlign: "right" }}>Distance</span>
+                <span style={{ textAlign: "right" }}>Pace</span>
+                <span style={{ textAlign: "right" }}>Time</span>
+              </div>
               {data.splits.map((split: any, idx: number) => (
                 <div
                   key={idx}
@@ -201,18 +215,21 @@ export function CertificateStory({ data }: { data: any }) {
                     display: "grid",
                     gridTemplateColumns: "1fr auto auto auto",
                     gap: 16,
-                    fontSize: 20,
+                    fontSize: 24,
                     alignItems: "center",
+                    padding: "10px 0",
+                    borderBottom: idx === data.splits.length - 1 ? "none" : "1px solid rgba(255,255,255,0.08)",
                   }}
                 >
                   <span style={{ fontWeight: 700 }}>{split.label}</span>
-                  <span style={{ color: "#94a3b8" }}>{split.distance}</span>
-                  <span style={{ color: "#94a3b8" }}>{split.pace}</span>
+                  <span style={{ color: "#94a3b8", textAlign: "right" }}>{split.distance}</span>
+                  <span style={{ color: "#94a3b8", textAlign: "right" }}>{split.pace}</span>
                   <span
                     style={{
                       fontFamily: "monospace",
                       textAlign: "right",
-                      fontWeight: 600,
+                      fontWeight: 700,
+                      fontSize: 26,
                     }}
                   >
                     {split.time}
@@ -237,22 +254,30 @@ export function CertificateStory({ data }: { data: any }) {
             <img
               src={data.signatureUrl}
               alt="Signature"
-              style={{ height: 64 }}
+              style={{ height: 116, objectFit: "contain" }}
             />
           )}
 
           {/* QR */}
           {data.qrCodeUrl && (
-            <div style={{ textAlign: "center" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
+              }}
+            >
               <CertificateQR dataUrl={data.qrCodeUrl} />
               <p
                 style={{
                   fontSize: 12,
                   color: "#94a3b8",
-                  marginTop: 6,
+                  margin: 0,
+                  lineHeight: 1.3,
+                  textAlign: "center",
                 }}
               >
-                Verify
+                Scan to verify
               </p>
             </div>
           )}

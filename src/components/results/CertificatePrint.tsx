@@ -170,6 +170,7 @@ export function CertificatePrint({ data }: { data: any }) {
           style={{
             width: "100%",
             backgroundColor: "rgba(255,255,255,0.07)",
+            border: "3px solid rgba(255,255,255,0.16)",
             padding: 80,
             borderRadius: 32,
           }}
@@ -189,16 +190,18 @@ export function CertificatePrint({ data }: { data: any }) {
             style={{
               display: "grid",
               gridTemplateColumns: "240px 1fr 1fr 240px",
-              fontSize: 34,
+              fontSize: 38,
               fontWeight: 700,
-              color: "#94a3b8",
+              color: "#e2e8f0",
               borderBottom: "3px solid rgba(255,255,255,0.25)",
-              paddingBottom: 20,
+              backgroundColor: "rgba(255,255,255,0.06)",
+              borderRadius: 20,
+              padding: "22px 28px",
               marginBottom: 24,
             }}
           >
             <span>Segment</span>
-            <span>Distance</span>
+            <span style={{ textAlign: "right" }}>Distance</span>
             <span style={{ textAlign: "right" }}>Pace</span>
             <span style={{ textAlign: "right" }}>Time</span>
           </div>
@@ -209,8 +212,9 @@ export function CertificatePrint({ data }: { data: any }) {
               style={{
                 display: "grid",
                 gridTemplateColumns: "240px 1fr 1fr 240px",
-                padding: "28px 0",
-                fontSize: 38,
+                padding: "32px 28px",
+                fontSize: 42,
+                backgroundColor: i % 2 === 0 ? "rgba(255,255,255,0.03)" : "transparent",
                 borderBottom:
                   i === data.splits.length - 1
                     ? "none"
@@ -218,14 +222,14 @@ export function CertificatePrint({ data }: { data: any }) {
               }}
             >
               <span style={{ fontWeight: 800 }}>{s.label}</span>
-              <span>{s.distance}</span>
+              <span style={{ textAlign: "right" }}>{s.distance}</span>
               <span style={{ textAlign: "right" }}>{s.pace}</span>
               <span
                 style={{
                   textAlign: "right",
                   fontFamily: "monospace",
                   fontWeight: 900,
-                  fontSize: 40,
+                  fontSize: 44,
                 }}
               >
                 {s.time}
@@ -245,15 +249,21 @@ export function CertificatePrint({ data }: { data: any }) {
           }}
         >
           <img
-            src="/white signature.png"
+            src={data.signatureUrl || "/white signature.png"}
             alt="Signature"
-            style={{ height: 120, objectFit: "contain" }}
+            style={{ height: 210, objectFit: "contain" }}
           />
 
           {data.qrCodeUrl && (
-            <div style={{ textAlign: "center" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 20,
+              }}
+            >
               <CertificateQR dataUrl={data.qrCodeUrl} size={160} />
-              <p style={{ fontSize: 18, color: "#94a3b8", marginTop: 12 }}>
+              <p style={{ fontSize: 18, color: "#94a3b8", margin: 0, lineHeight: 1.3, textAlign: "center" }}>
                 Scan to verify
               </p>
             </div>

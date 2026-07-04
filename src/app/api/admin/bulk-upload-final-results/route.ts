@@ -14,6 +14,7 @@ import { computeLegacyStatus } from '@/lib/actions/athleteRankingActions';
 import { FieldValue, FieldPath } from 'firebase-admin/firestore';
 
 export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
 
 const getVal = (row: any, primaryHeader: string, altHeaders: string[] = []): string | null => {
     const lowerPrimary = primaryHeader.toLowerCase().replace(/\s+/g, '');
@@ -195,6 +196,15 @@ async function processUploadJob(jobId: string, eventId: string, fileBuffer: Buff
 
 export async function POST(request: Request) {
   const actionName = '[API /bulk-upload-final-results]';
+  
+  // Safety check for Firebase configuration
+  if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+    return NextResponse.json(
+      { error: 'Firebase not configured', status: 'unavailable' },
+      { status: 503 }
+    );
+  }
+  
   try {
     const formData = await request.formData();
     const eventId = formData.get('eventId') as string;

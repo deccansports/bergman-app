@@ -25,7 +25,7 @@ export default function RewardsSection() {
               Loyalty Program
             </Badge>
             <h2 className="text-3xl font-black uppercase italic tracking-tighter sm:text-5xl text-left">
-              Performance Rewards
+              Bergman Elite League
             </h2>
             <p className="max-w-[700px] text-muted-foreground md:text-lg font-medium text-left">
               Your results on the course unlock savings at the checkout. Accumulate points in {previousYear} to earn automatic discounts on every {currentYear} race.
@@ -78,20 +78,20 @@ export default function RewardsSection() {
           ))}
         </div>
 
-        <div className="mt-16 p-8 bg-primary rounded-[2.5rem] shadow-2xl shadow-primary/20 text-white relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full blur-3xl -mr-32 -mt-32"></div>
+        <div className="mt-16 p-8 bg-slate-100 dark:bg-slate-900 rounded-[2.5rem] shadow-2xl shadow-slate-300/30 dark:shadow-primary/20 text-slate-900 dark:text-white relative overflow-hidden border border-slate-200 dark:border-slate-700">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-slate-300/30 dark:bg-white/10 rounded-full blur-3xl -mr-32 -mt-32"></div>
             <div className="flex flex-col md:flex-row items-center justify-between gap-8 relative z-10">
                 <div className="flex items-center gap-6 text-left">
-                    <div className="h-16 w-16 bg-white/20 rounded-2xl flex items-center justify-center shrink-0 border border-white/20">
-                        <TrendingUp className="h-8 w-8 text-white" />
+              <div className="h-16 w-16 bg-white dark:bg-white/20 rounded-2xl flex items-center justify-center shrink-0 border border-slate-300 dark:border-white/20">
+                <TrendingUp className="h-8 w-8 text-primary" />
                     </div>
                     <div className="text-left space-y-1">
                         <h3 className="text-2xl font-black uppercase italic tracking-tighter leading-none">Race More. Pay Less.</h3>
-                        <p className="text-sm font-medium text-blue-50/80">Points earned during the {previousYear} season will unlock rewards for all {currentYear} races.</p>
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">Points earned during the {previousYear} season will unlock rewards for all {currentYear} races.</p>
                     </div>
                 </div>
-                <Button asChild size="lg" className="bg-white text-primary hover:bg-blue-50 h-14 px-8 rounded-xl font-black uppercase tracking-widest shrink-0">
-                    <Link href="/athlete-rankings">Check My Points <Star className="ml-2 h-4 w-4 fill-primary" /></Link>
+            <Button asChild size="lg" className="bg-slate-900 text-white hover:bg-slate-800 dark:bg-slate-800 dark:text-white dark:hover:bg-slate-700 h-14 px-8 rounded-xl font-black uppercase tracking-widest shrink-0">
+              <Link href="/athlete-rankings">Check My Points <Star className="ml-2 h-4 w-4 fill-current" /></Link>
                 </Button>
             </div>
         </div>

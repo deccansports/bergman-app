@@ -31,13 +31,6 @@ function Stat({
 export function CertificatePost({ data }: { data: any }) {
   if (!data) return null;
 
-  const isFemale =
-    data.gender?.toLowerCase() === "female" || data.gender === "F";
-
-  const headerLogo = isFemale
-    ? "/Bwwhitelogo.png"
-    : "/Bmlogowhite.png";
-
   return (
     <CertificateShell width={1080} height={1350}>
       <div
@@ -53,7 +46,7 @@ export function CertificatePost({ data }: { data: any }) {
         {/* ================= HEADER ================= */}
         <div>
           <img
-            src={headerLogo}
+            src={data.logoUrl}
             alt="Bergman Logo"
             style={{
               height: 56,
@@ -167,15 +160,16 @@ export function CertificatePost({ data }: { data: any }) {
         <div
           style={{
             textAlign: "left",
-            fontSize: 15,
+            fontSize: 16,
             padding: 18,
             backgroundColor: "rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.14)",
             borderRadius: 12,
           }}
         >
           <h3
             style={{
-              fontSize: 16,
+              fontSize: 18,
               fontWeight: 700,
               textAlign: "center",
               marginBottom: 12,
@@ -185,19 +179,45 @@ export function CertificatePost({ data }: { data: any }) {
             YOUR SPLITS
           </h3>
 
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "100px 1fr 1fr auto",
+              alignItems: "center",
+              gap: 16,
+              padding: "10px 12px",
+              borderBottom: "1px solid rgba(255,255,255,0.18)",
+              backgroundColor: "rgba(255,255,255,0.05)",
+              borderRadius: 8,
+              marginBottom: 8,
+              fontSize: 13,
+              fontWeight: 700,
+              color: "#e2e8f0",
+              textTransform: "uppercase",
+              letterSpacing: 0.6,
+            }}
+          >
+            <span>Segment</span>
+            <span style={{ textAlign: "right" }}>Distance</span>
+            <span style={{ textAlign: "right" }}>Pace</span>
+            <span style={{ textAlign: "right" }}>Time</span>
+          </div>
+
           {data.splits?.map((s: any, idx: number) => (
             <div
               key={idx}
               style={{
                 display: "grid",
-                gridTemplateColumns: "90px 1fr 1fr auto",
+                gridTemplateColumns: "100px 1fr 1fr auto",
                 alignItems: "center",
                 gap: 16,
-                padding: "6px 0",
+                padding: "10px 12px",
+                borderBottom: idx === data.splits.length - 1 ? "none" : "1px solid rgba(255,255,255,0.1)",
+                fontSize: 17,
               }}
             >
               <span style={{ fontWeight: 700 }}>{s.label}</span>
-              <span style={{ color: "#94a3b8" }}>{s.distance}</span>
+              <span style={{ color: "#94a3b8", textAlign: "right" }}>{s.distance}</span>
               <span style={{ color: "#94a3b8", textAlign: "right" }}>
                 {s.pace}
               </span>
@@ -205,6 +225,7 @@ export function CertificatePost({ data }: { data: any }) {
                 style={{
                   fontFamily: "monospace",
                   fontWeight: 700,
+                  fontSize: 18,
                   textAlign: "right",
                 }}
               >
@@ -226,11 +247,32 @@ export function CertificatePost({ data }: { data: any }) {
             <img
               src={data.signatureUrl}
               alt="Signature"
-              style={{ height: 52 }}
+              style={{ height: 92, objectFit: "contain" }}
             />
           )}
 
-          {data.qrCodeUrl && <CertificateQR dataUrl={data.qrCodeUrl} />}
+          {data.qrCodeUrl && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+              }}
+            >
+              <CertificateQR dataUrl={data.qrCodeUrl} />
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "#94a3b8",
+                  lineHeight: 1.3,
+                  textAlign: "center",
+                  margin: 0,
+                }}
+              >
+                Scan to verify
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </CertificateShell>

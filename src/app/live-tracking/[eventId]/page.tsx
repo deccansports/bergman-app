@@ -1,112 +1,117 @@
-// src/app/live-tracking/[eventId]/page.tsx
-import React, { Suspense } from 'react';
-import { getEventDetailsWithTicketsAction } from '@/lib/actions';
+import { notFound } from 'next/navigation';
+import type { Metadata } from 'next';
+import { parseISO, isPast, isToday } from 'date-fns';
+import { getKV } from '@/lib/cloudflare/kv';
+import { getLiveTimingDataAction } from '@/lib/actions';
 import LiveTrackingClientPage from '@/components/live-tracking/LiveTrackingClientPage';
-import { AlertTriangle, ArrowLeft, Loader2 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import Link from 'next/link';
-import { isPast, parseISO, startOfDay } from 'date-fns';
-import { getPublicFinalResultsAction } from '@/lib/actions/publicResultActions';
-import type { RaceResult, LiveAthlete, Split, Status } from '@/lib/types';
-import { hmsToSeconds, normalizeStatus } from '@/lib/utils';
+import type { EventCalendarEntry, LiveAthlete } from '@/lib/types';
+import { loadParticipantIndex, getParticipantRowsFromIndex } from '@/lib/liveTrackingParticipantStore';
+import { getFirestoreInstance } from '@/lib/firebaseAdmin';
+import { getParticipantLiveTrackingPrivacy, maskPrivateAthlete } from '@/lib/liveTrackingPrivacy';
 
-interface LiveTrackingPageProps {
-  params: {
-    eventId: string;
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+interface Props {
+  params: { eventId: string };
+}
+
+async function loadEventFromKv(eventId: string) {
+  const fromKv = (
+    (await getKV<Record<string, any>>(`event:${eventId}:data`, 'live-tracking-page'))
+    || (await getKV<Record<string, any>>(`live:event:${eventId}:data`, 'live-tracking-page'))
+    || null
+  );
+  let fromFirestore: Record<string, any> | null = null;
+  try {
+    const eventSnap = await getFirestoreInstance().collection('events').doc(eventId).get();
+    if (eventSnap.exists) {
+      const event = eventSnap.data() || {};
+      fromFirestore = {
+        eventId,
+        eventName: String((event as any).eventName || (event as any).name || 'Live Event'),
+        eventDate: String((event as any).eventDate || (event as any).date || (event as any).startDate || 'TBD'),
+        liveDataSource: String((event as any).liveDataSource || 'timing_partner'),
+        source: 'firestore-master',
+      } as Record<string, any>;
+    }
+  } catch {
+    fromFirestore = null;
+  }
+
+  if (!fromKv && !fromFirestore) return null;
+
+  return {
+    ...fromKv,
+    ...fromFirestore,
+    eventId,
+    eventName: String(fromFirestore?.eventName || fromKv?.eventName || fromKv?.name || 'Live Event').trim() || 'Live Event',
+    eventDate: String(fromFirestore?.eventDate || fromKv?.eventDate || fromKv?.date || 'TBD').trim() || 'TBD',
+    liveDataSource: String(fromFirestore?.liveDataSource || fromKv?.liveDataSource || 'timing_partner'),
+  } as Record<string, any>;
+}
+
+function toEventCalendarEntry(eventId: string, event: Record<string, any>): EventCalendarEntry {
+  return {
+    id: String(event?.id || eventId),
+    eventName: String(event?.eventName || event?.name || 'Live Event').trim() || 'Live Event',
+    eventDate: String(event?.eventDate || event?.date || '').trim() || null,
+    ...event,
+  } as EventCalendarEntry;
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const event = await loadEventFromKv(params.eventId);
+  return {
+    title: event ? `${event.eventName || 'Live Tracking'} — Live Tracking` : 'Live Tracking',
+    description: event ? `Real-time athlete tracking for ${event.eventName || 'this event'}` : 'Follow athletes live on course.',
   };
 }
 
-// This is now a Server Component responsible for fetching initial data.
-async function LiveTrackingPageContent({ params }: LiveTrackingPageProps) {
+export default async function LiveTrackingPage({ params }: Props) {
   const { eventId } = params;
-  const eventDetailsResult = await getEventDetailsWithTicketsAction(eventId);
+  const eventRaw = await loadEventFromKv(eventId);
+  if (!eventRaw) notFound();
+  const event = toEventCalendarEntry(eventId, eventRaw);
 
-  if (!eventDetailsResult.success || !eventDetailsResult.event) {
-    return (
-        <main className="flex-grow container mx-auto p-4 text-center">
-          <h1 className="text-2xl font-bold text-destructive">Event Not Found</h1>
-          <p className="text-muted-foreground">{eventDetailsResult.message || 'The requested event could not be loaded.'}</p>
-        </main>
-    );
+  const eventDate = String(event.eventDate || '').trim();
+  const isPastEvent = !!(eventDate && eventDate !== 'TBD' && isPast(parseISO(eventDate)) && !isToday(parseISO(eventDate)));
+
+  const liveResult = (event.liveDataSource === 'timing_partner' || event.liveDataSource === 'participants' || event.liveDataSource === 'racemap')
+    ? await getLiveTimingDataAction(eventId, isPastEvent ? 'history' : 'live')
+    : { success: false, message: 'Live data source not enabled', participants: [] as LiveAthlete[] };
+
+  const participantIndex = await loadParticipantIndex(eventId);
+  const indexRows = getParticipantRowsFromIndex(participantIndex);
+  const byBib = new Map<string, any>();
+  const byProvider = new Map<string, any>();
+  const byUid = new Map<string, any>();
+  for (const row of indexRows as any[]) {
+    const bib = String(row?.bib || row?.bibNumber || '').trim();
+    const providerUuid = String(row?.providerParticipantUuid || row?.participantUuid || row?.participant_uuid || row?.provider?.providerUuid || '').trim();
+    const athleteUid = String(row?.bergmanAthleteId || row?.athleteUid || '').trim();
+    if (bib) byBib.set(bib, row);
+    if (providerUuid) byProvider.set(providerUuid, row);
+    if (athleteUid) byUid.set(athleteUid, row);
   }
 
-  const event = eventDetailsResult.event;
-  // FIX: Use startOfDay to prevent timezone issues where an event on the current day is considered "past".
-  const isPastEvent = event.eventDate ? isPast(startOfDay(parseISO(event.eventDate))) : false;
+  const applyPrivacy = (row: any) => {
+    const bib = String(row?.bib || row?.bibNumber || '').trim();
+    const providerUuid = String(row?.participantUuid || row?.participant_uuid || row?.providerUuid || row?.id || '').trim();
+    const athleteUid = String(row?.athleteUid || row?.bergmanAthleteId || row?.bergmanAthleteUid || '').trim();
+    const source = (providerUuid && byProvider.get(providerUuid)) || (bib && byBib.get(bib)) || (athleteUid && byUid.get(athleteUid)) || null;
+    const privacy = getParticipantLiveTrackingPrivacy(source || row);
+    const merged = { ...row, ...(source || {}), privacy, liveTrackingPrivacy: privacy };
+    return privacy === 'PRIVATE' ? maskPrivateAthlete(merged) : merged;
+  };
 
+  const initialLiveData = liveResult.success && liveResult.participants ? liveResult.participants.map((row: any) => applyPrivacy(row)) : [];
 
-  let initialLiveData: LiveAthlete[] = [];
-  // Corrected Logic: Fetch results if source is 'race_results' OR if it's a past event and not a live source.
-  const shouldFetchResults = event.liveDataSource === 'race_results' || (isPastEvent && event.liveDataSource !== 'timing_partner');
-
-  if (shouldFetchResults) {
-    const resultsResult = await getPublicFinalResultsAction(eventId, null);
-    if (resultsResult.success && resultsResult.participants) {
-      initialLiveData = resultsResult.participants.map((p: RaceResult): LiveAthlete => {
-          const splits: Split[] = [];
-          if (p.swim) splits.push({ segment: 'SWIM', time: hmsToSeconds(p.swim), distance: 0 });
-          if (p.run1) splits.push({ segment: 'RUN1', time: hmsToSeconds(p.run1), distance: 0 });
-          if (p.t1) splits.push({ segment: 'T1', time: hmsToSeconds(p.t1), distance: 0 });
-          if (p.bike) splits.push({ segment: 'BIKE', time: hmsToSeconds(p.bike), distance: 0 });
-          if (p.t2) splits.push({ segment: 'T2', time: hmsToSeconds(p.t2), distance: 0 });
-          if (p.run) splits.push({ segment: 'RUN', time: hmsToSeconds(p.run), distance: 0 });
-          if (p.run2) splits.push({ segment: 'RUN2', time: hmsToSeconds(p.run2), distance: 0 });
-          
-          const finalTime = p.chipTime ? hmsToSeconds(p.chipTime) : Infinity;
-          if (finalTime !== Infinity) {
-              splits.push({ segment: 'FINISHED', time: finalTime, distance: 0 });
-          }
-          
-          return {
-            id: p.docId || p.bibNumber, bib: p.bibNumber, name: p.name, category: p.category, ticketId: (p as any).ticketId || null,
-            ticketName: (p as any).ticketName || p.raceCategory || 'N/A', status: normalizeStatus(p.status) as Status,
-            splits: splits, athleteUid: p.athleteUid || null, ageGroup: p.category, gender: p.gender as 'Male' | 'Female',
-            leg: 'FINISHED', startTime: 0, // Using 0 for startTime to indicate it's from final results
-            lastUpdateTime: new Date(p.uploadedAt || Date.now()).getTime(),
-            avatarUrl: (p as any).photoURL, country: (p as any).countryAtRace || null, clubName: p.clubNameAtRace || null, ranks: p.ranks || {}
-          };
-      });
-    }
-  }
-
-  // Disable tracking page only if tracking is explicitly set to 'none' AND the event is not in the past.
-  // For past events, we allow access for replay purposes.
-  if (event.liveDataSource === 'none' && !isPastEvent) {
-    return (
-        <main className="flex-grow container mx-auto p-4 text-center flex items-center justify-center">
-          <div className="space-y-4">
-              <AlertTriangle className="h-16 w-16 text-muted-foreground mx-auto" />
-              <h1 className="text-2xl font-bold text-foreground">Live Tracking Unavailable</h1>
-              <p className="text-muted-foreground">Live tracking is not available for this event at the moment. Please check back later.</p>
-              <Button asChild variant="outline" className="mt-4">
-                  <Link href="/tracking">
-                      <ArrowLeft className="mr-2 h-4 w-4"/> Back to Events
-                  </Link>
-              </Button>
-          </div>
-        </main>
-    );
-  }
-
-  // The eventDetailsResult.event is now fully serialized by the server action
   return (
-      <LiveTrackingClientPage 
-        initialEventDetails={eventDetailsResult.event} 
-        isPastEvent={isPastEvent}
-        initialLiveData={initialLiveData}
-      />
+    <LiveTrackingClientPage
+      initialEventDetails={event}
+      isPastEvent={isPastEvent}
+      initialLiveData={initialLiveData}
+    />
   );
-}
-
-
-export default function TrackingEventPage({ params }: LiveTrackingPageProps) {
-    return (
-      <Suspense fallback={
-        <div className="flex h-screen w-full items-center justify-center bg-background">
-            <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        </div>
-      }>
-        <LiveTrackingPageContent params={params} />
-      </Suspense>
-    );
 }

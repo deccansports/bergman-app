@@ -57,9 +57,9 @@ function ClubLoginPageClient() {
                         <Image
                             src={logoSrc}
                             alt="Bergman Logo"
-                            width={300}
-                            height={100}
-                            className="object-contain"
+                            width={220}
+                            height={74}
+                            className="object-contain w-auto h-auto max-w-[180px] sm:max-w-[220px]"
                             priority
                         />
                     </motion.div>

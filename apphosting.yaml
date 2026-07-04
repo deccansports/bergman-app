@@ -1,6 +1,7 @@
 # Settings for Backend (on Cloud Run).
 runConfig:
   minInstances: 0
+  timeoutSeconds: 300
 
 env:
 
@@ -55,6 +56,11 @@ env:
       - BUILD
       - RUNTIME
 
+  - variable: NEXT_PUBLIC_TURNSTILE_SITE_KEY
+    secret: NEXT_PUBLIC_TURNSTILE_SITE_KEY
+    availability:
+      - BUILD
+      - RUNTIME
 
   # ==============================
   # 🔹 Public Payment Keys (Safe for Build)
@@ -71,18 +77,104 @@ env:
       - BUILD
       - RUNTIME
 
-
   # ==============================
   # 🔒 Backend Secrets (MUST be available at BUILD and RUNTIME)
   # ==============================
 
+  # Live streaming / broadcast
+  - variable: LIVE_TRACKING_PROVIDER_SECRET_KEY
+    secret: LIVE_TRACKING_PROVIDER_SECRET_KEY
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: LIVE_STREAM_WORKER_URL
+    secret: LIVE_STREAM_WORKER_URL
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_LIVE_STREAM_WORKER_URL
+    secret: LIVE_STREAM_WORKER_URL
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: LIVE_STREAM_WORKER_SECRET
+    secret: LIVE_STREAM_WORKER_SECRET
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: LIVE_STREAM_FIRESTORE_SYNC_URL
+    secret: LIVE_STREAM_FIRESTORE_SYNC_URL
+    availability:
+      - BUILD
+      - RUNTIME
+
+  # TerraMaster WebDAV
+  - variable: TERRAMASTER_WEBDAV_URL
+    secret: TERRAMASTER_WEBDAV_URL
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: TERRAMASTER_WEBDAV_USERNAME
+    secret: TERRAMASTER_WEBDAV_USERNAME
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: TERRAMASTER_WEBDAV_PASSWORD
+    secret: TERRAMASTER_WEBDAV_PASSWORD
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: TERRAMASTER_WEBDAV_BASE_PATH
+    secret: TERRAMASTER_WEBDAV_BASE_PATH
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: TERRAMASTER_WEBDAV_ALLOW_SELF_SIGNED
+    secret: TERRAMASTER_WEBDAV_ALLOW_SELF_SIGNED
+    availability:
+      - BUILD
+      - RUNTIME
+
+  # Google Drive (folder upload + service-account fallback)
+  - variable: GOOGLE_API_KEY
+    secret: GOOGLE_API_KEY
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: GOOGLE_DRIVE_SERVICE_ACCOUNT_EMAIL
+    secret: GOOGLE_DRIVE_SERVICE_ACCOUNT_EMAIL
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: GOOGLE_DRIVE_SERVICE_ACCOUNT_PRIVATE_KEY
+    secret: GOOGLE_DRIVE_SERVICE_ACCOUNT_PRIVATE_KEY
+    availability:
+      - BUILD
+      - RUNTIME
+
   # Razorpay
+  - variable: RAZORPAY_KEY_ID
+    secret: RAZORPAY_KEY_ID
+    availability:
+      - BUILD
+      - RUNTIME
+
   - variable: RAZORPAY_KEY_SECRET
     secret: RAZORPAY_KEY_SECRET
     availability:
       - BUILD
       - RUNTIME
-  
+
   - variable: RAZORPAY_WEBHOOK_SECRET
     secret: RAZORPAY_WEBHOOK_SECRET
     availability:
@@ -92,6 +184,12 @@ env:
   # Stripe
   - variable: STRIPE_SECRET_KEY
     secret: STRIPE_SECRET_KEY
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: STRIPE_WEBHOOK_SECRET
+    secret: STRIPE_WEBHOOK_SECRET
     availability:
       - BUILD
       - RUNTIME
@@ -177,12 +275,17 @@ env:
       - BUILD
       - RUNTIME
 
+  - variable: ZOHO_BANK_ACCOUNT_ID
+    secret: ZOHO_BANK_ACCOUNT_ID
+    availability:
+      - BUILD
+      - RUNTIME
+
   - variable: STRIPE_CLEARING_ACCOUNT_ID
     secret: STRIPE_CLEARING_ACCOUNT_ID
     availability:
       - BUILD
       - RUNTIME
-
 
   # Firebase Admin SDK (Server Only)
   - variable: FIREBASE_PROJECT_ID
@@ -203,7 +306,6 @@ env:
       - BUILD
       - RUNTIME
 
-
   # Cloudflare KV
   - variable: CLOUDFLARE_ACCOUNT_ID
     secret: CLOUDFLARE_ACCOUNT_ID
@@ -223,9 +325,35 @@ env:
       - BUILD
       - RUNTIME
 
+  # Cloudflare Turnstile (server verification)
+  - variable: TURNSTILE_SECRET_KEY
+    secret: TURNSTILE_SECRET_KEY
+    availability:
+      - BUILD
+      - RUNTIME
+
   # Coupon System Secret
   - variable: SECRET_KEY
     secret: SECRET_KEY
+    availability:
+      - BUILD
+      - RUNTIME
+
+  # Sync Secret (used for analytics-sync and scheduled jobs)
+  - variable: SYNC_SECRET
+    secret: SYNC_SECRET
+    availability:
+      - BUILD
+      - RUNTIME
+
+  # Split Second Pix Partner API
+  - variable: SPLITSECOND_PARTNER_TOKEN
+    secret: SPLITSECOND_PARTNER_TOKEN
+    availability:
+      - BUILD
+      - RUNTIME
+  - variable: YOUTUBE_API_KEY
+    secret: YOUTUBE_API_KEY
     availability:
       - BUILD
       - RUNTIME

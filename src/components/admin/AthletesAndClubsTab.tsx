@@ -32,6 +32,9 @@ import {
   Save,
   ShieldAlert,
   History as HistoryIcon,
+  HardDrive,
+  Clock,
+  Zap,
 } from "lucide-react";
 import ClubManagementTab from "./ClubManagementTab";
 
@@ -41,12 +44,19 @@ import {
 import {
   searchAthletesForAdminAction,
   removeDuplicateUsersAction,
+  syncLoggedInUsersEmailVerificationAction,
   exportAllUsersAction,
   updateRaceResultByAdminAction,
-} from "@/lib/actions/adminActions";
+  setAdminAccessModeAction,
+} from "@/lib/actions";
 import { createUserAction, updateUserProfile } from '@/lib/actions/userActions';
 import { getRecentClubsAction, getAllClubs } from "@/lib/actions/clubActions";
 import { useAuth } from "@/context/AuthContext";
+import {
+  masterSyncCacheAction,
+  manualClearCacheAction,
+  getCacheStatsAction,
+} from '@/lib/actions/cacheManagementActions';
 
 import type { 
     User, 
@@ -77,6 +87,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Form,
   FormField,
@@ -141,9 +152,84 @@ function CreateUserForm({ isSubmitting, onSubmit }: { isSubmitting: boolean; onS
 function AdminAthleteEditForm({ isSubmitting, onSubmit, editingUser, allClubs }: { isSubmitting: boolean; onSubmit: (data: AdminParticipantEditFormInput) => void; editingUser: User | null, allClubs: Club[] }) {
     const form = useForm<AdminParticipantEditFormInput>({ resolver: zodResolver(AdminParticipantEditSchema) });
     const [dialCode, setDialCode] = useState('+91');
+    const normalizeClubName = (value: any) =>
+      String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const activeClubFromHistoryForDisplay = useMemo(() => {
+      if (!editingUser || !Array.isArray(editingUser.clubHistory)) return null;
+      return (
+        editingUser.clubHistory.find((entry: any) => entry?.isActive) ||
+        editingUser.clubHistory.find((entry: any) => !entry?.leftAt) ||
+        null
+      );
+    }, [editingUser]);
+
+    const effectiveClubIdForDisplay =
+      editingUser?.clubId ||
+      activeClubFromHistoryForDisplay?.clubId ||
+      editingUser?.ownedClubId ||
+      null;
+
+    const effectiveClubNameForDisplay =
+      editingUser?.clubName ||
+      activeClubFromHistoryForDisplay?.clubName ||
+      editingUser?.ownedClubName ||
+      null;
+
+    const clubOptions = useMemo(() => {
+      const options = Array.isArray(allClubs) ? [...allClubs] : [];
+      if (
+        effectiveClubIdForDisplay &&
+        !options.some((club) => club.id === effectiveClubIdForDisplay)
+      ) {
+        options.unshift({
+          id: effectiveClubIdForDisplay,
+          name: effectiveClubNameForDisplay || 'Current Affiliation',
+        } as Club);
+      }
+      return options;
+    }, [allClubs, effectiveClubIdForDisplay, effectiveClubNameForDisplay]);
 
     useEffect(() => {
         if (editingUser) {
+            const activeClubFromHistory = Array.isArray(editingUser.clubHistory)
+              ? (
+                  editingUser.clubHistory.find((entry: any) => entry?.isActive) ||
+                  editingUser.clubHistory.find((entry: any) => !entry?.leftAt) ||
+                  null
+                )
+              : null;
+            const normalizedTargetClubName = normalizeClubName(
+              editingUser.clubName ||
+              activeClubFromHistory?.clubName ||
+              editingUser.ownedClubName ||
+              ''
+            );
+            const matchedClubByName = normalizedTargetClubName
+              ? (allClubs.find((club) => {
+                    const clubNorm = normalizeClubName(club.name);
+                    return (
+                      clubNorm === normalizedTargetClubName ||
+                      clubNorm.includes(normalizedTargetClubName) ||
+                      normalizedTargetClubName.includes(clubNorm)
+                    );
+                }) || null)
+              : null;
+            const clubIdFromName = matchedClubByName?.id || null;
+
+            const effectiveClubId =
+              editingUser.clubId ||
+              activeClubFromHistory?.clubId ||
+              editingUser.ownedClubId ||
+              clubIdFromName ||
+              null;
+            const effectiveClubAffiliationDate = editingUser.clubAffiliationDate || activeClubFromHistory?.joinedAt || '';
+
             let mobileOnly = editingUser.mobile || '';
             if (mobileOnly.startsWith('+')) {
                 const matched = COUNTRY_CODES.find(c => mobileOnly.startsWith(c.dial_code));
@@ -167,11 +253,11 @@ function AdminAthleteEditForm({ isSubmitting, onSubmit, editingUser, allClubs }:
                 pincode: editingUser.pincode || '',
                 country: editingUser.country || 'India',
                 state: editingUser.state || '',
-                clubId: editingUser.clubId || NO_CLUB_SELECTED_VALUE,
-                clubAffiliationDate: toDateStringSafe(editingUser.clubAffiliationDate) || '',
+                clubId: effectiveClubId || NO_CLUB_SELECTED_VALUE,
+                clubAffiliationDate: toDateStringSafe(effectiveClubAffiliationDate) || '',
             });
         }
-    }, [editingUser, form]);
+          }, [editingUser, form, allClubs]);
 
     const countryValueFromForm = form.watch("country");
     const dobValue = form.watch("dob");
@@ -275,7 +361,12 @@ function AdminAthleteEditForm({ isSubmitting, onSubmit, editingUser, allClubs }:
                     
                     <Separator className="my-4"/>
                     
-                    <FormField name="clubId" control={form.control} render={({ field }) => (<FormItem className="text-left"><FormLabel>Club Affiliation</FormLabel><Select onValueChange={(value) => field.onChange(value === NO_CLUB_SELECTED_VALUE ? null : value)} value={field.value || NO_CLUB_SELECTED_VALUE}><FormControl><SelectTrigger><SelectValue placeholder="Select..."/></SelectTrigger></FormControl><SelectContent><SelectItem value={NO_CLUB_SELECTED_VALUE}>None / Not Affiliated</SelectItem>{allClubs.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></FormItem>)}/>
+                    <FormField name="clubId" control={form.control} render={({ field }) => (<FormItem className="text-left"><FormLabel>Club Affiliation</FormLabel><Select onValueChange={(value) => field.onChange(value === NO_CLUB_SELECTED_VALUE ? null : value)} value={field.value || NO_CLUB_SELECTED_VALUE}><FormControl><SelectTrigger><SelectValue placeholder="Select..."/></SelectTrigger></FormControl><SelectContent><SelectItem value={NO_CLUB_SELECTED_VALUE}>None / Not Affiliated</SelectItem>{clubOptions.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}</SelectContent></Select></FormItem>)}/>
+                    {!!effectiveClubNameForDisplay && !(form.watch('clubId') && form.watch('clubId') !== NO_CLUB_SELECTED_VALUE) && (
+                      <p className="text-[10px] font-semibold text-muted-foreground -mt-2 text-left">
+                        Detected current affiliation: <span className="text-foreground">{effectiveClubNameForDisplay}</span>
+                      </p>
+                    )}
                     <FormField control={form.control} name="clubAffiliationDate" render={({ field }) => (<FormItem className="text-left"><FormLabel>Club Affiliation Date</FormLabel><FormControl><Input type="date" {...field} value={field.value || ''} /></FormControl><FormMessage /></FormItem>)} />
                   </div>
                 </ScrollArea>
@@ -438,10 +529,12 @@ const AnalyticsOverview = () => {
 
 function ManageAthletesTab({ onRefresh }: { onRefresh: () => void }) {
     const { toast } = useToast();
+  const { currentUser } = useAuth();
     const [searchTerm, setSearchTerm] = useState('');
     const [searchBy, setSearchBy] = useState<'name' | 'email' | 'mobile' | 'bibNumber'>('name');
     const [isSearching, setIsSearching] = useState(false);
     const [isCleaning, setIsCleaning] = useState(false);
+    const [isSyncingVerified, setIsSyncingVerified] = useState(false);
     const [searchResults, setSearchResults] = useState<Array<User & { races?: RaceResult[]; upcomingEvents?: any[] }>>([]);
     const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
     const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -449,6 +542,21 @@ function ManageAthletesTab({ onRefresh }: { onRefresh: () => void }) {
     const [allClubs, setAllClubs] = useState<Club[]>([]);
     const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
     const [editingRaceResult, setEditingRaceResult] = useState<RaceResult | null>(null);
+    const [adminAccessTarget, setAdminAccessTarget] = useState<User | null>(null);
+    const [adminAccessModeDraft, setAdminAccessModeDraft] = useState<'none' | 'view' | 'edit'>('none');
+    const [isUpdatingAdminAccess, setIsUpdatingAdminAccess] = useState(false);
+
+    const isViewOnlyAdmin = !!(currentUser?.isAdmin && currentUser?.adminAccessMode === 'view');
+
+    const blockIfReadOnly = () => {
+      if (!isViewOnlyAdmin) return false;
+      toast({
+        variant: 'destructive',
+        title: 'View-only admin',
+        description: 'Your admin access is view-only. Editing is disabled.',
+      });
+      return true;
+    };
 
 
     useEffect(() => {
@@ -474,6 +582,7 @@ function ManageAthletesTab({ onRefresh }: { onRefresh: () => void }) {
     };
 
     const handleCreateUser = async (data: CreateUserFormInput) => {
+      if (blockIfReadOnly()) return;
         setIsSubmitting(true);
         const result = await createUserAction({
             name: data.name,
@@ -491,6 +600,7 @@ function ManageAthletesTab({ onRefresh }: { onRefresh: () => void }) {
     };
 
     const handleUpdateUser = async (data: AdminParticipantEditFormInput) => {
+      if (blockIfReadOnly()) return;
         if (!editingUser) return;
         setIsSubmitting(true);
         
@@ -513,6 +623,7 @@ function ManageAthletesTab({ onRefresh }: { onRefresh: () => void }) {
     };
     
     const handleUpdateRaceResult = async (data: AdminRaceResultEditFormInput) => {
+      if (blockIfReadOnly()) return;
         if (!editingRaceResult || !editingRaceResult.docId) return;
         setIsSubmitting(true);
         const result = await updateRaceResultByAdminAction(editingRaceResult.docId, data);
@@ -533,6 +644,7 @@ function ManageAthletesTab({ onRefresh }: { onRefresh: () => void }) {
     };
 
     const handleExport = async () => {
+      if (blockIfReadOnly()) return;
         setIsSearching(true); 
         const result = await exportAllUsersAction();
         if (result.success && result.fileContent) {
@@ -547,6 +659,7 @@ function ManageAthletesTab({ onRefresh }: { onRefresh: () => void }) {
     };
 
     const handleCleanDuplicates = async () => {
+      if (blockIfReadOnly()) return;
         setIsCleaning(true);
         try {
             const res = await removeDuplicateUsersAction();
@@ -563,11 +676,65 @@ function ManageAthletesTab({ onRefresh }: { onRefresh: () => void }) {
         }
     };
 
+      const handleSyncVerifiedEmails = async () => {
+        if (blockIfReadOnly()) return;
+        setIsSyncingVerified(true);
+        try {
+          const res = await syncLoggedInUsersEmailVerificationAction();
+          if (res.success) {
+            toast({ title: 'Verified Sync Complete', description: res.message });
+            onRefresh();
+            if (searchTerm) {
+              const searchResult = await searchAthletesForAdminAction(searchTerm, searchBy);
+              if (searchResult.success && searchResult.athletes) {
+                setSearchResults(searchResult.athletes);
+              }
+            }
+          } else {
+            toast({ variant: 'destructive', title: 'Sync Failed', description: res.message });
+          }
+        } catch (error: any) {
+          toast({ variant: 'destructive', title: 'Error', description: error.message || 'Could not sync verified emails.' });
+        } finally {
+          setIsSyncingVerified(false);
+        }
+      };
+
+    const openAdminAccessModal = (user: User) => {
+      const currentMode = user.isAdmin
+        ? ((user.adminAccessMode === 'view' || user.adminAccessMode === 'edit') ? user.adminAccessMode : 'edit')
+        : 'none';
+      setAdminAccessModeDraft(currentMode);
+      setAdminAccessTarget(user);
+    };
+
+    const handleUpdateAdminAccess = async () => {
+      if (blockIfReadOnly()) return;
+      if (!adminAccessTarget || !currentUser?.uid) return;
+
+      setIsUpdatingAdminAccess(true);
+      const result = await setAdminAccessModeAction(currentUser.uid, adminAccessTarget.uid, adminAccessModeDraft);
+      if (result.success) {
+        toast({ title: 'Admin access updated', description: result.message });
+        setSearchResults((prev) => prev.map((u) => {
+          if (u.uid !== adminAccessTarget.uid) return u;
+          if (adminAccessModeDraft === 'none') {
+            return { ...u, isAdmin: false, role: (u.role === 'admin' ? 'athlete' : u.role), adminAccessMode: null };
+          }
+          return { ...u, isAdmin: true, role: 'admin', adminAccessMode: adminAccessModeDraft };
+        }));
+        setAdminAccessTarget(null);
+      } else {
+        toast({ variant: 'destructive', title: 'Update failed', description: result.message });
+      }
+      setIsUpdatingAdminAccess(false);
+    };
+
     return (
         <div className="space-y-4 text-left">
             <div className="flex flex-wrap gap-2 text-left">
                 <Dialog open={isCreateUserModalOpen} onOpenChange={setIsCreateUserModalOpen}>
-                    <DialogTrigger asChild><Button size="sm" className="rounded-xl font-bold uppercase text-xs tracking-widest"><UserPlus className="mr-2 h-4 w-4"/>Create User</Button></DialogTrigger>
+                <DialogTrigger asChild><Button size="sm" className="rounded-xl font-bold uppercase text-xs tracking-widest" disabled={isViewOnlyAdmin}><UserPlus className="mr-2 h-4 w-4"/>Create User</Button></DialogTrigger>
                     <DialogContent className="text-left">
                         <DialogHeader className="text-left">
                           <DialogTitle className="text-left">Create New User Profile</DialogTitle>
@@ -576,10 +743,14 @@ function ManageAthletesTab({ onRefresh }: { onRefresh: () => void }) {
                         <CreateUserForm isSubmitting={isSubmitting} onSubmit={handleCreateUser} />
                     </DialogContent>
                 </Dialog>
-                 <Button size="sm" variant="outline" onClick={handleExport} disabled={isSearching} className="rounded-xl font-bold uppercase text-xs tracking-widest"><Download className="mr-2 h-4 w-4"/>Export All Users</Button>
+                 <Button size="sm" variant="outline" onClick={handleExport} disabled={isSearching || isViewOnlyAdmin} className="rounded-xl font-bold uppercase text-xs tracking-widest"><Download className="mr-2 h-4 w-4"/>Export All Users</Button>
+                <Button size="sm" variant="outline" onClick={handleSyncVerifiedEmails} disabled={isSearching || isCleaning || isSyncingVerified || isViewOnlyAdmin} className="rounded-xl font-bold uppercase text-xs tracking-widest">
+                  {isSyncingVerified ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <CheckCircle2 className="mr-2 h-4 w-4"/>}
+                  Sync Verified Emails
+                </Button>
                 <AlertDialog>
                     <AlertDialogTrigger asChild>
-                        <Button size="sm" variant="destructive" disabled={isSearching || isCleaning} className="rounded-xl font-bold uppercase text-xs tracking-widest">
+                    <Button size="sm" variant="destructive" disabled={isSearching || isCleaning || isSyncingVerified || isViewOnlyAdmin} className="rounded-xl font-bold uppercase text-xs tracking-widest">
                             {isCleaning ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Trash2 className="mr-2 h-4 w-4"/>}
                             Clean Duplicates
                         </Button>
@@ -653,12 +824,30 @@ function ManageAthletesTab({ onRefresh }: { onRefresh: () => void }) {
                                     <div className="text-xs font-bold uppercase text-slate-500 flex items-center gap-1.5 text-left">
                                         <Building className="h-3 w-3 opacity-50"/> {user.clubName || 'Independent'}
                                     </div>
+                                    {user.isAdmin && (
+                                      <div className="mt-1">
+                                        <Badge variant="outline" className="text-[9px] uppercase font-black border-blue-200 text-blue-700 bg-blue-50">
+                                          Admin: {user.adminAccessMode === 'view' ? 'View' : 'Edit'}
+                                        </Badge>
+                                      </div>
+                                    )}
                                 </TableCell>
                                 <TableCell className="text-left">
                                     <p className="text-[10px] font-bold uppercase text-slate-400 font-mono text-left">{user.createdAt ? format(parseISO(user.createdAt), 'dd MMM yyyy') : '—'}</p>
                                 </TableCell>
                                 <TableCell className="text-right pr-6">
-                                    <Button size="xs" variant="outline" className="rounded-lg h-8 px-4 font-black uppercase text-[10px] tracking-widest text-primary border-primary/20 hover:bg-primary/5" onClick={(e) => {e.stopPropagation(); setEditingUser(user);}}>Manage</Button>
+                                    <div className="flex justify-end gap-2">
+                                      <Button
+                                        size="xs"
+                                        variant="outline"
+                                        className="rounded-lg h-8 px-3 font-black uppercase text-[10px] tracking-widest"
+                                        onClick={(e) => { e.stopPropagation(); openAdminAccessModal(user); }}
+                                        disabled={isViewOnlyAdmin}
+                                      >
+                                        <UserCog className="mr-1 h-3 w-3" /> Admin
+                                      </Button>
+                                      <Button size="xs" variant="outline" className="rounded-lg h-8 px-4 font-black uppercase text-[10px] tracking-widest text-primary border-primary/20 hover:bg-primary/5" onClick={(e) => {e.stopPropagation(); setEditingUser(user);}} disabled={isViewOnlyAdmin}>Manage</Button>
+                                    </div>
                                 </TableCell>
                             </TableRow>
                             {expandedUserId === user.uid && (
@@ -694,14 +883,19 @@ function ManageAthletesTab({ onRefresh }: { onRefresh: () => void }) {
                                                 {user.upcomingEvents && user.upcomingEvents.length > 0 ? (
                                                     <div className="rounded-xl border bg-background overflow-hidden text-left shadow-sm">
                                                         <Table>
-                                                            <TableHeader className="bg-muted/50"><TableRow className="h-8 text-[9px] font-black uppercase border-b"><TableHead className="pl-4">Event Name</TableHead><TableHead>Booking ID</TableHead><TableHead>Ticket Status</TableHead><TableHead className="text-right pr-4">Registration Date</TableHead></TableRow></TableHeader>
+                                                            <TableHeader className="bg-muted/50"><TableRow className="h-8 text-[9px] font-black uppercase border-b"><TableHead className="pl-4">Event Name</TableHead><TableHead>Event Date</TableHead><TableHead>Your Ticket</TableHead><TableHead>BIB NO</TableHead><TableHead>Booking ID</TableHead></TableRow></TableHeader>
                                                             <TableBody>
                                                                 {user.upcomingEvents.map((e, idx) => (
                                                                     <TableRow key={idx} className="h-10 text-[10px] font-medium hover:bg-muted/20 border-border/50 text-left">
                                                                         <TableCell className="pl-4 font-bold uppercase text-primary">{e.eventName}</TableCell>
-                                                                        <TableCell className="font-mono text-muted-foreground">{e.bookingId || '—'}</TableCell>
-                                                                        <TableCell><Badge variant="outline" className="text-[9px] font-bold">Active</Badge></TableCell>
-                                                                        <TableCell className="text-right pr-4 text-muted-foreground">{e.registeredDate ? format(parseISO(e.registeredDate), 'dd MMM yyyy') : '—'}</TableCell>
+                                                                        <TableCell className="text-muted-foreground">{e.eventDate ? format(parseISO(e.eventDate), 'dd MMM yyyy') : '—'}</TableCell>
+                                                                        <TableCell className="text-sm">
+                                                                          {e.ticketCategory && e.raceCategory
+                                                                            ? `${e.ticketCategory} • ${e.raceCategory}`
+                                                                            : (e.ticketCategory || e.raceCategory || '—')}
+                                                                        </TableCell>
+                                                                        <TableCell className="font-mono font-bold">{e.bibNumber || '—'}</TableCell>
+                                                                        <TableCell className="font-mono text-muted-foreground font-bold">{e.bookingId || '—'}</TableCell>
                                                                     </TableRow>
                                                                 ))}
                                                             </TableBody>
@@ -777,6 +971,41 @@ function ManageAthletesTab({ onRefresh }: { onRefresh: () => void }) {
                     </div>
                 </DialogContent>
             </Dialog>
+
+            <Dialog open={!!adminAccessTarget} onOpenChange={(open) => !open && !isUpdatingAdminAccess && setAdminAccessTarget(null)}>
+              <DialogContent className="text-left">
+                <DialogHeader className="text-left">
+                  <DialogTitle className="text-left">Admin Access Control</DialogTitle>
+                  <DialogDescription className="text-left">
+                    Configure admin rights for <strong>{adminAccessTarget?.name || adminAccessTarget?.email || 'user'}</strong>.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-3 py-2">
+                  <Label>Access Mode</Label>
+                  <Select value={adminAccessModeDraft} onValueChange={(v) => setAdminAccessModeDraft(v as 'none' | 'view' | 'edit')}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose access mode" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No Admin Access</SelectItem>
+                      <SelectItem value="view">Admin (View Only)</SelectItem>
+                      <SelectItem value="edit">Admin (View + Edit)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button type="button" variant="ghost" disabled={isUpdatingAdminAccess}>Cancel</Button>
+                  </DialogClose>
+                  <Button onClick={handleUpdateAdminAccess} disabled={isUpdatingAdminAccess}>
+                    {isUpdatingAdminAccess ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                    Save Access
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
         </div>
     );
 }
@@ -786,6 +1015,12 @@ export default function AthletesAndClubsTab() {
   const [activeTab, setActiveTab] = useState('overview');
   const isMobile = useIsMobile();
 
+  // Cache management state
+  const [isMasterSyncing, setIsMasterSyncing] = useState(false);
+  const [isManualClearing, setIsManualClearing] = useState(false);
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
+  const [cacheStats, setCacheStats] = useState<any>(null);
+
   const onRefresh = useCallback(() => {
     toast({ title: 'Directory Synchronized' });
   }, [toast]);
@@ -793,8 +1028,84 @@ export default function AthletesAndClubsTab() {
   const navItems = [
     { id: 'overview', label: 'Dashboard', icon: LineChart },
     { id: 'athletes', label: 'Directory', icon: Users2 },
-    { id: 'clubs', label: 'Clubs', icon: Building }
+    { id: 'clubs', label: 'Clubs', icon: Building },
+    { id: 'cache', label: 'Cache Mgmt', icon: HardDrive }
   ];
+
+  // Cache Management Handlers
+  const handleMasterSync = async () => {
+    setIsMasterSyncing(true);
+    try {
+      const result = await masterSyncCacheAction();
+      if (result.success) {
+        toast({
+          title: 'Master Sync Completed',
+          description: result.message,
+        });
+        await loadCacheStats();
+      } else {
+        toast({
+          variant: 'destructive',
+          title: 'Master Sync Failed',
+          description: result.message,
+        });
+      }
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: (error as Error).message,
+      });
+    } finally {
+      setIsMasterSyncing(false);
+    }
+  };
+
+  const handleManualClearCache = async () => {
+    setIsManualClearing(true);
+    try {
+      const result = await manualClearCacheAction();
+      if (result.success) {
+        toast({
+          title: 'Cache Cleared',
+          description: result.message,
+        });
+        await loadCacheStats();
+      } else {
+        toast({
+          variant: 'destructive',
+          title: 'Clear Cache Failed',
+          description: result.message,
+        });
+      }
+    } catch (error) {
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: (error as Error).message,
+      });
+    } finally {
+      setIsManualClearing(false);
+    }
+  };
+
+  const loadCacheStats = async () => {
+    setIsLoadingStats(true);
+    try {
+      const result = await getCacheStatsAction();
+      if (result.success) {
+        setCacheStats(result.stats);
+      }
+    } catch (error) {
+      console.error('Failed to load cache stats:', error);
+    } finally {
+      setIsLoadingStats(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCacheStats();
+  }, []);
 
   const renderNav = () => {
     if (isMobile) {
@@ -817,7 +1128,7 @@ export default function AthletesAndClubsTab() {
       );
     }
     return (
-        <TabsList className="grid w-full grid-cols-3 bg-muted/50 p-1 rounded-xl h-11 border">
+        <TabsList className="grid w-full grid-cols-4 bg-muted/50 p-1 rounded-xl h-11 border">
             {navItems.map(item => (
                  <TabsTrigger key={item.id} value={item.id} className="rounded-lg gap-2 font-bold uppercase text-[10px] tracking-widest h-9"><item.icon className="h-4 w-4"/>{item.label}</TabsTrigger>
             ))}
@@ -845,6 +1156,202 @@ export default function AthletesAndClubsTab() {
             </TabsContent>
             <TabsContent value="clubs" className="mt-8 animate-in fade-in slide-in-from-left-4 duration-500 text-left">
                 <ClubManagementTab />
+            </TabsContent>
+            <TabsContent value="cache" className="mt-8 animate-in fade-in slide-in-from-left-4 duration-500 text-left space-y-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <HardDrive className="w-5 h-5" />
+                    Cache Management
+                  </CardTitle>
+                  <CardDescription>
+                    Manage Cloudflare KV cache, flush stale data, and fix inconsistencies
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Cache Statistics */}
+                  <div className="space-y-3">
+                    <h3 className="font-semibold text-sm text-gray-900 flex items-center gap-2">
+                      <Clock className="w-4 h-4" />
+                      Current Cache Status
+                    </h3>
+                    
+                    {isLoadingStats ? (
+                      <div className="space-y-2">
+                        <Skeleton className="h-8 w-full" />
+                        <Skeleton className="h-8 w-full" />
+                      </div>
+                    ) : cacheStats ? (
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                        <div className="p-3 border rounded-lg bg-blue-50">
+                          <p className="text-xs text-gray-600">Users</p>
+                          <p className="text-lg font-bold text-blue-900">{cacheStats.userEntries}</p>
+                        </div>
+                        <div className="p-3 border rounded-lg bg-green-50">
+                          <p className="text-xs text-gray-600">Clubs</p>
+                          <p className="text-lg font-bold text-green-900">{cacheStats.clubEntries}</p>
+                        </div>
+                        <div className="p-3 border rounded-lg bg-purple-50">
+                          <p className="text-xs text-gray-600">Events</p>
+                          <p className="text-lg font-bold text-purple-900">{cacheStats.eventEntries}</p>
+                        </div>
+                        <div className="p-3 border rounded-lg bg-orange-50">
+                          <p className="text-xs text-gray-600">System</p>
+                          <p className="text-lg font-bold text-orange-900">{cacheStats.systemEntries}</p>
+                        </div>
+                        <div className="p-3 border rounded-lg bg-gray-100">
+                          <p className="text-xs text-gray-600">Total</p>
+                          <p className="text-lg font-bold text-gray-900">{cacheStats.totalEntries}</p>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Unable to load cache statistics</p>
+                    )}
+
+                    {cacheStats?.lastSyncTime && (
+                      <p className="text-xs text-muted-foreground">
+                        Last sync: {new Date(cacheStats.lastSyncTime).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+
+                  <hr className="my-4" />
+
+                  {/* Master Sync Section */}
+                  <div className="space-y-3">
+                    <div>
+                      <h3 className="font-semibold text-sm text-gray-900 flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-yellow-600" />
+                        Master Sync
+                      </h3>
+                      <p className="text-xs text-gray-600 mt-1">
+                        Flush all stale cache entries and rebuild fresh data from Firestore. Runs in batches to avoid Cloudflare rate limits.
+                      </p>
+                    </div>
+
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className="w-full justify-center gap-2 border-yellow-200 hover:bg-yellow-50"
+                          disabled={isMasterSyncing}
+                        >
+                          {isMasterSyncing ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Syncing Cache...
+                            </>
+                          ) : (
+                            <>
+                              <Zap className="w-4 h-4" />
+                              Run Master Sync
+                            </>
+                          )}
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Confirm Master Cache Sync</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will:
+                            <ul className="mt-2 ml-4 space-y-1 text-sm list-disc">
+                              <li>Clear all user profile cache entries</li>
+                              <li>Clear all club stats cache entries</li>
+                              <li>Clear all event cache entries</li>
+                              <li>Rebuild fresh data from Firestore</li>
+                              <li>Process in batches to avoid rate limits</li>
+                            </ul>
+                            <p className="mt-3 font-semibold text-yellow-700">This may take a few minutes.</p>
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={handleMasterSync} className="bg-yellow-600 hover:bg-yellow-700">
+                            Start Sync
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+
+                  <hr className="my-4" />
+
+                  {/* Manual Clear Cache Section */}
+                  <div className="space-y-3">
+                    <div>
+                      <h3 className="font-semibold text-sm text-gray-900 flex items-center gap-2">
+                        <Trash2 className="w-4 h-4 text-red-600" />
+                        Manual Clear Cache
+                      </h3>
+                      <p className="text-xs text-gray-600 mt-1">
+                        Remove ghost entries and fix inconsistencies. Scans cache for entries without Firestore records and removes them.
+                      </p>
+                    </div>
+
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className="w-full justify-center gap-2 border-red-200 hover:bg-red-50"
+                          disabled={isManualClearing}
+                        >
+                          {isManualClearing ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              Clearing...
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="w-4 h-4" />
+                              Clear Ghost Entries
+                            </>
+                          )}
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Confirm Manual Cache Clear</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will:
+                            <ul className="mt-2 ml-4 space-y-1 text-sm list-disc">
+                              <li>Scan cache for orphaned user entries</li>
+                              <li>Scan cache for orphaned club entries</li>
+                              <li>Remove entries without Firestore records (ghost entries)</li>
+                              <li>Clean up old temporary and system entries</li>
+                              <li>Verify data integrity</li>
+                            </ul>
+                            <p className="mt-3 text-sm">
+                              <strong>Safe:</strong> Only removes entries not found in Firestore.
+                            </p>
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={handleManualClearCache} className="bg-red-600 hover:bg-red-700">
+                            Clear Cache
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+
+                  <hr className="my-4" />
+
+                  {/* Information Box */}
+                  <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                    <h4 className="font-semibold text-sm text-blue-900 flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4" />
+                      How It Works
+                    </h4>
+                    <ul className="mt-3 space-y-2 text-xs text-blue-800">
+                      <li>• <strong>Master Sync:</strong> Complete cache rebuild with rate limiting (200ms between deletes)</li>
+                      <li>• <strong>Manual Clear:</strong> Removes only ghost entries (orphaned cache with no Firestore record)</li>
+                      <li>• <strong>Rate Limiting:</strong> Both operations use batched processing to avoid Cloudflare 429 errors</li>
+                      <li>• <strong>Safe:</strong> Both operations are safe and can be run anytime without data loss</li>
+                    </ul>
+                  </div>
+                </CardContent>
+              </Card>
             </TabsContent>
         </Tabs>
       </CardContent>

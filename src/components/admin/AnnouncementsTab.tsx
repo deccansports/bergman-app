@@ -61,6 +61,7 @@ export default function AnnouncementsTab() {
       type: 'global',
       priority: 'low',
       isTicker: true,
+            tickerSpeedSeconds: 15,
       isModal: false,
       linkUrl: '',
       startDate: new Date().toISOString().split('T')[0],
@@ -146,6 +147,7 @@ export default function AnnouncementsTab() {
           type: a.type,
           priority: a.priority,
           isTicker: a.isTicker,
+          tickerSpeedSeconds: a.tickerSpeedSeconds ?? 15,
           isModal: a.isModal,
           linkUrl: a.linkUrl || '',
           targetEventId: a.targetEventId || 'all',
@@ -202,6 +204,7 @@ export default function AnnouncementsTab() {
                                     <p className="text-xs text-muted-foreground line-clamp-1">{a.message}</p>
                                     <div className="flex flex-wrap gap-1 mt-1">
                                         {a.isTicker && <Badge variant="outline" className="text-[10px] scale-90 origin-left">Ticker</Badge>}
+                                        {a.isTicker && <Badge variant="outline" className="text-[10px] scale-90 origin-left">{a.tickerSpeedSeconds ?? 15}s</Badge>}
                                         {a.isModal && <Badge variant="outline" className="text-[10px] scale-90 origin-left">Modal</Badge>}
                                         {a.linkUrl && <Badge variant="outline" className="text-[10px] scale-90 origin-left bg-blue-50 text-blue-600 border-blue-200">Link</Badge>}
                                         <Badge variant={a.priority === 'high' ? 'destructive' : a.priority === 'medium' ? 'default' : 'secondary'} className="text-[10px] scale-90 origin-left lowercase">{a.priority}</Badge>
@@ -320,6 +323,30 @@ export default function AnnouncementsTab() {
                             <FormItem className="flex items-center gap-2 space-y-0 text-left"><FormControl><Switch checked={field.value} onCheckedChange={field.onChange}/></FormControl><FormLabel className="font-bold cursor-pointer">Click to open Modal</FormLabel></FormItem>
                         )}/>
                     </div>
+
+                                        {form.watch('isTicker') && (
+                                            <FormField
+                                                control={form.control}
+                                                name="tickerSpeedSeconds"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel>Ticker Speed (seconds)</FormLabel>
+                                                        <FormControl>
+                                                            <Input
+                                                                type="number"
+                                                                min={5}
+                                                                max={40}
+                                                                step={0.5}
+                                                                value={field.value ?? 15}
+                                                                onChange={(e) => field.onChange(Number(e.target.value))}
+                                                            />
+                                                        </FormControl>
+                                                        <FormDescription className="text-[10px]">Higher value = slower ticker movement. Recommended: 12–18.</FormDescription>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+                                        )}
 
                     <DialogFooter className="pt-4 border-t">
                         <DialogClose asChild><Button variant="ghost">Cancel</Button></DialogClose>

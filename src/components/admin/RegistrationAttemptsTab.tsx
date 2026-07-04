@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Loader2, Search, Mail, MessageSquare, Target, Trash2, Info } from 'lucide-react';
+import { Loader2, Search, Mail, MessageSquare, Target, Trash2, Info, RefreshCw } from 'lucide-react';
 import { format, parseISO, isValid } from 'date-fns';
 import {
   AlertDialog,
@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useAuth } from '@/context/AuthContext';
 
 
 interface RegistrationAttemptsTabProps {
@@ -49,12 +50,14 @@ const MAX_REMINDERS_PAYMENT_INITIATED = 4;
 
 export default function RegistrationAttemptsTab({ events, isLoadingEvents }: RegistrationAttemptsTabProps) {
   const { toast } = useToast();
+  const { firebaseUserFromAuth } = useAuth();
   const [attempts, setAttempts] = useState<RegistrationAttempt[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isSendingNotif, setIsSendingNotif] = useState<{ type: 'email' | 'whatsapp', attemptId: string } | null>(null);
   const [isDeletingAttemptId, setIsDeletingAttemptId] = useState<string | null>(null);
+  const [isFixingAttemptId, setIsFixingAttemptId] = useState<string | null>(null);
 
   const fetchAttempts = useCallback(async (eventId?: string) => {
     setIsLoading(true);
@@ -97,7 +100,8 @@ export default function RegistrationAttemptsTab({ events, isLoadingEvents }: Reg
           channel === 'email' ? attempt.email : null,
           attempt.eventName,
           redirectUrl,
-          channel === 'whatsapp' ? (attempt.mobile ?? null) : null
+          channel === 'whatsapp' ? (attempt.mobile ?? null) : null,
+          attempt.id
       );
 
       if (result.success) {
@@ -130,6 +134,43 @@ export default function RegistrationAttemptsTab({ events, isLoadingEvents }: Reg
     }
   };
 
+  const handleFixRegistration = async (attempt: RegistrationAttempt) => {
+    if (!firebaseUserFromAuth) {
+      toast({ variant: 'destructive', title: 'Auth Error', description: 'You must be authenticated to perform this action.' });
+      return;
+    }
+
+    setIsFixingAttemptId(attempt.id);
+    try {
+      const token = await firebaseUserFromAuth.getIdToken();
+      const response = await fetch('/api/admin/retry-registration', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ orderId: attempt.id }),
+      });
+
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.message || 'Could not finalize registration.');
+      }
+
+      toast({
+        title: 'Registration Fixed',
+        description: result.bookingId
+          ? `Registration created successfully. Booking ID: ${result.bookingId}`
+          : 'Registration created successfully for the paid attempt.',
+      });
+      fetchAttempts(selectedEventId || undefined);
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Fix Failed', description: error.message || 'Could not fix the registration.' });
+    } finally {
+      setIsFixingAttemptId(null);
+    }
+  };
+
 
   return (
     <>
@@ -158,6 +199,7 @@ export default function RegistrationAttemptsTab({ events, isLoadingEvents }: Reg
                 <TableRow>
                   <TableHead>Athlete</TableHead>
                   <TableHead>Event</TableHead>
+                  <TableHead>Payment ID</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Last Updated</TableHead>
                   <TableHead>Reminders Sent</TableHead>
@@ -166,9 +208,9 @@ export default function RegistrationAttemptsTab({ events, isLoadingEvents }: Reg
               </TableHeader>
               <TableBody>
                 {isLoading ? (
-                  <TableRow><TableCell colSpan={6} className="text-center h-24"><Loader2 className="h-6 w-6 animate-spin mx-auto text-primary"/></TableCell></TableRow>
+                  <TableRow><TableCell colSpan={7} className="text-center h-24"><Loader2 className="h-6 w-6 animate-spin mx-auto text-primary"/></TableCell></TableRow>
                 ) : filteredAttempts.length === 0 ? (
-                  <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-10">No incomplete registrations found.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-10">No incomplete registrations found.</TableCell></TableRow>
                 ) : (
                   filteredAttempts.map(attempt => {
                     const reminders = attempt.remindersSent || { email: { count: 0, dates: [] }, whatsapp: { count: 0, dates: [] } };
@@ -179,6 +221,10 @@ export default function RegistrationAttemptsTab({ events, isLoadingEvents }: Reg
                     const maxReminders = statusKey === 'Potential' || statusKey === 'pending' ? MAX_REMINDERS_POTENTIAL : MAX_REMINDERS_PAYMENT_INITIATED;
                     const canSendMore = totalRemindersSent < maxReminders;
                     const updatedAtDate = attempt.updatedAt ? (typeof attempt.updatedAt === 'string' ? parseISO(attempt.updatedAt) : attempt.updatedAt) : null;
+                    const paymentId = String(attempt.transactionId || '').trim();
+                    const paymentCaptured = statusKey === 'PaymentCaptured' || statusKey === 'Completed' || !!paymentId;
+                    const manualRegistrationExists = attempt.manualRegistrationExists === true || statusKey === 'Completed';
+                    const canFixRegistration = statusKey === 'RegistrationFailed' && paymentCaptured && !manualRegistrationExists;
 
                     return (
                       <TableRow key={attempt.id}>
@@ -190,6 +236,13 @@ export default function RegistrationAttemptsTab({ events, isLoadingEvents }: Reg
                         <TableCell>
                             <div className="font-medium">{attempt.eventName}</div>
                             <div className="text-xs text-muted-foreground">{attempt.ticketName}</div>
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {paymentId ? (
+                            <div className="font-mono break-all">{paymentId}</div>
+                          ) : (
+                            <span className="text-muted-foreground">No payment ID</span>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Badge variant={statusVariantMap[statusKey] || 'secondary'}>{statusKey}</Badge>
@@ -226,6 +279,25 @@ export default function RegistrationAttemptsTab({ events, isLoadingEvents }: Reg
                            </Popover>
                          </TableCell>
                         <TableCell className="space-x-1 text-right">
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span>
+                                  <Button
+                                    size="xs"
+                                    variant={canFixRegistration ? 'default' : 'outline'}
+                                    onClick={() => handleFixRegistration(attempt)}
+                                    disabled={!canFixRegistration || isFixingAttemptId === attempt.id || isDeletingAttemptId === attempt.id || !!isSendingNotif}
+                                  >
+                                    {isFixingAttemptId === attempt.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <><RefreshCw className="h-3 w-3 mr-1" />Fix</>}
+                                  </Button>
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{manualRegistrationExists ? 'Already fixed manually / reconciled.' : canFixRegistration ? 'Create registration for this failed paid attempt' : 'Available only for failed attempts with captured payment.'}</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                             <TooltipProvider>
                                 <Tooltip>
                                     <TooltipTrigger asChild>

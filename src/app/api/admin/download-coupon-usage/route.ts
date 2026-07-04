@@ -3,12 +3,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getFirestoreInstance } from '@/lib/firebaseAdmin';
 import * as XLSX from 'xlsx';
-import type { EventParticipant, EventCalendarEntry } from '@/lib/types';
+import type { EventParticipant } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   const actionName = '[API /download-coupon-usage]';
+  
+  // Safety check for Firebase configuration
+  if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+    return NextResponse.json(
+      { success: false, message: 'Firebase not configured', status: 'unavailable' },
+      { status: 503 }
+    );
+  }
+  
   try {
     const { searchParams } = new URL(request.url);
     const couponCode = searchParams.get('couponCode');
@@ -18,21 +28,16 @@ export async function GET(request: NextRequest) {
     }
 
     const adminDb = getFirestoreInstance();
-    const allUsageData: EventParticipant[] = [];
+    const normalizedCouponCode = couponCode.trim().toUpperCase();
 
-    // Get all events first
-    const eventsSnapshot = await adminDb.collection('events').get();
+    // Read only matching participants instead of scanning every event/participant.
+    const couponUsageSnapshot = await adminDb
+      .collectionGroup('participants')
+      .where('couponCode', '==', normalizedCouponCode)
+      .select('name', 'email', 'eventName', 'ticketName', 'registeredAt', 'bookingId')
+      .get();
 
-    // Iterate through each event and fetch its participants, then filter in memory
-    for (const eventDoc of eventsSnapshot.docs) {
-      const participantsSnapshot = await eventDoc.ref.collection('participants').get();
-      participantsSnapshot.forEach(participantDoc => {
-        const pData = participantDoc.data() as EventParticipant;
-        if (pData.couponCode === couponCode) {
-          allUsageData.push(pData);
-        }
-      });
-    }
+    const allUsageData: EventParticipant[] = couponUsageSnapshot.docs.map((doc) => doc.data() as EventParticipant);
     
     const usageData = allUsageData.map(pData => {
         return {
@@ -45,7 +50,7 @@ export async function GET(request: NextRequest) {
         };
     });
 
-    const safeCouponCode = couponCode.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const safeCouponCode = normalizedCouponCode.replace(/[^a-z0-9]/gi, '_').toLowerCase();
     const filename = `coupon_usage_${safeCouponCode}.xlsx`;
 
     if (usageData.length === 0) {

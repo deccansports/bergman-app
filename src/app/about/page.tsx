@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import ClientSideContent from '@/components/shared/ClientSideContent';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export default async function AboutUsPage() {
   const pagesResult = await getPagesAction();

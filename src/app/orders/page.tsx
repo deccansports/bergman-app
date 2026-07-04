@@ -18,7 +18,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { 
     ShoppingBag, Ticket, Loader2, Package, Truck, Download, 
-    ArrowRight, History, Calendar, ExternalLink, RefreshCw, Search, X, Award, Info
+    ArrowRight, History, Calendar, ExternalLink, RefreshCw, Search, X, Award, Info, Star
 } from 'lucide-react';
 import { format, parseISO } from 'date-fns';
 import { Badge } from '@/components/ui/badge';
@@ -57,7 +57,7 @@ export default function OrdersDashboardPage() {
         try {
             const [storeRes, ticketsRes] = await Promise.all([
                 getUserStoreSummaryAction(currentUser.uid),
-                getAthleteRegisteredEventsAction(currentUser.uid)
+                getAthleteRegisteredEventsAction(currentUser.uid, currentUser.email || null, { upcomingOnly: false })
             ]);
 
             if (storeRes.success) {
@@ -71,7 +71,7 @@ export default function OrdersDashboardPage() {
         } finally {
             setLoading(false);
         }
-    }, [currentUser?.uid, toast]);
+    }, [currentUser?.uid, currentUser?.email, toast]);
 
     useEffect(() => {
         fetchData();
@@ -184,6 +184,11 @@ export default function OrdersDashboardPage() {
                                                     </div>
                                                     <div className="flex-grow space-y-1 pt-1 text-left">
                                                         <h4 className="font-black text-base uppercase tracking-tight leading-tight text-left">{item.name}</h4>
+                                                                                                                {item.isBestseller && (
+                                                                                                                    <Badge className="mt-1 bg-amber-500 hover:bg-amber-600 text-[9px] h-5 px-2 uppercase font-black tracking-widest border-none">
+                                                                                                                        <Star className="mr-1 h-3 w-3 fill-white" /> Bestseller
+                                                                                                                    </Badge>
+                                                                                                                )}
                                                         <div className="flex items-center gap-3 mt-2">
                                                             {item.size && <Badge variant="secondary" className="text-[10px] h-5 font-bold uppercase">{item.size}</Badge>}
                                                             <span className="text-xs text-muted-foreground font-bold">Qty: {item.quantity}</span>

@@ -3,14 +3,16 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
 import type { LiveAthlete, Status, Leg, Split } from '@/lib/types';
+import type { ResolvedTimingConfiguration } from '@/lib/timingConfiguration';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { X, Waves, ChevronsRight, Bike, Footprints, Flag, Clock, MapPin, User as UserIcon, Building, ShieldCheck, AlertTriangle, TrendingUp, LocateFixed, Route, Hourglass } from 'lucide-react';
-import { isDuathlonEvent, formatSecondsToHMS, hmsToSeconds, isValidImageUrl, getInitials } from '@/lib/utils';
+import { isDuathlonEvent, formatSecondsToHMS, hmsToSeconds, isValidImageUrl, getInitials, normalizeStatus } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import { cn } from "@/lib/utils";
+import { buildSplitModalModel } from './split-modal/utils';
 
 const LegIcon = ({ leg, className }: { leg: Leg | 'NOT_STARTED' | 'FINISHED'; className?: string }) => {
     const baseClass = "h-4 w-4";
@@ -35,8 +37,8 @@ const getStatusBadgeVariant = (status: Status) => {
   }
 }
 
-const findSplit = (splits: Split[], segment: string): Split | undefined => {
-  return splits.find(s => s.segment === segment);
+const findSplit = (splits: Split[] | null | undefined, segment: string): Split | undefined => {
+  return Array.isArray(splits) ? splits.find((s) => s.segment === segment) : undefined;
 };
 
 const getLegTime = (athlete: LiveAthlete, leg: Leg): number | undefined => {
@@ -45,16 +47,18 @@ const getLegTime = (athlete: LiveAthlete, leg: Leg): number | undefined => {
         return summaryTime;
     }
 
+  const splits = Array.isArray(athlete.splits) ? athlete.splits : [];
+
     if (athlete.startTime === null || athlete.startTime === undefined) {
-        const legSplit = findSplit(athlete.splits, leg);
+    const legSplit = findSplit(splits, leg);
         if (legSplit?.time && legSplit.time > 0) return legSplit.time;
-        const athleteAsRaceResult = { splits: athlete.splits, ...athlete.splits.reduce((acc, s) => ({...acc, [s.segment.toLowerCase()]: formatSecondsToHMS(s.time)}), {}) } as any; 
+    const athleteAsRaceResult = { splits, ...splits.reduce((acc, s) => ({ ...acc, [s.segment.toLowerCase()]: formatSecondsToHMS(s.time) }), {}) } as any;
         const timeStr = athleteAsRaceResult[leg.toLowerCase()];
         if (timeStr) return hmsToSeconds(timeStr);
         return undefined;
     }
     
-    const legSplit = findSplit(athlete.splits, leg);
+  const legSplit = findSplit(splits, leg);
     if (!legSplit?.time) return undefined;
 
     const prevLeg: Leg | undefined = leg === 'T1' ? (isDuathlonEvent(athlete.category) ? 'RUN1' : 'SWIM')
@@ -65,7 +69,7 @@ const getLegTime = (athlete: LiveAthlete, leg: Leg): number | undefined => {
         : undefined;
 
     if (prevLeg) {
-        const prevLegSplit = findSplit(athlete.splits, prevLeg);
+      const prevLegSplit = findSplit(splits, prevLeg);
         if (prevLegSplit?.time) {
             return legSplit.time - prevLegSplit.time;
         }
@@ -76,53 +80,28 @@ const getLegTime = (athlete: LiveAthlete, leg: Leg): number | undefined => {
 
 
 const RaceProgressBar: React.FC<{
-    athlete: LiveAthlete;
-    leg: Leg | 'NOT_STARTED';
-    progress: number; // 0 to 100
-    category: string;
-    splits: Split[];
-    startTime: number | null;
-}> = ({ athlete, leg, progress, category, splits, startTime }) => {
-    const isDua = useMemo(() => isDuathlonEvent(category), [category]);
-    
-    const segments = useMemo(() => isDua ? ['RUN1', 'T1', 'BIKE', 'T2', 'RUN2'] : ['SWIM', 'T1', 'BIKE', 'T2', 'RUN'], [isDua]);
-    const totalSegments = segments.length;
-    
-    const legMap: Record<Leg | 'NOT_STARTED', number> = {
-        'NOT_STARTED': 0, 'SWIM': 0, 'RUN1': 0, 
-        'T1': 1, 'BIKE': 2, 'T2': 3, 
-        'RUN': 4, 'RUN2': 4, 'FINISH': 5, 'FINISHED': 5,
-    };
-    
-    const currentSegmentIndex = legMap[leg] ?? 0;
-    const progressWithinSegment = (progress || 0) / 100;
-    const athletePosition = currentSegmentIndex + progressWithinSegment;
-    const totalProgressPercentage = athlete.status === 'Finished' ? 100 : Math.min(100, (athletePosition / totalSegments) * 100);
-
-    const legTimes = useMemo(() => {
-        return segments.reduce((acc, segmentName) => {
-            acc[segmentName as keyof typeof acc] = getLegTime(athlete, segmentName as Leg);
-            return acc;
-        }, {} as Record<string, number | undefined>);
-    }, [athlete, segments]);
+  athlete: LiveAthlete;
+  stages: Array<{ label: string; value: string; state: 'completed' | 'current' | 'future' | 'missed' }>;
+  totalProgressPercentage: number;
+}> = ({ athlete, stages, totalProgressPercentage }) => {
+  const segments = stages.length > 0 ? stages : [{ label: 'SWIM', value: '--:--', state: 'future' as const }];
 
     return (
         <div className="w-full pt-2">
              <div className="flex justify-between items-center mb-1">
-                {segments.map((segmentName, i) => {
-                    const isCompleted = athlete.status === 'Finished' || currentSegmentIndex > i;
-                    const isCurrent = currentSegmentIndex === i && athlete.status !== 'Finished';
-                    const timeForLeg = legTimes[segmentName as keyof typeof legTimes];
+        {segments.map((segment, i) => {
+          const isCompleted = athlete.status === 'Finished' || segment.state === 'completed';
+          const isCurrent = athlete.status !== 'Finished' && segment.state === 'current';
                     return (
                         <div key={i} className="z-10 flex flex-col items-center flex-1">
-                             <span className={`text-xs font-medium mb-1 ${isCurrent || isCompleted ? 'text-primary' : 'text-muted-foreground'}`}>{segmentName}</span>
+               <span className={`text-xs font-medium mb-1 ${isCurrent || isCompleted ? 'text-primary' : 'text-muted-foreground'}`}>{segment.label}</span>
                             <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 transition-colors duration-300 ${
                                 isCompleted ? 'bg-primary border-primary' : isCurrent ? 'bg-background border-primary scale-110' : 'bg-background border-border'
                             }`}>
-                                <LegIcon leg={segmentName as Leg} className={`h-4 w-4 transition-colors duration-300 ${isCompleted ? 'text-primary-foreground' : isCurrent ? 'text-primary' : 'text-muted-foreground'}`} />
+                <LegIcon leg={(segment.label as Leg) || 'NOT_STARTED'} className={`h-4 w-4 transition-colors duration-300 ${isCompleted ? 'text-primary-foreground' : isCurrent ? 'text-primary' : 'text-muted-foreground'}`} />
                             </div>
                             <p className="font-mono text-[10px] mt-1 text-muted-foreground">
-                                {timeForLeg !== undefined ? formatSecondsToHMS(timeForLeg) : '--:--'}
+                {segment.value || '--:--'}
                             </p>
                         </div>
                     );
@@ -196,28 +175,75 @@ const LiveDataTicker = ({ data, elapsedTime }: LiveDataTickerProps) => {
 
 interface BergmanTrackerCardProps {
   data: LiveAthlete, 
+  timingConfiguration?: ResolvedTimingConfiguration | null;
+  ticketDef?: any;
   onViewMap?: (athleteId: string) => void;
   onRemove: (id: string) => void, 
   onSelect: (athlete: LiveAthlete) => void
 }
 
-export default function BergmanTrackerCard({ data, onViewMap, onRemove, onSelect }: BergmanTrackerCardProps) {
+export default function BergmanTrackerCard({ data, timingConfiguration, ticketDef, onViewMap, onRemove, onSelect }: BergmanTrackerCardProps) {
   const [now, setNow] = useState(new Date());
 
+  const isOpaqueId = (value: unknown) => {
+    const text = String(value ?? '').trim();
+    return Boolean(text) && (/^[a-z0-9_-]{6,}$/i.test(text) || /^[A-Za-z0-9]{8,}$/.test(text));
+  };
+
+  const resolvedContestName = useMemo(() => {
+    const candidates = [data.contestName, data.category, (data as any)?.subCategoryName, (data as any)?.selectedSubCategory, (data as any)?.provider?.contestName, (data as any)?.providerContestName]
+      .map((value) => String(value || '').trim())
+      .filter((value) => value && !isOpaqueId(value));
+    return candidates[0] || 'Unmapped';
+  }, [data]);
+
+  const resolvedAgeGroupLabel = useMemo(() => {
+    const candidates = [
+      (data as any)?.ageGroupName,
+      data.ageGroup,
+      (data as any)?.provider?.ageGroupName,
+      (data as any)?.provider?.age_group_name,
+    ].map((value) => String(value || '').trim()).filter((value) => value && !isOpaqueId(value));
+    return candidates[0] || 'Not Assigned';
+  }, [data]);
+
+  const effectiveStatus = useMemo<Status>(() => {
+    const normalized = normalizeStatus(data.status || '');
+    const hasProgress = Number(data.courseProgress || 0) > 0 || Number(data.startTime || 0) > 0 || (Array.isArray(data.splits) && data.splits.length > 0);
+    if (normalized === 'Finished' || normalized === 'DNF' || normalized === 'DNS' || normalized === 'DNQ') {
+      return normalized as Status;
+    }
+    if (normalized === 'On Course' || hasProgress) return 'On Course';
+    if (normalized === 'Not Started' || normalized.toLowerCase() === 'registered' || normalized.toLowerCase() === 'registration') return 'Not Started';
+    return 'Not Started';
+  }, [data]);
+
+  const displayStatusLabel = useMemo(() => {
+    const raw = normalizeStatus(data.status || '').trim().toLowerCase();
+    if (effectiveStatus === 'On Course') return 'Started';
+    if (raw === 'regular' || raw === 'registered' || raw === 'registration') return 'Registered';
+    if (raw === 'dns') return 'Did Not Start';
+    if (raw === 'dnf') return 'Did Not Finish';
+    if (raw === 'deferred') return 'Deferred';
+    if (raw === 'transferred') return 'Transferred';
+    if (raw === 'cancelled' || raw === 'canceled') return 'Cancelled';
+    return effectiveStatus;
+  }, [effectiveStatus, data.status]);
+
   useEffect(() => {
-    if (data.status === 'On Course') {
+    if (effectiveStatus === 'On Course') {
         const timer = setInterval(() => setNow(new Date()), 1000);
         return () => clearInterval(timer);
     }
-  }, [data.status]);
+  }, [effectiveStatus]);
   
   const elapsedTime = useMemo(() => {
-    if (data.status === 'Finished') {
+    if (effectiveStatus === 'Finished') {
         const finishSeconds = data.summary?.FINISHED;
         if (typeof finishSeconds === 'number') return formatSecondsToHMS(finishSeconds);
     }
     
-    if (data.startTime && data.startTime > 0 && data.status === 'On Course') {
+    if (data.startTime && data.startTime > 0 && effectiveStatus === 'On Course') {
         const elapsed = (now.getTime() / 1000) - data.startTime;
         return formatSecondsToHMS(elapsed > 0 ? elapsed : 0);
     }
@@ -232,20 +258,82 @@ export default function BergmanTrackerCard({ data, onViewMap, onRemove, onSelect
     }
 
     return '00:00:00';
-  }, [data, now]);
+  }, [data, now, effectiveStatus]);
   
   const finishTime = useMemo(() => {
     const finishSeconds = data.summary?.FINISHED;
-    if (data.status === 'Finished' && typeof finishSeconds === 'number') {
+    if (effectiveStatus === 'Finished' && typeof finishSeconds === 'number') {
       return formatSecondsToHMS(finishSeconds);
     }
     return null;
-  }, [data]);
+  }, [data, effectiveStatus]);
 
   const validAvatarUrl = data && isValidImageUrl(data.avatarUrl) ? data.avatarUrl : undefined;
 
+  const progressModel = useMemo(() => {
+    try {
+      return buildSplitModalModel({
+        athlete: data,
+        timingConfiguration: timingConfiguration || null,
+        ticketDef: ticketDef || null,
+      } as any);
+    } catch {
+      return null;
+    }
+  }, [data, timingConfiguration, ticketDef]);
+
+  const ticketCategoryText = String(ticketDef?.ticketCategory || ticketDef?.name || ticketDef?.ticketName || '').toLowerCase();
+  const athleteCategoryText = String(data.category || data.contestName || data.ticketName || '').toLowerCase();
+  const isSwimOnlyContest = useMemo(() => {
+    const text = `${ticketCategoryText} ${athleteCategoryText}`;
+    return text.includes('swim') && !text.includes('triathlon') && !text.includes('duathlon') && !text.includes('aquathlon');
+  }, [athleteCategoryText, ticketCategoryText]);
+
+  const watchlistStages = useMemo(() => {
+    if (!progressModel) return [] as Array<{ label: string; value: string; state: 'completed' | 'current' | 'future' | 'missed' }>;
+    const stageMap = new Map<string, { label: string; value: string; state: 'completed' | 'current' | 'future' | 'missed' }>();
+    progressModel.sectionTimeline
+      .filter((row) => row.section.theme !== 'transition')
+      .forEach((row) => {
+        const theme = String(row.section.theme || row.section.label || '').toLowerCase();
+        const label = theme.includes('swim') ? 'SWIM' : theme.includes('bike') ? 'BIKE' : theme.includes('run') ? 'RUN' : theme.includes('finish') ? 'FINISH' : String(row.section.label || row.section.theme || '').toUpperCase();
+        if (isSwimOnlyContest && !['SWIM', 'FINISH'].includes(label)) return;
+        if (!label) return;
+        if (!stageMap.has(label)) {
+          stageMap.set(label, {
+            label,
+            value: row.section.primaryMetricValue || '--:--',
+            state: row.state,
+          });
+        }
+      });
+
+    const stages = Array.from(stageMap.values());
+    if (stages.length > 0) return stages;
+
+    const isDua = isDuathlonEvent(data.category);
+    const fallback = isSwimOnlyContest ? ['SWIM', 'FINISH'] : isDua ? ['RUN1', 'T1', 'BIKE', 'T2', 'RUN2'] : ['SWIM', 'T1', 'BIKE', 'T2', 'RUN'];
+    return fallback.map((label) => ({
+      label,
+      value: (() => {
+        const t = getLegTime(data, label as Leg);
+        return t !== undefined ? formatSecondsToHMS(t) : '--:--';
+      })(),
+      state: 'future' as const,
+    }));
+  }, [progressModel, data, isSwimOnlyContest]);
+
+  const totalProgressPercentage = useMemo(() => {
+    if (!progressModel) return Math.max(0, Math.min(100, Number(data.legProgressPct || 0)));
+    if (progressModel.isFinished) return 100;
+    const totalRows = progressModel.sections.reduce((sum, section) => sum + section.rows.length, 0);
+    const reachedRows = progressModel.sections.reduce((sum, section) => sum + section.rows.filter((row) => row.reached).length, 0);
+    if (totalRows <= 0) return Math.max(0, Math.min(100, Number(data.legProgressPct || 0)));
+    return Math.max(0, Math.min(100, (reachedRows / totalRows) * 100));
+  }, [progressModel, data.legProgressPct]);
+
   return (
-    <Card className="bg-gray-50 cursor-pointer hover:bg-gray-100" onClick={() => onSelect(data)}>
+    <Card className="bg-card text-foreground cursor-pointer hover:bg-muted/40 transition-colors" onClick={() => onSelect(data)}>
       <CardHeader className="p-3 flex flex-row items-start justify-between">
         <div className="flex items-center gap-2">
           <Avatar className="h-8 w-8">
@@ -255,9 +343,18 @@ export default function BergmanTrackerCard({ data, onViewMap, onRemove, onSelect
           <div>
             <p className="font-semibold text-sm">{data.name}</p>
             <div className="flex items-center gap-2">
-                <p className="text-xs text-gray-500">BIB: {data.bib}</p>
-                {data.clubName && <p className="text-xs text-gray-500 flex items-center gap-1"><Building className="h-3 w-3"/>{data.clubName}</p>}
+                <p className="text-xs text-muted-foreground">BIB: {data.bib}</p>
+              <p className="text-xs text-muted-foreground">Age Group: {resolvedAgeGroupLabel}</p>
             </div>
+            <div className="flex items-center gap-2">
+              {data.clubName && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-100">
+                  <Building className="h-3 w-3" />
+                  Proudly representing {data.clubName}
+                </span>
+              )}
+            </div>
+            <div className="text-xs text-muted-foreground">Contest: {resolvedContestName}</div>
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -272,39 +369,38 @@ export default function BergmanTrackerCard({ data, onViewMap, onRemove, onSelect
         </div>
       </CardHeader>
       <CardContent className="p-3 pt-0 text-xs space-y-3">
-        {data.status === 'Finished' ? (
-          <div className="text-center p-4 my-2 bg-green-100/50 border border-green-200 rounded-lg">
-            <p className="text-sm font-semibold text-green-700">Finished!</p>
-            <p className="text-4xl font-bold font-mono text-green-800 tracking-tighter">{finishTime}</p>
+        {effectiveStatus === 'Finished' ? (
+          <div className="text-center p-4 my-2 bg-green-100/50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+            <p className="text-sm font-semibold text-green-700 dark:text-green-300">Finished!</p>
+            <p className="text-4xl font-bold font-mono text-green-800 dark:text-green-200 tracking-tighter">{finishTime}</p>
           </div>
-        ) : data.status === 'On Course' ? (
-          <div className="text-center p-4 my-2 bg-blue-100/50 border border-blue-200 rounded-lg h-[90px] flex flex-col justify-center">
+        ) : effectiveStatus === 'On Course' ? (
+          <div className="text-center p-4 my-2 bg-blue-100/50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg h-[90px] flex flex-col justify-center">
              <LiveDataTicker data={data} elapsedTime={elapsedTime}/>
           </div>
         ) : (
           <div className="text-center p-4 my-2">
-            <Badge variant={getStatusBadgeVariant(data.status as Status)} className="text-xs">{data.status}</Badge>
+            <Badge variant={getStatusBadgeVariant(effectiveStatus)} className="text-xs">{displayStatusLabel}</Badge>
           </div>
         )}
         
         <RaceProgressBar 
           athlete={data} 
-          leg={data.leg as Leg | 'NOT_STARTED'} 
-          progress={data.legProgressPct || 0} 
-          category={data.category} 
-          splits={data.splits || []} 
-          startTime={data.startTime} 
+          stages={watchlistStages}
+          totalProgressPercentage={totalProgressPercentage}
         />
         
-        {data.status === 'On Course' && data.cutoffStatus && data.cutoffStatus !== 'N/A' && (
-            <div className={`p-2 rounded-md border text-center ${data.cutoffStatus === 'On Track' ? 'bg-green-50 border-green-100' : 'bg-orange-50 border-orange-100'}`}>
-                {data.cutoffStatus === 'On Track' ? (
-                    <p className="font-semibold text-sm text-green-700 flex items-center justify-center gap-1"><ShieldCheck className="h-4 w-4"/>On Track</p>
-                ) : (
-                     <p className="font-semibold text-sm text-orange-700 flex items-center justify-center gap-1"><AlertTriangle className="h-4 w-4"/>May Miss Cutoff</p>
-                )}
-                <p className="text-muted-foreground text-[10px]">Cutoff Status</p>
-            </div>
+        {effectiveStatus === 'On Course' && data.cutoffStatus && data.cutoffStatus !== 'N/A' && (
+          <div className={`p-2 rounded-md border text-center ${String(data.cutoffStatus) === 'Within Cutoff' || String(data.cutoffStatus) === 'On Track' ? 'bg-green-50 border-green-100' : String(data.cutoffStatus) === 'Missed Cutoff' ? 'bg-red-50 border-red-100' : 'bg-orange-50 border-orange-100'}`}>
+            {(String(data.cutoffStatus) === 'Within Cutoff' || String(data.cutoffStatus) === 'On Track') ? (
+              <p className="font-semibold text-sm text-green-700 flex items-center justify-center gap-1"><ShieldCheck className="h-4 w-4"/>Within Cutoff</p>
+            ) : String(data.cutoffStatus) === 'Missed Cutoff' ? (
+               <p className="font-semibold text-sm text-red-700 flex items-center justify-center gap-1"><AlertTriangle className="h-4 w-4"/>Missed Cutoff</p>
+            ) : (
+               <p className="font-semibold text-sm text-orange-700 flex items-center justify-center gap-1"><AlertTriangle className="h-4 w-4"/>Approaching Cutoff</p>
+            )}
+            <p className="text-muted-foreground text-[10px]">Cutoff Status</p>
+          </div>
         )}
       </CardContent>
     </Card>

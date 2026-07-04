@@ -1,5 +1,6 @@
 // src/lib/types/participant.ts
 import type { ReminderInfo, PricingBreakdown } from './common';
+import type { RelayConfiguration, RelayTeamParticipant } from './registration';
 import type { User } from './user';
 
 export interface ParticipantCSVRow {
@@ -85,6 +86,8 @@ export interface EventParticipant {
   agreedRules?: boolean;
   agreedWaiver?: boolean;
   agreedCutoff?: boolean;
+  agreedPolicyChangeFlow?: boolean;
+  liveTrackingPrivacy?: 'PUBLIC' | 'PRIVATE' | null;
   previousTimingCertificateUrl?: string | null;
   digitalSignatureName?: string | null;
   personalRaceEmail?: string | null;
@@ -110,6 +113,15 @@ export interface EventParticipant {
   ageCategory?: string | null;
   paymentId?: string;
   paymentMethod?: string | null;
+  isRelay?: boolean;
+  relayTeamId?: string | null;
+  relayTeamName?: string | null;
+  relayTeamBib?: string | null;
+  relayRole?: string | null;
+  relayBib?: string | null;
+  relayParticipants?: RelayTeamParticipant[] | null;
+  relayParticipantCount?: number | null;
+  relayConfiguration?: RelayConfiguration | null;
   balanceAmount?: number | null;
   couponCode?: string | null;
   couponDiscountPaisa?: number | null;
@@ -156,6 +168,7 @@ export interface AthleteRegisteredEventDetail {
   participantId: string;
   eventId: string;
   bookingId?: string | null;
+  invoiceId?: string | null;
   invoiceNumber?: string | null;
   athleteName?: string | null;
   athleteBibNumber?: string | null;
@@ -169,6 +182,8 @@ export interface AthleteRegisteredEventDetail {
   couponDiscountPaisa?: number | null; 
   ticketStatus?: 'Active' | 'Inactive' | 'Refunded' | 'Deferred' | 'Cancelled' | 'Confirmed' | 'Pending' | null;
   amountPaidPaisa?: number | null;
+  paymentId?: string | null;
+  paymentMethod?: string | null;
   originalAmountPaidAtFirstRegistrationPaisa?: number | null;
   taxAmountPaidPaisa?: number | null;
   processingFeePaidPaisa?: number | null;
@@ -187,4 +202,10 @@ export interface AthleteRegisteredEventDetail {
   ticketDefinitions?: any[];
   previousDeferralDetails?: any;
   customSlug?: string | null;
+  /** Numeric event ID used by Split Second Pix race photography partner */
+  splitSecondPixEventId?: string | null;
+  splitSecondPixEventName?: string | null;
+  splitSecondPixEventSlug?: string | null;
+  splitSecondPixSearchByBib?: boolean | null;
+  splitSecondPixSearchByFace?: boolean | null;
 }

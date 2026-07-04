@@ -20,6 +20,7 @@ import type { User, UserProfileUpdateData, RaceResult, Club, AdminAthleteAnalyti
 import { hmsToSeconds, normalizeStatus } from '../utils';
 import { _internal_fetchAllRaceDataFromFirestore } from './publicResultActions';
 import { _mirrorParticipantToKV, _syncUserToKV } from './dataSyncActions';
+import { getCachedServerValue } from '@/lib/serverCache';
 
 
 export async function testTimingPartnerApiAction(
@@ -215,7 +216,7 @@ export async function mergeAthletesAction(primaryUid: string, duplicateUid: stri
 export async function searchAthletesForAdminAction(
   searchTerm: string,
   searchBy: 'name' | 'email' | 'mobile' | 'bibNumber'
-): Promise<{ success: boolean; message: string; athletes?: Array<User & { races?: RaceResult[]; upcomingEvents?: { eventId: string; eventName: string; bookingId?: string; registeredDate?: string }[] }> }> {
+): Promise<{ success: boolean; message: string; athletes?: Array<User & { races?: RaceResult[]; upcomingEvents?: { eventId: string; eventName: string; eventDate?: string; bookingId?: string; registeredDate?: string; bibNumber?: string; ticketCategory?: string; raceCategory?: string }[] }> }> {
     const actionName = 'searchAthletesForAdminAction';
     if (!searchTerm || typeof searchTerm !== 'string') {
         return { success: false, message: "A valid search term is required." };
@@ -223,7 +224,8 @@ export async function searchAthletesForAdminAction(
     try {
         const adminDb = getFirestoreInstance();
         const adminAuth = getAuthInstance();
-        const lowerSearchTerm = searchTerm.toLowerCase();
+        const normalizedSearchTerm = searchTerm.trim();
+        const lowerSearchTerm = normalizedSearchTerm.toLowerCase();
 
         let userDocs: QueryDocumentSnapshot<DocumentData>[] = [];
         const userDocsMap = new Map<string, QueryDocumentSnapshot<DocumentData>>();
@@ -246,18 +248,44 @@ export async function searchAthletesForAdminAction(
                 }
             }
         } else { // Handle name, email, mobile
-            let userQuery;
             if (searchBy === 'name') {
-                userQuery = adminDb.collection('users')
+                const usersSnapshot = await adminDb.collection('users')
                     .where('nameLower', '>=', lowerSearchTerm)
-                    .where('nameLower', '<=', lowerSearchTerm + '\uf8ff');
-            } else { // email or mobile
-                userQuery = adminDb.collection('users').where(searchBy, '==', searchTerm);
+                    .where('nameLower', '<=', lowerSearchTerm + '\uf8ff')
+                    .limit(20)
+                    .get();
+                usersSnapshot.forEach(doc => {
+                    if (!userDocsMap.has(doc.id)) userDocsMap.set(doc.id, doc);
+                });
+            } else if (searchBy === 'email') {
+                const [byEmailLower, byEmail] = await Promise.all([
+                    adminDb.collection('users').where('emailLower', '==', lowerSearchTerm).limit(20).get(),
+                    adminDb.collection('users').where('email', '==', lowerSearchTerm).limit(20).get(),
+                ]);
+                [byEmailLower, byEmail].forEach((snap) => {
+                    snap.forEach((doc) => {
+                        if (!userDocsMap.has(doc.id)) userDocsMap.set(doc.id, doc);
+                    });
+                });
+            } else {
+                // mobile search: normalize and try multiple likely formats
+                const mobileDigits = normalizedSearchTerm.replace(/\D/g, '');
+                const mobileLast10 = mobileDigits.length >= 10 ? mobileDigits.slice(-10) : mobileDigits;
+                const mobileCandidates = Array.from(new Set([
+                    normalizedSearchTerm,
+                    mobileDigits,
+                    mobileLast10,
+                    mobileDigits ? `+${mobileDigits}` : '',
+                    mobileLast10 ? `+91${mobileLast10}` : '',
+                ].filter(Boolean)));
+
+                for (const candidate of mobileCandidates) {
+                    const snap = await adminDb.collection('users').where('mobile', '==', candidate).limit(20).get();
+                    snap.forEach((doc) => {
+                        if (!userDocsMap.has(doc.id)) userDocsMap.set(doc.id, doc);
+                    });
+                }
             }
-            const usersSnapshot = await userQuery.limit(20).get();
-            usersSnapshot.forEach(doc => {
-                if (!userDocsMap.has(doc.id)) userDocsMap.set(doc.id, doc);
-            });
         }
         
         userDocs = Array.from(userDocsMap.values());
@@ -266,50 +294,144 @@ export async function searchAthletesForAdminAction(
             return { success: true, message: "No users found.", athletes: [] };
         }
         
-        const allEventsSnap = await adminDb.collection('events').get();
-        const upcomingEventDetails = new Map<string, { eventName: string }>();
+        const allEventsSnap = await getCachedServerValue('admin:all-events', 60_000, async () => adminDb.collection('events').get());
+        const upcomingEventDetails = new Map<string, { eventName: string; eventDate?: string; ticketDefinitions?: any[] }>();
         const today = startOfDay(new Date());
 
         allEventsSnap.forEach(doc => {
             const event = doc.data();
             const eventDate = event.eventDate ? parseISO(event.eventDate) : null;
             if (eventDate && isAfter(eventDate, today)) {
-                upcomingEventDetails.set(doc.id, { eventName: event.eventName });
+                upcomingEventDetails.set(doc.id, {
+                    eventName: event.eventName,
+                    eventDate: event.eventDate,
+                    ticketDefinitions: Array.isArray(event.ticketDefinitions) ? event.ticketDefinitions : [],
+                });
             }
         });
         
         const athletesWithRacesPromises = userDocs.map(async (userDoc) => {
             const user = { ...userDoc.data(), uid: userDoc.id } as User;
+
+            // Normalize affiliation for legacy users migrated to clubHistory
+            if ((!user.clubId || !user.clubName) && Array.isArray(user.clubHistory) && user.clubHistory.length > 0) {
+                const activeClub =
+                    user.clubHistory.find((entry) => entry?.isActive) ||
+                    user.clubHistory.find((entry) => !entry?.leftAt) ||
+                    null;
+                if (activeClub) {
+                    user.clubId = user.clubId || activeClub.clubId;
+                    user.clubName = user.clubName || activeClub.clubName;
+                }
+            }
+
+            const storedVerified = !!user.emailVerified;
             try {
                 const authUser: UserRecord = await adminAuth.getUser(user.uid);
                 user.emailVerified = authUser.emailVerified;
             } catch (authError) {
-                user.emailVerified = false;
+                // Fallback for legacy/manual users where UID doesn't exist in Auth
+                if (user.email) {
+                    try {
+                        const authUserByEmail: UserRecord = await adminAuth.getUserByEmail(user.email);
+                        user.emailVerified = authUserByEmail.emailVerified;
+                    } catch {
+                        user.emailVerified = storedVerified;
+                    }
+                } else {
+                    user.emailVerified = storedVerified;
+                }
             }
-            const raceResultsSnap = await adminDb.collection('raceResults').where('email', '==', user.email?.toLowerCase()).orderBy('raceDate', 'desc').get();
-            const races = raceResultsSnap.docs.map((doc: QueryDocumentSnapshot<DocumentData>) => serializeValue({ docId: doc.id, ...doc.data() }) as RaceResult);
+            const races: RaceResult[] = [];
+            const normalizedEmail = String(user.email || '').toLowerCase().trim();
+
+            if (normalizedEmail) {
+                const raceResultsSnap = await adminDb
+                    .collection('raceResults')
+                    .where('email', '==', normalizedEmail)
+                    .orderBy('raceDate', 'desc')
+                    .get();
+                races.push(...raceResultsSnap.docs.map((doc: QueryDocumentSnapshot<DocumentData>) => serializeValue({ docId: doc.id, ...doc.data() }) as RaceResult));
+            } else if (user.uid) {
+                // Fallback for legacy users without email on profile
+                const raceResultsByUidSnap = await adminDb
+                    .collection('raceResults')
+                    .where('athleteUid', '==', user.uid)
+                    .orderBy('raceDate', 'desc')
+                    .get();
+                races.push(...raceResultsByUidSnap.docs.map((doc: QueryDocumentSnapshot<DocumentData>) => serializeValue({ docId: doc.id, ...doc.data() }) as RaceResult));
+            }
             
-            const upcomingEvents: { eventId: string; eventName: string; bookingId?: string; registeredDate?: string }[] = [];
+            const upcomingEvents: { eventId: string; eventName: string; eventDate?: string; bookingId?: string; registeredDate?: string; bibNumber?: string; ticketCategory?: string; raceCategory?: string }[] = [];
             
+            const participantDocMap = new Map<string, QueryDocumentSnapshot<DocumentData>>();
+
+            if (user.uid) {
+                const participantByUidSnap = await adminDb.collectionGroup('participants')
+                    .where('athleteUid', '==', user.uid)
+                    .where('ticketStatus', 'in', ['Active', 'Confirmed'])
+                    .get();
+                participantByUidSnap.forEach((doc) => participantDocMap.set(doc.ref.path, doc));
+            }
+
             if (user.email) {
-                const participantRecordsSnap = await adminDb.collectionGroup('participants')
+                const participantByEmailSnap = await adminDb.collectionGroup('participants')
                     .where('email', '==', user.email.toLowerCase())
                     .where('ticketStatus', 'in', ['Active', 'Confirmed'])
                     .get();
+                participantByEmailSnap.forEach((doc) => participantDocMap.set(doc.ref.path, doc));
+            }
 
-                if (!participantRecordsSnap.empty) {
-                    participantRecordsSnap.forEach(doc => {
-                        const eventId = doc.ref.parent.parent?.id; 
-                        const participantData = doc.data();
-                        if (eventId && upcomingEventDetails.has(eventId)) {
-                            upcomingEvents.push({
-                                eventId: eventId,
-                                eventName: upcomingEventDetails.get(eventId)!.eventName,
-                                bookingId: participantData.bookingId || undefined,
-                                registeredDate: participantData.registeredAt || undefined,
-                            });
-                        }
-                    });
+            if (participantDocMap.size > 0) {
+                let derivedClubId: string | null = user.clubId ? String(user.clubId) : null;
+                let derivedClubName: string | null = user.clubName ? String(user.clubName) : null;
+
+                participantDocMap.forEach((doc) => {
+                    const eventId = doc.ref.parent.parent?.id;
+                    const participantData = doc.data();
+
+                    if (!derivedClubId && participantData?.clubId) {
+                        derivedClubId = String(participantData.clubId);
+                    }
+                    if (!derivedClubName && participantData?.clubName) {
+                        derivedClubName = String(participantData.clubName);
+                    }
+
+                    if (eventId && upcomingEventDetails.has(eventId)) {
+                        const eventDetail = upcomingEventDetails.get(eventId)!;
+                        const ticketId = String(participantData.ticketId || '').trim();
+                        const ticketDef = ticketId
+                            ? (eventDetail.ticketDefinitions || []).find((td: any) => String(td?.id || '').trim() === ticketId)
+                            : null;
+                        const ticketCategory =
+                            participantData.ticketName ||
+                            participantData.ticketCategory ||
+                            ticketDef?.ticketName ||
+                            undefined;
+                        const raceCategory =
+                            participantData.ageCategory ||
+                            participantData.selectedSubCategory ||
+                            participantData.raceCategory ||
+                            undefined;
+
+                        upcomingEvents.push({
+                            eventId: eventId,
+                            eventName: eventDetail.eventName,
+                            eventDate: eventDetail.eventDate || undefined,
+                            bookingId: participantData.bookingId || undefined,
+                            registeredDate: participantData.registeredAt || undefined,
+                            bibNumber: participantData.bibNumber || undefined,
+                            ticketCategory,
+                            raceCategory,
+                        });
+                    }
+                });
+
+                if (!user.clubId && derivedClubId) {
+                    user.clubId = derivedClubId;
+                }
+                if (!user.clubName && derivedClubName) {
+                    user.clubName = derivedClubName;
                 }
             }
             
@@ -440,6 +562,79 @@ export async function removeDuplicateUsersAction(): Promise<{ success: boolean; 
     }
 }
 
+export async function syncLoggedInUsersEmailVerificationAction(): Promise<{
+    success: boolean;
+    message: string;
+    scanned?: number;
+    matchedAuth?: number;
+    updated?: number;
+}> {
+    const actionName = 'syncLoggedInUsersEmailVerificationAction';
+    try {
+        const adminDb = getFirestoreInstance();
+        const adminAuth = getAuthInstance();
+
+        let scanned = 0;
+        let matchedAuth = 0;
+        let updated = 0;
+
+        let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+        const pageSize = 500;
+
+        while (true) {
+            let query = adminDb.collection('users').orderBy(FieldPath.documentId()).limit(pageSize);
+            if (lastDoc) query = query.startAfter(lastDoc);
+
+            const page = await query.get();
+            if (page.empty) break;
+
+            for (const doc of page.docs) {
+                scanned++;
+                const data = doc.data() as User;
+                const email = String(data?.email || '').trim().toLowerCase();
+                if (!email) continue;
+
+                try {
+                    const authUser = await adminAuth.getUserByEmail(email);
+                    matchedAuth++;
+
+                    const patch: Record<string, any> = {};
+                    if (data.email !== email) patch.email = email;
+                    if ((data.emailVerified ?? null) !== authUser.emailVerified) {
+                        patch.emailVerified = authUser.emailVerified;
+                    }
+
+                    if (Object.keys(patch).length > 0) {
+                        patch.updatedAt = FieldValue.serverTimestamp();
+                        await doc.ref.set(patch, { merge: true });
+                        updated++;
+                    }
+                } catch {
+                    // No Firebase Auth user for this email yet → skip.
+                }
+            }
+
+            lastDoc = page.docs[page.docs.length - 1] || null;
+            if (page.size < pageSize) break;
+        }
+
+        revalidatePath('/admin/dashboard');
+        return {
+            success: true,
+            message: `Sync complete. Scanned ${scanned}, matched ${matchedAuth}, updated ${updated}.`,
+            scanned,
+            matchedAuth,
+            updated,
+        };
+    } catch (error: any) {
+        console.error(`[${actionName}] Error:`, error);
+        return {
+            success: false,
+            message: error?.message || 'Failed to sync verified emails.',
+        };
+    }
+}
+
 export async function exportAllUsersAction(): Promise<{ success: boolean; message: string; fileContent?: string }> {
   try {
     const adminDb = getFirestoreInstance();
@@ -460,6 +655,7 @@ export async function exportAllUsersAction(): Promise<{ success: boolean; messag
             'Country': u.country || '',
             'Affiliated Club': u.clubName || '',
             'Is Admin': u.isAdmin ? 'Yes' : 'No',
+            'Admin Access Mode': u.isAdmin ? (u.adminAccessMode || 'edit') : 'none',
             'Is Volunteer': u.isVolunteer ? 'Yes' : 'No',
             'Created At': toIsoStringSafe(u.createdAt) || '',
         };
@@ -472,4 +668,80 @@ export async function exportAllUsersAction(): Promise<{ success: boolean; messag
   } catch (e: any) {
     return { success: false, message: e.message };
   }
+}
+
+export async function setAdminAccessModeAction(
+    actorUid: string,
+    targetUid: string,
+    mode: 'none' | 'view' | 'edit'
+): Promise<{ success: boolean; message: string }> {
+    const actionName = 'setAdminAccessModeAction';
+
+    try {
+        const db = getFirestoreInstance();
+        const normalizedActorUid = String(actorUid || '').trim();
+        const normalizedTargetUid = String(targetUid || '').trim();
+
+        if (!normalizedActorUid || !normalizedTargetUid) {
+            return { success: false, message: 'Actor and target user are required.' };
+        }
+
+        if (!['none', 'view', 'edit'].includes(mode)) {
+            return { success: false, message: 'Invalid access mode.' };
+        }
+
+        const [actorSnap, targetSnap] = await Promise.all([
+            getCachedServerValue(`user-doc:${normalizedActorUid}`, 60_000, async () => db.collection('users').doc(normalizedActorUid).get()),
+            getCachedServerValue(`user-doc:${normalizedTargetUid}`, 60_000, async () => db.collection('users').doc(normalizedTargetUid).get()),
+        ]);
+
+        if (!actorSnap.exists) {
+            return { success: false, message: 'Actor profile not found.' };
+        }
+
+        if (!targetSnap.exists) {
+            return { success: false, message: 'Target profile not found.' };
+        }
+
+        const actor = actorSnap.data() as User;
+        const actorMode = String((actor as any)?.adminAccessMode || 'edit').toLowerCase();
+
+        if (!actor?.isAdmin) {
+            return { success: false, message: 'Only admins can update admin access.' };
+        }
+
+        if (actorMode === 'view') {
+            return { success: false, message: 'View-only admin cannot change admin access.' };
+        }
+
+        if (normalizedActorUid === normalizedTargetUid && mode === 'none') {
+            return { success: false, message: 'You cannot revoke your own admin access.' };
+        }
+
+        const target = targetSnap.data() as User;
+        const patch: Record<string, any> = {
+            updatedAt: FieldValue.serverTimestamp(),
+        };
+
+        if (mode === 'none') {
+            patch.isAdmin = false;
+            patch.adminAccessMode = null;
+            if (target?.role === 'admin') {
+                patch.role = 'athlete';
+            }
+        } else {
+            patch.isAdmin = true;
+            patch.role = 'admin';
+            patch.adminAccessMode = mode;
+        }
+
+        await db.collection('users').doc(normalizedTargetUid).set(patch, { merge: true });
+        await _syncUserToKV(normalizedTargetUid);
+
+        revalidatePath('/admin/dashboard');
+        return { success: true, message: `Admin access updated to ${mode}.` };
+    } catch (e: any) {
+        console.error(`[${actionName}] Error:`, e);
+        return { success: false, message: e?.message || 'Failed to update admin access.' };
+    }
 }

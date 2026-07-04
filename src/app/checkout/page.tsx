@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label';
 import { 
     Loader2, ShoppingBag, ShieldCheck, ArrowLeft, 
     CreditCard, MapPin, Truck, CheckCircle2, Ticket,
-    User, Smartphone, Mail, Building, Trash2
+  User, Smartphone, Mail, Building, Trash2, Star
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -232,6 +232,11 @@ export default function CheckoutPage() {
                             <div key={idx} className="flex justify-between items-center text-left">
                                 <div className="text-left">
                                     <p className="font-bold text-sm leading-tight text-white uppercase tracking-tight">{item.name}</p>
+                                    {item.isBestseller && (
+                                      <Badge className="mt-1 bg-amber-500 hover:bg-amber-600 text-[9px] h-5 px-2 uppercase font-black tracking-widest border-none">
+                                        <Star className="mr-1 h-3 w-3 fill-white" /> Bestseller
+                                      </Badge>
+                                    )}
                                     <p className="text-[10px] text-slate-500 font-bold uppercase">Qty: {item.quantity} • Size: {item.size}</p>
                                 </div>
                                 <span className="font-black text-slate-300 ml-4">₹{item.salePrice * item.quantity}</span>

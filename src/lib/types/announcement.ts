@@ -10,6 +10,7 @@ export interface Announcement {
   targetEventId?: string | null;
   priority: AnnouncementPriority;
   isTicker: boolean;
+  tickerSpeedSeconds?: number | null;
   isModal: boolean;
   linkUrl?: string | null;
   startDate: string; // ISO
@@ -26,6 +27,7 @@ export interface AnnouncementFormInput {
   type: AnnouncementType;
   priority: AnnouncementPriority;
   isTicker: boolean;
+  tickerSpeedSeconds?: number | null;
   isModal: boolean;
   linkUrl?: string | null;
   startDate: string;

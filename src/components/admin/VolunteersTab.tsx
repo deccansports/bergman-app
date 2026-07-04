@@ -5,6 +5,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/AuthContext';
 import {
   Users, UserPlus, Loader2, Edit, Trash2, Search as SearchIcon, ClipboardList, Bike, Medal, UtensilsCrossed, IndianRupee, Package, UserCheck, Clock, Award, Repeat, Waves, Footprints
 } from 'lucide-react';
@@ -14,6 +15,7 @@ import {
   createAndAssignVolunteerAction,
   assignVolunteerToEventAction,
   removeVolunteerAssignmentAction,
+  toggleVolunteerActiveStatusAction,
 } from '@/lib/actions';
 import { getCalendarEventsAction } from '@/lib/actions/eventActions';
 import { 
@@ -41,6 +43,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
 import { format as formatDateFns, parseISO, isValid as isDateValid } from 'date-fns';
 import { Label } from '@/components/ui/label';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
@@ -97,6 +101,8 @@ function ManageAssignmentsTab({
   fetchVolunteersAndStats: () => void;
 }) {
   const { toast } = useToast();
+  const { currentUser } = useAuth();
+  const isViewOnlyAdmin = !!(currentUser?.isAdmin && currentUser?.adminAccessMode === 'view');
   const [isCreateVolunteerModalOpen, setIsCreateVolunteerModalOpen] = useState(false);
   const [searchedVolunteerUsers, setSearchedVolunteerUsers] = useState<User[]>([]);
   const [volunteerSearchTerm, setVolunteerSearchTerm] = useState('');
@@ -104,6 +110,7 @@ function ManageAssignmentsTab({
   const [selectedUserForVolunteerAssignment, setSelectedUserForVolunteerAssignment] = useState<User | null>(null);
   const [isAssigningVolunteer, setIsAssigningVolunteer] = useState(false);
   const [isCreatingVolunteer, setIsCreatingVolunteer] = useState(false);
+  const [isUpdatingVolunteerStatus, setIsUpdatingVolunteerStatus] = useState<string | null>(null);
 
   const volunteerAssignmentForm = useForm<VolunteerAssignmentFormInput>({ resolver: zodResolver(VolunteerAssignmentSchema), defaultValues: { userId: '', isVolunteer: false, assignedEventId: null, assignedCounter: [] } });
   
@@ -167,6 +174,20 @@ function ManageAssignmentsTab({
     setIsCreatingVolunteer(false); setIsCreateVolunteerModalOpen(false);
   }, [toast, fetchVolunteersAndStats]);
 
+  const handleToggleVolunteerStatus = useCallback(async (userId: string, isActive: boolean) => {
+    if (isViewOnlyAdmin) return;
+    setIsUpdatingVolunteerStatus(userId);
+    const result = await toggleVolunteerActiveStatusAction(userId, isActive);
+    if (result.success) {
+      toast({ title: 'Volunteer updated', description: result.message });
+      fetchVolunteersAndStats();
+      setSelectedUserForVolunteerAssignment(prev => prev?.uid === userId ? { ...prev, volunteerActive: isActive } : prev);
+    } else {
+      toast({ variant: 'destructive', title: 'Update failed', description: result.message });
+    }
+    setIsUpdatingVolunteerStatus(null);
+  }, [fetchVolunteersAndStats, isViewOnlyAdmin, toast]);
+
   const filteredVolunteers = useMemo(() => {
     if (!volunteerSearchTerm) return allVolunteers;
     const lowerTerm = volunteerSearchTerm.toLowerCase();
@@ -185,7 +206,7 @@ function ManageAssignmentsTab({
                   <CardTitle className="flex items-center gap-2"><UserPlus className="h-5 w-5 text-primary"/>Manage Volunteer Assignments</CardTitle>
                   <CardDescription>Assign existing users as volunteers or create new volunteer accounts.</CardDescription>
               </div>
-              <Button size="sm" onClick={()=>setIsCreateVolunteerModalOpen(true)}><UserPlus className="mr-2 h-4 w-4"/>Create New Volunteer</Button>
+              <Button size="sm" onClick={()=>setIsCreateVolunteerModalOpen(true)} disabled={isViewOnlyAdmin}><UserPlus className="mr-2 h-4 w-4"/>Create New Volunteer</Button>
           </CardHeader>
           <CardContent className="space-y-6">
                <div className="p-4 border rounded-lg bg-background">
@@ -216,19 +237,19 @@ function ManageAssignmentsTab({
                                 </FormItem>))}</div><FormMessage />
                             </FormItem>
                         )} />
-                        <div className="flex justify-end gap-2"><Button type="button" variant="destructive" size="sm" onClick={()=>handleRemoveVolunteerAssignment(selectedUserForVolunteerAssignment.uid)} disabled={isAssigningVolunteer}>Remove Volunteer Role</Button><Button type="submit" size="sm" disabled={isAssigningVolunteer}>{isAssigningVolunteer&&<Loader2 className="animate-spin h-4 w-4 mr-2"/>}Save Assignment</Button></div>
+                        <div className="flex justify-end gap-2"><Button type="button" variant="destructive" size="sm" onClick={()=>handleRemoveVolunteerAssignment(selectedUserForVolunteerAssignment.uid)} disabled={isAssigningVolunteer || isViewOnlyAdmin}>Remove Volunteer Role</Button><Button type="submit" size="sm" disabled={isAssigningVolunteer || isViewOnlyAdmin}>{isAssigningVolunteer&&<Loader2 className="animate-spin h-4 w-4 mr-2"/>}Save Assignment</Button></div>
                     </form>
                 </Form>
               )}
                <div className="mt-4 border-t pt-4 text-left">
                  <h4 className="font-semibold mb-2 text-left">All Volunteers</h4>
                  <Input placeholder="Search volunteers..." value={volunteerSearchTerm} onChange={(e) => setVolunteerSearchTerm(e.target.value)} className="mb-2" />
-                 {isLoadingAllVolunteers ? <p>Loading all volunteers...</p> : filteredVolunteers.length > 0 ? (<div className="max-h-80 overflow-y-auto rounded-md border"><Table><TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Email</TableHead><TableHead>Mobile</TableHead><TableHead>Assigned Event</TableHead><TableHead>Roles</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
-                   <TableBody>{filteredVolunteers.map(v=>(<TableRow key={v.uid} className="text-xs text-left"><TableCell>{v.name}</TableCell><TableCell>{v.email}</TableCell><TableCell>{v.mobile || 'N/A'}</TableCell><TableCell>{v.assignedEventName||'N/A'}</TableCell><TableCell>{(Array.isArray(v.assignedCounter)?v.assignedCounter:v.assignedCounter?[v.assignedCounter]:[]).join(', ')||'N/A'}</TableCell>
+                 {isLoadingAllVolunteers ? <p>Loading all volunteers...</p> : filteredVolunteers.length > 0 ? (<div className="max-h-80 overflow-y-auto rounded-md border"><Table><TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Email</TableHead><TableHead>Mobile</TableHead><TableHead>Assigned Event</TableHead><TableHead>Roles</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+                   <TableBody>{filteredVolunteers.map(v=>(<TableRow key={v.uid} className="text-xs text-left"><TableCell>{v.name}</TableCell><TableCell>{v.email}</TableCell><TableCell>{v.mobile || 'N/A'}</TableCell><TableCell>{v.assignedEventName||'N/A'}</TableCell><TableCell>{(Array.isArray(v.assignedCounter)?v.assignedCounter:v.assignedCounter?[v.assignedCounter]:[]).join(', ')||'N/A'}</TableCell><TableCell><div className="flex min-w-[120px] flex-col gap-2"><Badge variant={v.volunteerActive === false ? 'secondary' : 'default'} className={v.volunteerActive === false ? 'bg-slate-200 text-slate-700' : 'bg-green-600'}>{v.volunteerActive === false ? 'Inactive' : 'Active'}</Badge><div className="flex items-center gap-2"><Switch checked={v.volunteerActive !== false} onCheckedChange={(checked) => handleToggleVolunteerStatus(v.uid, checked)} disabled={isViewOnlyAdmin || isUpdatingVolunteerStatus === v.uid} aria-label={`Toggle ${v.name || 'volunteer'} active status`} /><span className="text-[11px] text-muted-foreground">{isUpdatingVolunteerStatus === v.uid ? 'Updating...' : (v.volunteerActive === false ? 'Inactive' : 'Active')}</span></div></div></TableCell>
                      <TableCell className="text-right space-x-1">
-                        <Button variant="ghost" size="xs" onClick={() => setSelectedUserForVolunteerAssignment(v)} disabled={isAssigningVolunteer}><Edit className="h-3.5 w-3.5"/></Button>
-                        <AlertDialog><AlertDialogTrigger asChild><Button variant="ghost" size="xs" className="text-destructive hover:text-destructive"><Trash2 className="h-3.5 w-3.5"/></Button></AlertDialogTrigger>
-                          <AlertDialogContent className="text-left"><AlertDialogHeader className="text-left"><AlertDialogTitle className="text-left">Remove {v.name} as Volunteer?</AlertDialogTitle><AlertDialogDescription className="text-left">This will remove their volunteer status and all event assignments. They will still be a regular user.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter className="text-left"><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction className="bg-destructive hover:bg-destructive/90" onClick={() => handleRemoveVolunteerAssignment(v.uid)}>Remove Volunteer</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
+                        <Button variant="ghost" size="xs" onClick={() => setSelectedUserForVolunteerAssignment(v)} disabled={isAssigningVolunteer || isViewOnlyAdmin}><Edit className="h-3.5 w-3.5"/></Button>
+                        <AlertDialog><AlertDialogTrigger asChild><Button variant="ghost" size="xs" className="text-destructive hover:text-destructive" disabled={isViewOnlyAdmin}><Trash2 className="h-3.5 w-3.5"/></Button></AlertDialogTrigger>
+                          <AlertDialogContent className="text-left"><AlertDialogHeader className="text-left"><AlertDialogTitle className="text-left">Remove {v.name} as Volunteer?</AlertDialogTitle><AlertDialogDescription className="text-left">This will remove their volunteer status and all event assignments. They will still be a regular user.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter className="text-left"><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction className="bg-destructive hover:bg-destructive/90" onClick={() => handleRemoveVolunteerAssignment(v.uid)} disabled={isViewOnlyAdmin}>Remove Volunteer</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
                         </AlertDialog>
                      </TableCell>
                    </TableRow>))}</TableBody>
@@ -292,7 +313,41 @@ export default function VolunteersTab() {
     setIsLoadingEvents(true);
     try {
       const result = await getCalendarEventsAction();
-      if (result.success && result.events) { setCalendarEvents(result.events); }
+      if (result.success && result.events) {
+        const today = new Date(new Date().setHours(0, 0, 0, 0));
+
+        const parseEventDate = (event: EventCalendarEntry): Date | null => {
+          const rawDate = event?.disciplineSchedule?.[0]?.date || event?.eventDate;
+          if (!rawDate || rawDate === 'TBD') return null;
+          const parsed = parseISO(rawDate);
+          return isDateValid(parsed) ? parsed : null;
+        };
+
+        const sortedEvents = [...result.events].sort((a, b) => {
+          const dateA = parseEventDate(a);
+          const dateB = parseEventDate(b);
+
+          const aIsUpcoming = !dateA || dateA >= today;
+          const bIsUpcoming = !dateB || dateB >= today;
+
+          if (aIsUpcoming !== bIsUpcoming) return aIsUpcoming ? -1 : 1;
+
+          // Upcoming: nearest first (ascending). Past: latest first (descending).
+          if (aIsUpcoming && bIsUpcoming) {
+            if (dateA && dateB) return dateA.getTime() - dateB.getTime();
+            if (dateA) return -1;
+            if (dateB) return 1;
+          } else {
+            if (dateA && dateB) return dateB.getTime() - dateA.getTime();
+            if (dateA) return -1;
+            if (dateB) return 1;
+          }
+
+          return (a.eventName || '').localeCompare(b.eventName || '');
+        });
+
+        setCalendarEvents(sortedEvents);
+      }
       else { toast({ variant: "destructive", title: "Error", description: result.message || "Could not fetch events." }); }
     } catch (error: any) { toast({ variant: "destructive", title: "Fetch Error", description: error.message || "An unexpected error occurred." }); }
     finally { setIsLoadingEvents(false); }

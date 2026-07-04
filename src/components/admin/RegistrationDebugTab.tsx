@@ -131,7 +131,14 @@ export default function RegistrationDebugTab() {
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{log.updatedAt ? format(parseISO(log.updatedAt), 'MMM dd, p') : 'N/A'}</TableCell>
                       <TableCell className="text-right space-x-1">
-                          <Button size="xs" onClick={() => handleRetry(log.orderId)} disabled={isRetrying === log.orderId}>
+                          <Button
+                            size="xs"
+                            onClick={() => handleRetry(log.orderId)}
+                            disabled={
+                              isRetrying === log.orderId ||
+                              (!log.transactionId && String(log.status || '').trim() !== 'PaymentCaptured')
+                            }
+                          >
                             {isRetrying === log.orderId ? <Loader2 className="animate-spin h-3 w-3" /> : 'Retry Finalize'}
                           </Button>
                         <Button size="xs" variant="outline" onClick={() => handleForceSync(log.orderId)} disabled={isSyncing === log.orderId}>

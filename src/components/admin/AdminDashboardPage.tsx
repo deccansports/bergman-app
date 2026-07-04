@@ -2,11 +2,12 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import dynamic from 'next/dynamic';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
   Loader2, Users2, FileUp, UserPlus, FileClock, Ban, IndianRupee, Warehouse, KeyRound,
   Mail, MessageCircleQuestion, DatabaseBackup, Repeat, UtensilsCrossed, Award, Map,
-  Trophy, LineChart, BookOpen, Bike, ShieldX, Tv, Handshake, ShieldAlert, Server, FileText, Satellite, Database, ShoppingBag, Truck, MessageSquare, Megaphone
+  Trophy, LineChart, BookOpen, Bike, ShieldX, Tv, Handshake, ShieldAlert, Server, FileText, Satellite, Database, ShoppingBag, Truck, MessageSquare, Megaphone, MapPinned
 } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
@@ -18,6 +19,7 @@ import { getCalendarEventsAction } from '@/lib/actions/eventActions';
 // Admin tab components
 import RegistrationsTab from '@/components/admin/RegistrationsTab';
 import AthletesAndClubsTab from '@/components/admin/AthletesAndClubsTab';
+import LiveTrackingHub from '@/components/admin/LiveTrackingHub';
 import LiveTrackingAdminTab from '@/components/admin/LiveTrackingAdminTab';
 import YearlyRecapTab from '@/components/admin/YearlyRecapTab';
 import LegacyAthletesTab from '@/components/admin/LegacyAthletesTab';
@@ -39,7 +41,10 @@ import FinishLedTab from '@/components/admin/FinishLedTab';
 import SponsorsTab from '@/components/admin/SponsorsTab';
 import WebhookHealthTab from '@/components/admin/WebhookHealthTab';
 import PagesTab from '@/components/admin/PagesTab';
-import LiveStreamingTab from '@/components/admin/LiveStreamingTab';
+const BroadcastCenterTab = dynamic(() => import('@/components/admin/BroadcastCenterTab'), {
+  ssr: false,
+  loading: () => <div className="rounded-2xl border p-6 text-sm text-muted-foreground">Loading broadcast tools...</div>,
+});
 import EnquiriesTab from '@/components/admin/EnquiriesTab';
 import DataSyncTab from '@/components/admin/DataSyncTab';
 import KvAnalyticsTab from '@/components/admin/KvAnalyticsTab';
@@ -47,26 +52,31 @@ import FirestoreDebugTab from '@/components/admin/FirestoreDebugTab';
 import RegistrationDebugTab from '@/components/admin/RegistrationDebugTab';
 import AnnouncementsTab from '@/components/admin/AnnouncementsTab';
 import PaidFoodTab from '@/components/admin/PaidFoodTab';
+import EventMapperProTab from '@/components/admin/EventMapperProTab';
+import WorkWithBergmanPanel from '@/components/admin/WorkWithBergman/WorkWithBergmanPanel';
 
 
 type AdminSection =
-  | 'registrations' | 'pages' | 'live_streaming'
+  | 'registrations' | 'pages' | 'broadcast'
   | 'athletes' | 'volunteers' | 'deferrals' | 'cancellations'
   | 'payments' | 'inventory' | 'api_keys' | 'email_campaigns' | 'faqs'
   | 'backup' | 'accounting' | 'category_changes' | 'yearly_recap'
-  | 'live_tracking' | 'legacy_athletes' | 'athlete_insights'
+  | 'live_tracking' | 'upload_results' | 'legacy_athletes' | 'athlete_insights'
   | 'bike_racking' | 'blacklist' | 'finish_led' | 'sponsors' | 'webhooks'
   | 'enquiries' | 'data_sync' | 'kv_analytics' | 'firestore_debug' | 'reg_debug'
-  | 'announcements' | 'paid_food';
+  | 'announcements' | 'paid_food' | 'course_maps' | 'work_with_bergman';
 
 const adminNavItems: { id: AdminSection; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'registrations', label: 'Registrations & Events', icon: BookOpen },
+  { id: 'work_with_bergman', label: 'Work With Bergman', icon: UserPlus },
   { id: 'announcements', label: 'Announcements', icon: Megaphone },
-  { id: 'live_streaming', label: 'Live Streaming', icon: Satellite },
+  { id: 'broadcast', label: 'Broadcast', icon: Satellite },
   { id: 'pages', label: 'Pages', icon: FileText },
   { id: 'athletes', label: 'Athletes & Clubs', icon: Users2 },
   { id: 'paid_food', label: 'Paid Food', icon: UtensilsCrossed },
-  { id: 'live_tracking', label: 'Live Tracking', icon: Map },
+  { id: 'live_tracking', label: 'Live Tracking', icon: Satellite },
+  { id: 'upload_results', label: 'Upload Results', icon: FileUp },
+  { id: 'course_maps', label: 'Course Maps', icon: MapPinned },
   { id: 'finish_led', label: 'Finish LED', icon: Tv },
   { id: 'bike_racking', label: 'Bike Racking', icon: Bike },
   { id: 'yearly_recap', label: 'Yearly Recap', icon: Award },
@@ -205,14 +215,18 @@ export default function AdminDashboardPage() {
             <RegistrationsTab events={events} isLoadingEvents={isLoadingEvents} onDataRefresh={fetchEvents} />
           </TabsContent>
 
+          <TabsContent value="work_with_bergman" className="mt-4">
+            <WorkWithBergmanPanel />
+          </TabsContent>
+
           <TabsContent value="announcements" className="mt-4">
             <AnnouncementsTab />
           </TabsContent>
 
-          <TabsContent value="live_streaming" className="mt-4">
-            <LiveStreamingTab />
+          <TabsContent value="broadcast" className="mt-4">
+            <BroadcastCenterTab events={events} isLoadingEvents={isLoadingEvents} />
           </TabsContent>
-          
+
           <TabsContent value="pages" className="mt-4">
             <PagesTab events={events} isLoadingEvents={isLoadingEvents} onDataRefresh={fetchEvents} />
           </TabsContent>
@@ -226,7 +240,15 @@ export default function AdminDashboardPage() {
           </TabsContent>
 
           <TabsContent value="live_tracking" className="mt-4">
+            <LiveTrackingHub />
+          </TabsContent>
+
+          <TabsContent value="upload_results" className="mt-4">
             <LiveTrackingAdminTab events={events} isLoadingEvents={isLoadingEvents} onDataRefresh={fetchEvents} />
+          </TabsContent>
+
+          <TabsContent value="course_maps" className="mt-4">
+            <EventMapperProTab events={events} isLoadingEvents={isLoadingEvents} />
           </TabsContent>
 
           <TabsContent value="finish_led" className="mt-4">

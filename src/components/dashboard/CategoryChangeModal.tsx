@@ -21,11 +21,21 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useCountdown, CountdownTimeUnit } from '@/hooks/useCountdown';
 import { subDays, format } from 'date-fns';
-import { calculateAgeGroup, sanitizeMoney } from '@/lib/utils';
+import { calculateAgeGroup, isTicketHidden, sanitizeMoney } from '@/lib/utils';
 
-const formatCurrencyLocal = (paisa: number | null | undefined) => {
-  if (paisa === null || paisa === undefined) return '₹0.00';
-  return `₹${(paisa / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+const isSubCategoryHidden = (subCategory: any): boolean => {
+    const raw = subCategory?.isHidden ?? subCategory?.hidden ?? subCategory?.visibility ?? subCategory?.status;
+    if (typeof raw === 'boolean') return raw;
+    if (typeof raw === 'number') return raw === 1;
+    const normalized = String(raw ?? '').trim().toLowerCase();
+    return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'hidden' || normalized === 'inactive' || normalized === 'archived';
+};
+
+const formatCurrencyLocal = (paisa: number | null | undefined, currency: 'INR' | 'USD' = 'INR') => {
+    if (paisa === null || paisa === undefined) return currency === 'USD' ? '$0.00' : '₹0.00';
+    const locale = currency === 'USD' ? 'en-US' : 'en-IN';
+    const symbol = currency === 'USD' ? '$' : '₹';
+    return `${symbol}${(paisa / 100).toLocaleString(locale, { minimumFractionDigits: 2 })}`;
 };
 
 export default function CategoryChangeModal({ isOpen, onClose, eventDetail, onSuccess }: { isOpen: boolean; onClose: () => void; eventDetail: AthleteRegisteredEventDetail | null; onSuccess: () => void }) {
@@ -41,6 +51,7 @@ export default function CategoryChangeModal({ isOpen, onClose, eventDetail, onSu
     const [agreedToTerms, setAgreedToTerms] = useState(false);
     const [calculatedFees, setCalculatedFees] = useState<any>(null);
     const [isProcessing, setIsProcessing] = useState(false);
+    const eventCurrency: 'INR' | 'USD' = eventDetail?.currency === 'USD' ? 'USD' : 'INR';
 
     const deadlineDate = useMemo(() => {
         if (!eventDetail?.eventDate) return null;
@@ -53,9 +64,14 @@ export default function CategoryChangeModal({ isOpen, onClose, eventDetail, onSu
         availableTickets.find(t => t.id === selectedNewTicketId),
     [availableTickets, selectedNewTicketId]);
 
+    const visibleSubCategories = useMemo(() => {
+        if (!activeTicket?.subCategories?.length) return [];
+        return activeTicket.subCategories.filter((s: any) => !isSubCategoryHidden(s));
+    }, [activeTicket]);
+
     const hasSubCategories = useMemo(() => 
-        !!(activeTicket?.subCategories && activeTicket.subCategories.length > 0),
-    [activeTicket]);
+        visibleSubCategories.length > 0,
+    [visibleSubCategories]);
 
     useEffect(() => {
         if (isOpen && eventDetail?.id && eventDetail.dob) {
@@ -73,6 +89,8 @@ export default function CategoryChangeModal({ isOpen, onClose, eventDetail, onSu
                         
                         // Age filtering logic: Only show tickets the athlete is eligible for
                         const allowed = res.ticketDefinitions.filter(t => {
+                            if (isTicketHidden(t)) return false;
+
                             // Rule 1: Must match the same discipline (Triathlon, Duathlon, etc)
                             if (t.ticketCategory !== originalCategory) return false;
                             
@@ -81,6 +99,7 @@ export default function CategoryChangeModal({ isOpen, onClose, eventDetail, onSu
                             // Rule 2: Check age eligibility for the main ticket
                             if (t.subCategories && t.subCategories.length > 0) {
                                 const hasEligibleDistance = t.subCategories.some(sub => {
+                                    if (isSubCategoryHidden(sub)) return false;
                                     const subAgeGroups = Array.isArray(sub.applicableAgeGroups) 
                                         ? sub.applicableAgeGroups 
                                         : (typeof sub.applicableAgeGroups === 'string' ? sub.applicableAgeGroups.split(',').map((ss: string) => ss.trim()) : []);
@@ -137,11 +156,14 @@ export default function CategoryChangeModal({ isOpen, onClose, eventDetail, onSu
             const globalFees = (res.fees as GlobalServiceFees) || ({} as GlobalServiceFees);
             const categoryName = (eventDetail.ticketName || '').toUpperCase();
             const typeKey = categoryName.includes('SWIM') ? 'Swimming' : (categoryName.includes('DUATHLON') ? 'Duathlon' : 'Triathlon');
-            const baseServiceFee = sanitizeMoney((globalFees as any)[typeKey]?.categoryChangeFeePaisa ?? 200000);
+            const isUsd = eventDetail.currency === 'USD';
+            const baseServiceFee = isUsd
+              ? sanitizeMoney((globalFees as any)[typeKey]?.categoryChangeFeeUsdCents ?? (globalFees as any)?.categoryChangeFeeUsdCents ?? 5000)
+              : sanitizeMoney((globalFees as any)[typeKey]?.categoryChangeFeePaisa ?? 200000);
 
-            // CORRECTION: Use actual amount paid as credit
-            const originalCredit = eventDetail.amountPaidPaisa || 0;
-            
+                        // Use actual amount paid as the credit against the new ticket
+                        const originalCredit = eventDetail.amountPaidPaisa || 0;
+
             let newPrice = 0;
             if (selectedNewSubCategoryId) {
                 const sub = ticket.subCategories?.find(s => s.id === selectedNewSubCategoryId);
@@ -152,7 +174,6 @@ export default function CategoryChangeModal({ isOpen, onClose, eventDetail, onSu
 
             const priceDiff = Math.max(0, newPrice - originalCredit);
 
-            const isUsd = eventDetail.currency === 'USD';
             const pricingInput: PricingInput = {
                 basePrice: baseServiceFee + priceDiff,
                 gatewayRate: isUsd ? 0.03 : (PAYMENT_GATEWAY_FEE_PERCENTAGE / 100),
@@ -183,6 +204,7 @@ export default function CategoryChangeModal({ isOpen, onClose, eventDetail, onSu
                 athleteUid: currentUser.uid,
                 athleteEmail: currentUser.email!,
                 athleteName: currentUser.name!,
+                originUrl: window.location.origin,
             });
 
             if (!orderRes.success) throw new Error(orderRes.message);
@@ -191,6 +213,12 @@ export default function CategoryChangeModal({ isOpen, onClose, eventDetail, onSu
                 toast({ title: "Category Updated", description: "Your category change has been processed successfully." });
                 onSuccess();
                 setIsProcessing(false);
+                return;
+            }
+
+            if (orderRes.paymentGateway === 'stripe') {
+                if (!orderRes.checkoutUrl) throw new Error('Stripe checkout URL is missing.');
+                window.location.assign(orderRes.checkoutUrl);
                 return;
             }
 
@@ -264,14 +292,14 @@ export default function CategoryChangeModal({ isOpen, onClose, eventDetail, onSu
                                 <Select onValueChange={setSelectedNewSubCategoryId} value={selectedNewSubCategoryId || ""}>
                                     <SelectTrigger className="h-10 rounded-xl font-bold text-left"><SelectValue placeholder="Select distance..."/></SelectTrigger>
                                     <SelectContent className="text-left">
-                                        {activeTicket?.subCategories?.filter(s => {
+                                        {visibleSubCategories.filter(s => {
                                             if (selectedNewTicketId === eventDetail.ticketId && s.id === eventDetail.selectedSubCategory) return false;
                                             
                                             const subAgeGroups = Array.isArray(s.applicableAgeGroups) 
                                                 ? s.applicableAgeGroups 
                                                 : (typeof s.applicableAgeGroups === 'string' ? s.applicableAgeGroups.split(',').map((ss: string) => ss.trim()) : []);
                                             
-                                            const { ageCategory } = calculateAgeGroup(eventDetail.dob, eventDetail.eventName, subAgeGroups, activeTicket.eventDate || eventDetail.eventDate);
+                                            const { ageCategory } = calculateAgeGroup(eventDetail.dob, eventDetail.eventName, subAgeGroups, activeTicket?.eventDate || eventDetail.eventDate);
                                             return ageCategory !== 'Unknown' && !!ageCategory;
                                         }).map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
                                     </SelectContent>
@@ -284,22 +312,22 @@ export default function CategoryChangeModal({ isOpen, onClose, eventDetail, onSu
                                 <h4 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1 text-left">Change Fee Summary</h4>
                                 <div className="flex justify-between text-xs font-bold uppercase tracking-tight text-left">
                                     <span>Processing Base</span>
-                                    <span>{formatCurrencyLocal(calculatedFees.serviceBase)}</span>
+                                    <span>{formatCurrencyLocal(calculatedFees.serviceBase, eventCurrency)}</span>
                                 </div>
                                 {calculatedFees.priceDiff > 0 && (
                                     <div className="flex justify-between text-xs font-bold uppercase tracking-tight text-orange-600 text-left">
                                         <span>Ticket Upgrade</span>
-                                        <span>{formatCurrencyLocal(calculatedFees.priceDiff)}</span>
+                                        <span>{formatCurrencyLocal(calculatedFees.priceDiff, eventCurrency)}</span>
                                     </div>
                                 )}
                                 <div className="flex justify-between text-[10px] text-muted-foreground text-left">
                                     <span>GST & Platform</span>
-                                    <span>{formatCurrencyLocal(calculatedFees.totalPayable - calculatedFees.serviceBase - calculatedFees.priceDiff)}</span>
+                                    <span>{formatCurrencyLocal(calculatedFees.totalPayable - calculatedFees.serviceBase - calculatedFees.priceDiff, eventCurrency)}</span>
                                 </div>
                                 <Separator className="my-1.5" />
                                 <div className="flex justify-between font-black text-primary text-lg italic tracking-tighter pt-0.5 text-left">
                                     <span>Total Payable</span>
-                                    <span>{formatCurrencyLocal(calculatedFees.totalPayable)}</span>
+                                    <span>{formatCurrencyLocal(calculatedFees.totalPayable, eventCurrency)}</span>
                                 </div>
                             </Card>
                         ) : (selectedNewTicketId && (!hasSubCategories || selectedNewSubCategoryId)) ? (

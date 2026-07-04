@@ -5,8 +5,7 @@ import { getFirestoreInstance } from '@/lib/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { StoreOrder, StoreProduct, ProductVariant, StoreCartItem } from '@/lib/types';
 import { syncStoreOrderToZohoAction } from '@/lib/actions/storeActions';
-import { sendStoreOrderConfirmedEmail, sendStoreAdminOrderAlertEmail } from '@/lib/auth/brevoService';
-import { sendStoreOrderConfirmedWhatsApp } from '@/lib/auth/aisensyService';
+import { sendStoreAdminOrderAlertEmail } from '@/lib/auth/brevoService';
 import { format } from 'date-fns';
 
 export const runtime = 'nodejs';
@@ -112,16 +111,15 @@ export async function POST(req: Request) {
 
       // Immediate Notifications
       const summary = (orderData.items || []).map(i => `${i.name} (${i.size}) x${i.quantity}`).join(', ');
-      await sendStoreOrderConfirmedEmail({
-        email: orderData.email,
+      await sendStoreAdminOrderAlertEmail({
         customer_name: orderData.customerName,
         order_id: orderData.orderId || orderDoc.id,
         order_date: format(new Date(), 'MMM dd, yyyy'),
         product_summary: summary,
         total_amount: orderData.totalAmount,
-        payment_method: payment.method || 'Online',
-        order_details_url: `https://bergmantri.com/dashboard`,
-        support_email: 'info@bergmantri.com'
+        shipping_address: `${orderData.shippingAddress}, ${orderData.city}, ${orderData.state} - ${orderData.pincode}`,
+        email: orderData.email,
+        mobile: orderData.mobile,
       });
 
       // Async Zoho Push

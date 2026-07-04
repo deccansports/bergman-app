@@ -6,8 +6,69 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import type { EventCalendarEntry, TicketDefinition, LiveAthlete, Split, Leg, Status, RaceResult } from '@/lib/types';
 import { hmsToSeconds, toIsoStringSafe, isDuathlonEvent, serializeValue, normalizeStatus, formatSecondsToHMS } from '@/lib/utils';
 import { _internal_fetchAllRaceDataFromFirestore } from '@/lib/actions/publicResultActions';
+import { fetchCloudflareLiveAthletes, getLiveTrackingEdgeBaseUrl } from '@/lib/live-tracking/cloudflareApi';
+import { getKV } from '@/lib/cloudflare/kv';
+import { getParticipantRowsFromIndex, loadParticipantIndex } from '@/lib/liveTrackingParticipantStore';
 
 const LEG_ORDER: (Leg | 'NOT_STARTED')[] = ['NOT_STARTED', 'SWIM', 'RUN1', 'T1', 'BIKE', 'T2', 'RUN', 'RUN2', 'FINISH', 'FINISHED'];
+
+function isCancelledOrInactiveStatus(value: unknown) {
+  const status = String(value || '').trim().toLowerCase();
+  if (!status) return false;
+  return (
+    status.includes('cancel')
+    || status.includes('refund')
+    || status.includes('void')
+    || status.includes('inactive')
+    || status.includes('rejected')
+  );
+}
+
+function mapLiveTimingAthlete(row: any): LiveAthlete {
+  const fullName = String(
+    row?.fullName
+    || row?.name
+    || [row?.firstName, row?.lastName].filter(Boolean).join(' ')
+    || 'Unknown Athlete',
+  ).trim() || 'Unknown Athlete';
+
+  const genderRaw = String(row?.gender || row?.registration?.gender || row?.provider?.gender || '').trim().toLowerCase();
+  const gender = (genderRaw.startsWith('f') ? 'Female' : genderRaw.startsWith('m') ? 'Male' : (row?.gender || 'Male')) as 'Male' | 'Female';
+  const status = normalizeStatus(row?.status || row?.registrationStatus || 'Not Started') as Status;
+
+  return {
+    id: String(row?.bookingId || row?.id || row?.participantId || row?.participantUuid || row?.athleteUid || ''),
+    bib: String(row?.bib || row?.bibNumber || '—'),
+    name: fullName,
+    fullName,
+    firstName: row?.firstName || null,
+    lastName: row?.lastName || null,
+    initials: String(row?.initials || fullName)
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part: string) => part[0])
+      .join('')
+      .toUpperCase() || 'AT',
+    category: String(row?.category || row?.contestName || row?.raceCategory || 'N/A'),
+    ageGroup: String(row?.ageGroup || row?.ageGroupName || row?.category || null),
+    ageGroupName: String(row?.ageGroupName || row?.ageGroup || row?.category || null),
+    gender,
+    ticketId: row?.ticketId || null,
+    ticketName: row?.ticketName || row?.raceCategory || null,
+    status,
+    leg: (row?.leg || 'NOT_STARTED') as Leg,
+    summary: row?.summary || {},
+    splits: row?.splits || [],
+    startTime: Number(row?.startTime || 0),
+    lastUpdateTime: Number(row?.lastUpdateTime || Date.now()),
+    country: row?.country || row?.registration?.country || null,
+    courseProgress: Number(row?.courseProgress || 0),
+    registrationStatus: row?.registrationStatus || row?.status || null,
+    ticketStatus: row?.ticketStatus || null,
+  } as LiveAthlete;
+}
 
 
 /**
@@ -254,20 +315,156 @@ export async function getLiveTimingDataAction(
         let participants: LiveAthlete[] = [];
 
         if (source === 'live') {
-            const adminDb = getFirestoreInstance();
-            const liveAthletesSnapshot = await adminDb.collection('events').doc(eventId).collection('liveAthletes').get();
-            if (!liveAthletesSnapshot.empty) {
-                participants = liveAthletesSnapshot.docs.map(doc => serializeValue({ id: doc.id, ...doc.data() }) as LiveAthlete);
+      const edgeBaseUrl = getLiveTrackingEdgeBaseUrl();
+      if (edgeBaseUrl) {
+        try {
+          participants = await fetchCloudflareLiveAthletes(eventId, 'live');
+          if (participants.length > 0) {
+            return { success: true, message: 'Live data fetched from Cloudflare edge API.', participants };
+          }
+        } catch (edgeError) {
+          console.warn(`[${actionName}] Cloudflare edge API fallback triggered:`, edgeError);
+        }
+      }
+
+            const [liveResults, participantIndex] = await Promise.all([
+              getKV<any[]>(`event:${eventId}:liveResults`, actionName),
+              loadParticipantIndex(eventId),
+            ]);
+
+            const indexRows = getParticipantRowsFromIndex(participantIndex);
+
+            if (indexRows.length > 0) {
+              const liveByBib = new Map<string, any>();
+              const liveByProviderUuid = new Map<string, any>();
+              const liveByAthleteUid = new Map<string, any>();
+
+              for (const row of Array.isArray(liveResults) ? liveResults : []) {
+                const bib = String(row?.bib || row?.bibNumber || '').trim();
+                const providerUuid = String(row?.participantUuid || row?.participant_uuid || row?.providerUuid || row?.id || '').trim();
+                const athleteUid = String(row?.athleteUid || row?.bergmanAthleteId || row?.bergmanAthleteUid || '').trim();
+                if (bib) liveByBib.set(bib, row);
+                if (providerUuid) liveByProviderUuid.set(providerUuid, row);
+                if (athleteUid) liveByAthleteUid.set(athleteUid, row);
+              }
+
+              participants = indexRows
+                .map((row: any) => {
+                  const bib = String(row?.bib || row?.bibNumber || '').trim();
+                  const providerUuid = String(row?.provider?.providerUuid || row?.participantUuid || row?.participant_uuid || row?.providerUuid || '').trim();
+                  const athleteUid = String(row?.bergmanAthleteId || row?.athleteUid || '').trim();
+                  const liveMatch = (providerUuid && liveByProviderUuid.get(providerUuid)) || (bib && liveByBib.get(bib)) || (athleteUid && liveByAthleteUid.get(athleteUid)) || null;
+                  return mapLiveTimingAthlete({
+                    ...(row || {}),
+                    ...(liveMatch || {}),
+                    country: liveMatch?.country || row?.country || row?.registration?.country || null,
+                  });
+                })
+                .filter((athlete: any) => !isCancelledOrInactiveStatus(athlete.registrationStatus || athlete.ticketStatus || athlete.status));
+
+              if (participants.length > 0) {
+                return { success: true, message: 'Live data from canonical participant index merged with live timing data.', participants };
+              }
+            }
+
+            const liveRows = Array.isArray(liveResults) ? liveResults : [];
+
+            if (liveRows.length > 0) {
+              participants = liveRows
+                .map((row: any) => mapLiveTimingAthlete({
+                  ...row,
+                  name: row?.name || row?.fullName,
+                  fullName: row?.fullName || row?.name,
+                  leg: row?.leg || row?.currentSplit || 'NOT_STARTED',
+                  status: row?.status || 'Not Started',
+                  registrationStatus: row?.registrationStatus || row?.status || null,
+                  country: row?.country || row?.registration?.country || null,
+                }))
+                .filter((athlete: any) => !isCancelledOrInactiveStatus(athlete.registrationStatus || athlete.ticketStatus || athlete.status));
+              return { success: true, message: 'Live data from KV liveResults.', participants };
+            }
+
+            const participantIndexLegacy = await getKV<any>(`event:${eventId}:index`, actionName);
+            const indexRowsLegacy = Array.isArray(participantIndexLegacy)
+              ? participantIndexLegacy
+              : Array.isArray(participantIndexLegacy?.byUuid)
+                ? Object.values(participantIndexLegacy.byUuid)
+                : [];
+
+            if (indexRowsLegacy.length > 0) {
+              participants = indexRowsLegacy
+                .map((row: any) => mapLiveTimingAthlete({
+                  ...row,
+                  status: 'Not Started',
+                  leg: 'NOT_STARTED',
+                  summary: {},
+                  splits: [],
+                  startTime: 0,
+                  lastUpdateTime: Date.now(),
+                  courseProgress: 0,
+                }))
+                .filter((athlete: any) => !isCancelledOrInactiveStatus(athlete.registrationStatus || athlete.ticketStatus || athlete.status));
+              if (participants.length > 0) {
+                return { success: true, message: 'Athletes loaded from KV registrations (no live data yet).', participants };
+              }
             }
         } else { // 'history'
-             const { races } = await _internal_fetchAllRaceDataFromFirestore({ eventId });
-             if(races && races.length > 0) {
-                participants = races.map((raceData: RaceResult) => {
+           const edgeBaseUrl = getLiveTrackingEdgeBaseUrl();
+           if (edgeBaseUrl) {
+            try {
+              participants = await fetchCloudflareLiveAthletes(eventId, 'history');
+              if (participants.length > 0) {
+                return { success: true, message: 'History data fetched from Cloudflare edge API.', participants };
+              }
+            } catch (edgeError) {
+              console.warn(`[${actionName}] Cloudflare edge API history fallback triggered:`, edgeError);
+            }
+           }
+
+             const results = await getKV<RaceResult[]>(`results:${eventId}`, actionName);
+             if(Array.isArray(results) && results.length > 0) {
+                participants = results.map((raceData: RaceResult) => {
+              const chipTimeSeconds = raceData.chipTime ? hmsToSeconds(raceData.chipTime) : null;
+              const isFinishedFromData = !!(chipTimeSeconds && chipTimeSeconds > 0 && chipTimeSeconds !== Infinity);
+              const normalized = normalizeStatus(raceData.status) as Status;
+              const finalStatus: Status = isFinishedFromData ? 'Finished' : normalized;
+
+              const summary: LiveAthlete['summary'] = {
+                SWIM: raceData.swim ? hmsToSeconds(raceData.swim) : null,
+                T1: raceData.t1 ? hmsToSeconds(raceData.t1) : null,
+                BIKE: raceData.bike ? hmsToSeconds(raceData.bike) : null,
+                T2: raceData.t2 ? hmsToSeconds(raceData.t2) : null,
+                RUN: raceData.run ? hmsToSeconds(raceData.run) : null,
+                RUN1: raceData.run1 ? hmsToSeconds(raceData.run1) : null,
+                RUN2: raceData.run2 ? hmsToSeconds(raceData.run2) : null,
+                FINISHED: chipTimeSeconds,
+              };
+
+              let finalLeg: Leg | 'NOT_STARTED' = 'NOT_STARTED';
+              if (summary.SWIM) finalLeg = 'SWIM';
+              if (summary.RUN1) finalLeg = 'RUN1';
+              if (summary.T1) finalLeg = 'T1';
+              if (summary.BIKE) finalLeg = 'BIKE';
+              if (summary.T2) finalLeg = 'T2';
+              if (summary.RUN) finalLeg = 'RUN';
+              if (summary.RUN2) finalLeg = 'RUN2';
+              if (finalStatus === 'Finished') finalLeg = 'FINISHED';
+
                     return {
                         id: raceData.docId || raceData.bibNumber,
                         bib: raceData.bibNumber,
                         name: raceData.name,
-                        status: normalizeStatus(raceData.status),
+                category: raceData.category || raceData.raceCategory || 'N/A',
+                ageGroup: raceData.category || null,
+                gender: (raceData.gender as 'Male' | 'Female') || 'Male',
+                ticketId: raceData.ticketId || null,
+                ticketName: raceData.ticketName || raceData.raceCategory || null,
+                status: finalStatus,
+                leg: finalLeg,
+                summary,
+                splits: [],
+                startTime: 0,
+                lastUpdateTime: Date.now(),
                     } as LiveAthlete;
                 });
             }

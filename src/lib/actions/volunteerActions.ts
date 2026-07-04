@@ -12,6 +12,87 @@ import { CreateVolunteerUserActionSchema, type CreateVolunteerUserActionInput } 
 import { updateInventoryStockAction } from '@/lib/actions/inventoryActions';
 import { sendLockerAssignmentEmail, sendLockerReturnConfirmationEmail } from '@/lib/auth/brevoService';
 import { resetFoodCouponAction } from './paidFoodActions';
+import { getKV } from '../cloudflare/kv';
+
+interface BelLookupValue {
+  belTier: string;
+  belQualified: boolean;
+}
+
+function normalizeMobileLast10(value?: string | null): string {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+}
+
+async function buildBelLookupMap(): Promise<Map<string, BelLookupValue>> {
+  const actionName = 'buildBelLookupMap';
+  const map = new Map<string, BelLookupValue>();
+  const currentYear = new Date().getFullYear();
+  const yearsToCheck = [currentYear, currentYear - 1];
+
+  for (const year of yearsToCheck) {
+    let rankings = await getKV<any[]>(`bel:season:${year}:rankings`, actionName);
+
+    if ((!Array.isArray(rankings) || rankings.length === 0) && year === currentYear) {
+      try {
+        const { syncBelSeasonFromResultsKVAction } = await import('./eliteLeagueActions');
+        await syncBelSeasonFromResultsKVAction(year);
+        rankings = await getKV<any[]>(`bel:season:${year}:rankings`, actionName);
+      } catch {
+        rankings = [];
+      }
+    }
+
+    if (!Array.isArray(rankings) || rankings.length === 0) continue;
+
+    for (const row of rankings) {
+      const belTier = String(row?.belTier || '').trim();
+      if (!belTier) continue;
+
+      const payload: BelLookupValue = {
+        belTier,
+        belQualified: Boolean(row?.belQualified),
+      };
+
+      const athleteId = String(row?.athleteId || '').trim();
+      const email = String(row?.email || '').toLowerCase().trim();
+      const mobileLast10 = normalizeMobileLast10(String(row?.mobile || ''));
+
+      if (athleteId && !map.has(`uid:${athleteId}`)) map.set(`uid:${athleteId}`, payload);
+      if (email && !map.has(`email:${email}`)) map.set(`email:${email}`, payload);
+      if (mobileLast10 && !map.has(`mobile:${mobileLast10}`)) map.set(`mobile:${mobileLast10}`, payload);
+    }
+  }
+
+  return map;
+}
+
+function applyBelStatus(participantData: any, belLookup: Map<string, BelLookupValue>) {
+  const athleteUid = String(participantData?.athleteUid || '').trim();
+  const email = String(participantData?.email || '').toLowerCase().trim();
+  const mobileLast10 = normalizeMobileLast10(participantData?.mobile);
+
+  const bel =
+    (athleteUid && belLookup.get(`uid:${athleteUid}`)) ||
+    (email && belLookup.get(`email:${email}`)) ||
+    (mobileLast10 && belLookup.get(`mobile:${mobileLast10}`)) ||
+    null;
+
+  if (!bel) return;
+
+  participantData.belStatus = bel.belTier;
+  participantData.belTier = bel.belTier;
+  participantData.belQualified = bel.belQualified;
+
+  if (participantData.userProfile) {
+    participantData.userProfile = {
+      ...(participantData.userProfile || {}),
+      belStatus: bel.belTier,
+      belTier: bel.belTier,
+      belQualified: bel.belQualified,
+    };
+  }
+}
 
 
 export async function searchParticipantsForCheckInAction(
@@ -23,6 +104,7 @@ export async function searchParticipantsForCheckInAction(
     let adminDb: Firestore;
     try {
         adminDb = getFirestoreInstance();
+      const belLookup = await buildBelLookupMap();
         const participantsRef = adminDb.collection('events').doc(eventId).collection('participants');
         
         let query: FirebaseFirestore.Query;
@@ -59,6 +141,9 @@ export async function searchParticipantsForCheckInAction(
                     participantData.userProfile = serializeValue(userSnap.data()) as User; // Serialize the user profile
                 }
             }
+
+          applyBelStatus(participantData, belLookup);
+
              if (participantData.ticketId) {
                 const ticketRef = adminDb.collection('events').doc(eventId).collection('ticketDefinitions').doc(participantData.ticketId);
                 const ticketSnap = await ticketRef.get();
@@ -97,6 +182,7 @@ export async function searchParticipantForBikeAction(
     let adminDb: Firestore;
     try {
         adminDb = getFirestoreInstance();
+      const belLookup = await buildBelLookupMap();
         const participantsRef = adminDb.collection('events').doc(eventId).collection('participants');
         let query;
 
@@ -121,6 +207,14 @@ export async function searchParticipantForBikeAction(
         
         const participantDoc = snapshot.docs[0];
         const participantData = serializeParticipantDataUtil(participantDoc);
+        if (participantData.athleteUid) {
+          const userSnap = await adminDb.collection('users').doc(participantData.athleteUid).get();
+          if (userSnap.exists) {
+            participantData.userProfile = serializeValue(userSnap.data()) as User;
+          }
+        }
+
+        applyBelStatus(participantData, belLookup);
 
         return { success: true, message: "Participant found.", participant: participantData };
     } catch (e: any) {
@@ -375,14 +469,20 @@ export async function assignVolunteerToEventAction(userId: string, isVolunteer: 
     try {
         const adminDb = getFirestoreInstance();
         const userRef = adminDb.collection('users').doc(userId);
-        await userRef.update({
+    const updateData: Record<string, any> = {
             isVolunteer: isVolunteer,
             assignedEventId: eventId || null,
             assignedEventName: eventName || null,
             assignedEventDate: eventDate || null,
             assignedCounter: assignedCounters || null,
             updatedAt: FieldValue.serverTimestamp(),
-        });
+    };
+    if (isVolunteer) {
+      updateData.volunteerActive = true;
+    } else {
+      updateData.volunteerActive = FieldValue.delete();
+    }
+    await userRef.update(updateData);
         revalidatePath('/admin/dashboard');
         return { success: true, message: "Volunteer assignment updated successfully." };
     } catch (e: any) {
@@ -396,6 +496,7 @@ export async function removeVolunteerAssignmentAction(userId: string): Promise<{
         const adminDb = getFirestoreInstance();
         await adminDb.collection('users').doc(userId).update({
             isVolunteer: false,
+      volunteerActive: FieldValue.delete(),
             assignedEventId: FieldValue.delete(),
             assignedEventName: FieldValue.delete(),
             assignedEventDate: FieldValue.delete(),
@@ -429,6 +530,7 @@ export async function createAndAssignVolunteerAction(data: CreateVolunteerUserAc
         const assignedEventSnap = assignedEventId ? await adminDb.collection('events').doc(assignedEventId).get() : null;
         await adminDb.collection('users').doc(newUserRecord.uid).set({
             uid: newUserRecord.uid, name, email, mobile: normalizedMobile, isVolunteer: true,
+          volunteerActive: true,
             assignedEventId: assignedEventId || null,
             assignedEventName: assignedEventSnap?.data()?.eventName || null,
             assignedEventDate: assignedEventSnap?.data()?.eventDate || null,
@@ -449,6 +551,23 @@ export async function createAndAssignVolunteerAction(data: CreateVolunteerUserAc
     }
 }
 
+    export async function toggleVolunteerActiveStatusAction(userId: string, isActive: boolean): Promise<{ success: boolean; message: string }> {
+      const actionName = 'toggleVolunteerActiveStatusAction';
+      try {
+        const adminDb = getFirestoreInstance();
+        await adminDb.collection('users').doc(userId).update({
+          isVolunteer: true,
+          volunteerActive: isActive,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        revalidatePath('/admin/dashboard');
+        revalidatePath('/volunteer/dashboard');
+        return { success: true, message: `Volunteer marked as ${isActive ? 'active' : 'inactive'}.` };
+      } catch (e: any) {
+        return { success: false, message: `${actionName} failed: ${e.message}` };
+      }
+    }
+
 
 export async function getCheckedInParticipantsForEventAction(
     eventId: string,
@@ -460,9 +579,12 @@ export async function getCheckedInParticipantsForEventAction(
         adminDb = getFirestoreInstance();
         if (!eventId) return { success: false, message: "Event ID is required." };
 
-        let baseQuery: FirebaseFirestore.Query = adminDb.collection('events').doc(eventId).collection('participants')
-            .where('checkInStatus', '==', 'CheckedIn')
-            .orderBy('checkedInAt', 'desc');
+        let baseQuery: FirebaseFirestore.Query = adminDb
+          .collection('events')
+          .doc(eventId)
+          .collection('participants')
+          .where('checkInStatus', '==', 'CheckedIn')
+          .orderBy('checkedInAt', 'desc');
 
         const snapshot = await baseQuery.get();
 
@@ -498,6 +620,74 @@ export async function getCheckedInParticipantsForEventAction(
         return { success: false, message: `Failed to fetch log: ${e.message}` };
     }
 }
+
+    export async function getBikeCheckedInParticipantsForEventAction(
+      eventId: string
+    ): Promise<{ success: boolean, message: string, participants?: EventParticipant[] }> {
+      const actionName = 'getBikeCheckedInParticipantsForEventAction';
+      let adminDb: Firestore;
+      try {
+        adminDb = getFirestoreInstance();
+        if (!eventId) return { success: false, message: 'Event ID is required.' };
+
+        const snapshot = await adminDb
+          .collection('events')
+          .doc(eventId)
+          .collection('participants')
+          .where('bikeCheckInStatus', '==', 'CheckedIn')
+          .get();
+
+        if (snapshot.empty) {
+          return { success: true, message: 'No bikes checked in for this event.', participants: [] };
+        }
+
+        const participantsData = snapshot.docs
+          .map((doc) => serializeParticipantDataUtil(doc))
+          .sort((a, b) => {
+            const aTs = a.bikeCheckedInAt ? new Date(a.bikeCheckedInAt).getTime() : 0;
+            const bTs = b.bikeCheckedInAt ? new Date(b.bikeCheckedInAt).getTime() : 0;
+            return bTs - aTs;
+          });
+
+        return { success: true, message: 'Bike checked-in participants fetched.', participants: participantsData };
+      } catch (e: any) {
+        return { success: false, message: `${actionName} failed: ${e.message}` };
+      }
+    }
+
+    export async function getBikeCheckedOutParticipantsForEventAction(
+      eventId: string
+    ): Promise<{ success: boolean, message: string, participants?: EventParticipant[] }> {
+      const actionName = 'getBikeCheckedOutParticipantsForEventAction';
+      let adminDb: Firestore;
+      try {
+        adminDb = getFirestoreInstance();
+        if (!eventId) return { success: false, message: 'Event ID is required.' };
+
+        const snapshot = await adminDb
+          .collection('events')
+          .doc(eventId)
+          .collection('participants')
+          .where('bikeCheckOutStatus', '==', 'CheckedOut')
+          .get();
+
+        if (snapshot.empty) {
+          return { success: true, message: 'No bikes checked out for this event.', participants: [] };
+        }
+
+        const participantsData = snapshot.docs
+          .map((doc) => serializeParticipantDataUtil(doc))
+          .sort((a, b) => {
+            const aTs = a.bikeCheckedOutAt ? new Date(a.bikeCheckedOutAt).getTime() : 0;
+            const bTs = b.bikeCheckedOutAt ? new Date(b.bikeCheckedOutAt).getTime() : 0;
+            return bTs - aTs;
+          });
+
+        return { success: true, message: 'Bike checked-out participants fetched.', participants: participantsData };
+      } catch (e: any) {
+        return { success: false, message: `${actionName} failed: ${e.message}` };
+      }
+    }
 
 export async function resetParticipantCheckInStatusAction(
     eventId: string,

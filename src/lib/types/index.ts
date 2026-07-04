@@ -20,8 +20,10 @@ export * from "./results";
 export * from "./whatsapp";
 export * from "./store";
 export * from "./payments";
+export * from "./waitlist";
 export * from "./category"; 
 export * from "./athleteTier";
+export * from "./expo";
 
 // 2. Schema and Form Types
 import type { 

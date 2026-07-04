@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCalendarEventsAction } from '@/lib/actions/eventActions';
 import { validateApiKey } from '@/lib/apiAuth';
+import { isEventHidden } from '@/lib/utils';
 
 export async function GET(request: NextRequest) {
   const authResult = await validateApiKey(request);
@@ -11,7 +12,8 @@ export async function GET(request: NextRequest) {
 
   const result = await getCalendarEventsAction();
   if (result.success) {
-    return NextResponse.json({ success: true, events: result.events });
+    const events = (result.events || []).filter(event => !isEventHidden(event));
+    return NextResponse.json({ success: true, events });
   } else {
     return NextResponse.json({ success: false, message: result.message }, { status: 500 });
   }

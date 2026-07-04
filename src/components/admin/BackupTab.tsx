@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, DatabaseBackup, PlusCircle, Trash2, Download, History } from 'lucide-react';
 import type { BackupRecord, EventCalendarEntry } from '@/lib/types';
-import { createBackupAction, getBackupsForEventAction, deleteBackupAction, restoreBackupAction, restoreBackupToNewEventAction } from '@/lib/actions';
+import { createBackupAction, getBackupsForEventAction, deleteBackupAction, restoreBackupAction, restoreBackupToNewEventAction, fetchBackupDataAction } from '@/lib/actions';
 import { format, parseISO } from 'date-fns';
 import { AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog";
 import * as XLSX from 'xlsx';
@@ -56,108 +56,251 @@ export default function BackupTab({ events, isLoadingEvents, onDataRefresh }: Ba
         fetchAllBackups();
     }, [fetchAllBackups]);
     
-    const handleCreateBackup = async () => {
-        if (!selectedEventId) {
-            toast({ variant: 'destructive', title: 'Select an Event', description: 'Please select an event to back up.' });
-            return;
-        }
-        setIsLoading(true);
-        try {
-            const result = await createBackupAction(selectedEventId);
-            if (result && result.success) {
-                toast({ title: 'Success', description: 'Backup created successfully.' });
-                await fetchAllBackups();
-            } else {
-                toast({ variant: 'destructive', title: 'Error', description: result?.message || 'Failed to create backup.' });
-            }
-        } catch (e: any) {
-            console.error(`[BackupTab] createBackupAction failed:`, e);
-            toast({ variant: 'destructive', title: 'Error', description: `An unexpected error occurred: ${e.message}` });
-        } finally {
-            setIsLoading(false);
-        }
-    };
-    
-    const handleDeleteBackup = async (backupId: string) => {
-        const result = await deleteBackupAction(backupId);
-        if (result.success) {
-            toast({ title: 'Success', description: 'Backup deleted.' });
-            setAllBackups(prev => prev.filter(b => b.id !== backupId));
-        } else {
-            toast({ variant: 'destructive', title: 'Error', description: result.message });
-        }
-    };
-    
-    const handleRestoreBackup = async () => {
-        if (!restoringBackup || !restoreTargetEventId) {
-          toast({ variant: 'destructive', title: 'Error', description: 'Backup and target event must be selected.' });
-          return;
-        }
-        setIsRestoring(true);
-        const result = await restoreBackupAction(restoringBackup.id, restoreTargetEventId);
-        if (result.success) {
-          toast({ title: 'Restore Successful', description: result.message });
-          setRestoringBackup(null);
-          setRestoreTargetEventId(null);
-          onDataRefresh();
-        } else {
-          toast({ variant: 'destructive', title: 'Restore Failed', description: result.message, duration: 7000 });
-        }
-        setIsRestoring(false);
-    };
 
-    const handleRestoreToNew = async () => {
-        if (!restoringBackup) return;
-        setIsRestoringNew(true);
-        const result = await restoreBackupToNewEventAction(restoringBackup.id);
-        if (result.success) {
-          toast({ title: 'Restore Successful', description: result.message });
-          setRestoringBackup(null);
-          onDataRefresh();
-        } else {
-          toast({ variant: 'destructive', title: 'Restore Failed', description: result.message, duration: 7000 });
-        }
-        setIsRestoringNew(false);
-    };
+            const handleDownloadBackup = (backup: BackupRecord) => {
+                try {
+                    const wb = XLSX.utils.book_new();
 
-    const handleDownloadBackup = (backup: BackupRecord) => {
-        try {
-            const wb = XLSX.utils.book_new();
-
-            const addSheet = (dataString: string | undefined | null, sheetName: string) => {
-                if (dataString) {
-                    try {
-                        const data = JSON.parse(dataString);
-                        const dataArray = Array.isArray(data) ? data : [data];
-                        if (dataArray.length > 0) {
-                            const ws = XLSX.utils.json_to_sheet(dataArray);
-                            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+                    const addSheet = (dataString: string | undefined | null, sheetName: string) => {
+                        if (dataString) {
+                            try {
+                                const data = JSON.parse(dataString);
+                                const dataArray = Array.isArray(data) ? data : [data];
+                                if (dataArray.length > 0) {
+                                    const ws = XLSX.utils.json_to_sheet(dataArray);
+                                    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+                                }
+                            } catch (e) {
+                                console.warn(`Could not parse or add sheet for ${sheetName}`, e);
+                            }
                         }
-                    } catch (e) {
-                        console.warn(`Could not parse or add sheet for ${sheetName}`, e);
-                    }
+                    };
+
+                    
+
+                    const processAndDownload = (payload: { participantsData?: string | null; eventDocument?: string | null; ticketDefinitionsData?: string | null; bibAssignmentsData?: string | null; sponsorsData?: string | null; inventoryData?: string | null }) => {
+                        let participants: any[] = [];
+                        try {
+                            if (payload.participantsData) {
+                                const parsed = JSON.parse(payload.participantsData);
+                                participants = Array.isArray(parsed) ? parsed : [parsed];
+                            }
+                        } catch (e) {
+                            console.warn('Could not parse participantsData', e);
+                            participants = [];
+                        }
+
+                        participants = participants.map(p => ({
+                            ...p,
+                            name: p.name || p.fullName || p.athleteName || `${p.firstName || ''} ${p.lastName || ''}`.trim() || 'Unnamed',
+                        }));
+
+                        if (participants.length > 0) {
+                            const ws = XLSX.utils.json_to_sheet(participants);
+                            XLSX.utils.book_append_sheet(wb, ws, 'Participants');
+                        }
+
+                        const getPathValue = (obj: any, path: string) => {
+                            if (!obj || !path) return undefined;
+                            return path.split('.').reduce((acc: any, key: string) => {
+                                if (acc === null || acc === undefined) return undefined;
+                                return acc[key];
+                            }, obj);
+                        };
+
+                        const getFirst = (obj: any, keys: string[]) => {
+                            for (const key of keys) {
+                                const value = key.includes('.') ? getPathValue(obj, key) : obj?.[key];
+                                if (value !== undefined && value !== null && value !== '') {
+                                    return value;
+                                }
+                            }
+                            return undefined;
+                        };
+
+                        const isTruthyYes = (v: any) => {
+                            if (v === true) return true;
+                            if (v === 1 || v === '1') return true;
+                            if (v === false || v === 0 || v === '0') return false;
+                            if (v === undefined || v === null || v === '') return false;
+                            const s = String(v).trim().toLowerCase();
+                            return ['yes', 'y', 'true', 't', '1', 'on'].includes(s);
+                        };
+
+                        const fromPaisa = (val: any) => {
+                            if (val === null || val === undefined || val === '') return '';
+                            const n = Number(val);
+                            if (Number.isNaN(n)) return '';
+                            return n / 100;
+                        };
+
+                        const amountFromFields = (p: any, paisaKeys: string[], plainKeys: string[]) => {
+                            const paisaValue = getFirst(p, paisaKeys);
+                            if (paisaValue !== undefined) {
+                                return fromPaisa(paisaValue);
+                            }
+                            const plainValue = getFirst(p, plainKeys);
+                            if (plainValue === undefined || plainValue === null || plainValue === '') return '';
+                            return plainValue;
+                        };
+
+                        const bulkRows = participants.map((p) => {
+                            const ticketPrice = amountFromFields(
+                                p,
+                                ['ticketPricePaisa', 'pricingBreakdown.basePricePaisa'],
+                                ['ticketPrice', 'price', 'pricingBreakdown.basePrice']
+                            );
+                            const amountPaid = amountFromFields(
+                                p,
+                                ['amountPaidPaisa', 'originalAmountPaidAtFirstRegistrationPaisa'],
+                                ['amountPaid', 'paid', 'amountPaidInr']
+                            );
+                            const balanceAmount = amountFromFields(
+                                p,
+                                ['balanceAmountPaisa'],
+                                ['balanceAmount']
+                            );
+                            const taxAmount = amountFromFields(
+                                p,
+                                ['taxAmountPaidPaisa', 'taxAmountPaisa'],
+                                ['taxAmountPaid', 'taxAmount']
+                            );
+                            const processingFee = amountFromFields(
+                                p,
+                                ['processingFeePaidPaisa', 'processingFeePaisa'],
+                                ['processingFeePaid', 'processingFee']
+                            );
+                            const consentValue = getFirst(p, ['consentPromotions', 'receiveUpdates', 'receive_updates', 'optIn']);
+                            const deferredPuneValue = getFirst(p, ['isDeferredFromPune', 'isDeferred_from_pune', 'deferredFromPune']);
+
+                            return {
+                                'BIB NO': p.bibNumber || p.bib || '',
+                                'Name': p.name || p.fullName || '',
+                                'Email Address': p.email || p.buyerEmail || '',
+                                'Address': p.address || p.businessAddress || '',
+                                'City': p.city || '',
+                                'Pincode': p.pincode || '',
+                                'State': p.state || '',
+                                'Country': p.country || '',
+                                'T Shirt Size': p.tshirtSize || '',
+                                'Date Of Birth': p.dob || '',
+                                'Phone Number': p.mobile || p.phone || '',
+                                'Gender': p.gender || '',
+                                'Blood Group': p.bloodGroup || '',
+                                'Identity Proof': p.idProofUrl || p.idProof || '',
+                                'Emergency Contact Number': p.emergencyContactNumber || p.emergencyContactPhone || '',
+                                'Digital Signature (Name)': p.digitalSignatureName || p.digitalSignature || '',
+                                'Rules & Regulations': isTruthyYes(p.agreedRules) || isTruthyYes(p.acceptedRules) ? 'Yes' : 'No',
+                                'Waiver': isTruthyYes(p.agreedWaiver) || isTruthyYes(p.waiverAccepted) ? 'Yes' : 'No',
+                                'Deferred': isTruthyYes(p.isDeferral) || !!p.deferralId ? 'Yes' : 'No',
+                                'Ticket Price': ticketPrice,
+                                'Amount Paid': amountPaid,
+                                'Balance Amount': balanceAmount,
+                                'Tax Amount': taxAmount,
+                                'Processing Fee': processingFee,
+                                'I would like to receive updates & notifications from this event organizer': isTruthyYes(consentValue) ? 'Yes' : 'No',
+                                'Deferred from pune': (deferredPuneValue === undefined || deferredPuneValue === null || deferredPuneValue === '') ? '' : (isTruthyYes(deferredPuneValue) ? 'Yes' : 'No'),
+                            };
+                        });
+
+                        if (bulkRows.length > 0) {
+                            const headerOrder = [
+                                'BIB NO','Name','Email Address','Address','City','Pincode','State','Country','T Shirt Size','Date Of Birth','Phone Number','Gender','Blood Group','Identity Proof','Emergency Contact Number','Digital Signature (Name)','Rules & Regulations','Waiver','Deferred','Ticket Price','Amount Paid','Balance Amount','Tax Amount','Processing Fee','I would like to receive updates & notifications from this event organizer','Deferred from pune'
+                            ];
+                            const ws2 = XLSX.utils.json_to_sheet(bulkRows, { header: headerOrder });
+                            XLSX.utils.book_append_sheet(wb, ws2, 'Participant Bulk Upload');
+                        }
+
+                        addSheet(payload.eventDocument, 'EventDetails');
+                        addSheet(payload.ticketDefinitionsData, 'TicketDefinitions');
+                        addSheet(payload.bibAssignmentsData, 'BibAssignments');
+                        addSheet(payload.sponsorsData, 'Sponsors');
+                        addSheet(payload.inventoryData, 'Inventory');
+
+                        if (wb.SheetNames.length === 0) {
+                            toast({ variant: 'destructive', title: 'Download Error', description: 'Backup contains no data to download.' });
+                            return;
+                        }
+
+                        const filename = `FullBackup_${backup.eventName.replace(/[^a-z0-9]/gi, '_')}_${format(parseISO(backup.createdAt), 'yyyyMMdd_HHmmss')}.xlsx`;
+                        XLSX.writeFile(wb, filename);
+                    };
+
+                    (async () => {
+                        if (backup.storagePath) {
+                            const resp = await fetchBackupDataAction(backup.id);
+                            if (!resp.success || !resp.data) {
+                                toast({ variant: 'destructive', title: 'Download Error', description: resp.message });
+                                return;
+                            }
+                            processAndDownload(resp.data);
+                        } else {
+                            processAndDownload({ participantsData: backup.participantsData, eventDocument: backup.eventDocument, ticketDefinitionsData: backup.ticketDefinitionsData, bibAssignmentsData: backup.bibAssignmentsData, sponsorsData: backup.sponsorsData, inventoryData: backup.inventoryData });
+                        }
+                    })();
+
+                } catch (e: any) {
+                    toast({ variant: 'destructive', title: 'Download Error', description: `Could not process backup data: ${e.message}` });
                 }
+
             };
 
-            addSheet(backup.participantsData, 'Participants');
-            addSheet(backup.eventDocument, 'EventDetails');
-            addSheet(backup.ticketDefinitionsData, 'TicketDefinitions');
-            addSheet(backup.bibAssignmentsData, 'BibAssignments');
-            addSheet(backup.sponsorsData, 'Sponsors');
-            addSheet(backup.inventoryData, 'Inventory');
+            const handleCreateBackup = async () => {
+                if (!selectedEventId) {
+                    toast({ variant: 'destructive', title: 'Create Backup', description: 'No event selected.' });
+                    return;
+                }
+                setIsLoading(true);
+                const resp = await createBackupAction(selectedEventId);
+                setIsLoading(false);
+                if (!resp.success) {
+                    toast({ variant: 'destructive', title: 'Create Backup', description: resp.message });
+                    return;
+                }
+                toast({ title: 'Backup created' });
+                fetchAllBackups();
+                onDataRefresh();
+            };
 
-            if (wb.SheetNames.length === 0) {
-                toast({ variant: 'destructive', title: 'Download Error', description: 'Backup contains no data to download.' });
-                return;
-            }
+            const handleDeleteBackup = async (id: string) => {
+                const resp = await deleteBackupAction(id);
+                if (!resp.success) {
+                    toast({ variant: 'destructive', title: 'Delete Backup', description: resp.message });
+                    return;
+                }
+                toast({ title: 'Backup deleted' });
+                fetchAllBackups();
+            };
 
-            const filename = `FullBackup_${backup.eventName.replace(/[^a-z0-9]/gi, '_')}_${format(parseISO(backup.createdAt), 'yyyyMMdd_HHmmss')}.xlsx`;
-            XLSX.writeFile(wb, filename);
+            const handleRestoreToNew = async () => {
+                if (!restoringBackup) return;
+                setIsRestoringNew(true);
+                const resp = await restoreBackupToNewEventAction(restoringBackup.id);
+                setIsRestoringNew(false);
+                if (!resp.success) {
+                    toast({ variant: 'destructive', title: 'Restore Error', description: resp.message });
+                    return;
+                }
+                toast({ title: 'Restore started' });
+                fetchAllBackups();
+                onDataRefresh();
+                setRestoringBackup(null);
+            };
 
-        } catch (e: any) {
-            toast({ variant: 'destructive', title: 'Download Error', description: `Could not process backup data: ${e.message}` });
-        }
-    };
+            const handleRestoreBackup = async () => {
+                if (!restoringBackup || !restoreTargetEventId) return;
+                setIsRestoring(true);
+                const resp = await restoreBackupAction(restoringBackup.id, restoreTargetEventId);
+                setIsRestoring(false);
+                if (!resp.success) {
+                    toast({ variant: 'destructive', title: 'Restore Error', description: resp.message });
+                    return;
+                }
+                toast({ title: 'Restore started' });
+                fetchAllBackups();
+                onDataRefresh();
+                setRestoringBackup(null);
+            };
 
     const displayedBackups = useMemo(() => {
         if (selectedEventId) {

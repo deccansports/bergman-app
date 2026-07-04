@@ -24,6 +24,7 @@ import {
 } from '@/lib/schemas';
 import { registerClubForExistingUser } from '@/lib/actions/clubActions';
 import { updateUserProfile } from '@/lib/actions/userActions';
+import { ClubPolicyAcceptance } from '@/components/club/ClubPolicyAcceptance';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
@@ -35,22 +36,24 @@ import { COUNTRY_CODES } from '@/lib/constants/country-codes';
 type AuthStep = 'identifier' | 'otp' | 'role-select' | 'athlete-signup' | 'club-signup';
 
 export function AuthForm({ defaultRole = 'athlete' }: { defaultRole?: 'athlete' | 'club' }) {
-  const { loginWithOtp, loginWithGoogle, fetchUserProfile, firebaseUserFromAuth } = useAuth();
+  const { loginWithOtp, loginWithGoogle, fetchUserProfile, firebaseUserFromAuth, googleProfileData } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
   
   const [step, setStep] = useState<AuthStep>('identifier');
   const [email, setEmail] = useState('');
+  const [maskedMobile, setMaskedMobile] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedDialCode, setSelectedDialCode] = useState('+91');
   const [otpResendCountdown, setOtpResendCountdown] = useState(0);
+  const [clubPolicyAccepted, setClubPolicyAccepted] = useState(false);
 
   const idForm = useForm({ defaultValues: { email: '' } });
   const otpForm = useForm({ defaultValues: { otp: '' } });
 
   const athleteSignupForm = useForm<AthleteSignupFormInput>({
     resolver: zodResolver(AthleteSignupSchemaBase), 
-    defaultValues: { name: '', email: '', mobile: '', country: 'India', state: '' }
+    defaultValues: { name: googleProfileData?.name || '', email: googleProfileData?.email || '', mobile: '', country: 'India', state: '' }
   });
 
   const clubSignupForm = useForm({
@@ -65,7 +68,7 @@ export function AuthForm({ defaultRole = 'athlete' }: { defaultRole?: 'athlete' 
         instagramUrl: z.string().url("Invalid URL").or(z.literal('')).optional().nullable(),
         facebookUrl: z.string().url("Invalid URL").or(z.literal('')).optional().nullable(),
     })),
-    defaultValues: { clubName: '', coachName: '', clubContactEmail: '', clubContactMobile: '', city: '', state: '', country: 'India', instagramUrl: '', facebookUrl: '' }
+    defaultValues: { clubName: '', coachName: googleProfileData?.name || '', clubContactEmail: googleProfileData?.email || '', clubContactMobile: '', city: '', state: '', country: 'India', instagramUrl: '', facebookUrl: '' }
   });
 
   useEffect(() => {
@@ -74,6 +77,16 @@ export function AuthForm({ defaultRole = 'athlete' }: { defaultRole?: 'athlete' 
         clubSignupForm.setValue('clubContactEmail', email);
     }
   }, [email, athleteSignupForm, clubSignupForm]);
+
+  // Auto-fill forms with Google profile data when available
+  useEffect(() => {
+    if (googleProfileData) {
+        athleteSignupForm.setValue('name', googleProfileData.name || '');
+        athleteSignupForm.setValue('email', googleProfileData.email);
+        clubSignupForm.setValue('coachName', googleProfileData.name || '');
+        clubSignupForm.setValue('clubContactEmail', googleProfileData.email);
+    }
+  }, [googleProfileData, athleteSignupForm, clubSignupForm]);
 
   // Countdown timer for resend OTP
   useEffect(() => {
@@ -93,6 +106,7 @@ export function AuthForm({ defaultRole = 'athlete' }: { defaultRole?: 'athlete' 
         const result = await res.json();
         if (res.ok) {
             setEmail(values.email);
+          setMaskedMobile(result.maskedMobile || null);
             setStep('otp');
             setOtpResendCountdown(50);
             toast({ title: "OTP Sent", description: "Please check your email inbox and WhatsApp." });
@@ -246,7 +260,19 @@ export function AuthForm({ defaultRole = 'athlete' }: { defaultRole?: 'athlete' 
             </button>
             <div className="text-left">
                 <h3 className="font-black uppercase tracking-tight text-lg leading-none">Security Check</h3>
-                <p className="text-xs text-muted-foreground font-medium mt-2">Enter the 6-digit code sent to <strong>{email}</strong> and WhatsApp</p>
+                <p className="text-xs text-muted-foreground font-medium mt-2">
+                  Enter the 6-digit code sent to <strong>{email}</strong>
+                  {maskedMobile ? (
+                    <>
+                      {' '}and WhatsApp <strong>{maskedMobile}</strong>
+                    </>
+                  ) : (
+                    ' and WhatsApp'
+                  )}
+                </p>
+                <p className="text-[11px] text-red-600 font-semibold mt-1">
+                  OTP not received in Inbox? Please check Spam/Junk folder.
+                </p>
             </div>
             <Form {...otpForm}>
               <form onSubmit={otpForm.handleSubmit(handleVerifyOtp)} className="space-y-4">
@@ -286,6 +312,9 @@ export function AuthForm({ defaultRole = 'athlete' }: { defaultRole?: 'athlete' 
             <div className="text-center">
                 <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 mb-2 uppercase font-black tracking-widest">New Identity</Badge>
                 <h3 className="text-xl font-black uppercase tracking-tight italic">Choose Your Path</h3>
+                {googleProfileData && (
+                    <p className="text-xs text-muted-foreground mt-2">Your profile will be pre-filled with your Google account details</p>
+                )}
             </div>
             <div className="grid grid-cols-1 gap-4">
                 <Button variant="outline" className="h-20 rounded-2xl border-2 hover:border-primary hover:bg-primary/5 flex items-center justify-start px-6 gap-4 group" onClick={() => setStep('athlete-signup')}>
@@ -384,8 +413,7 @@ export function AuthForm({ defaultRole = 'athlete' }: { defaultRole?: 'athlete' 
             </button>
             <Form {...clubSignupForm}>
               <form onSubmit={clubSignupForm.handleSubmit(handleClubSignup)} className="space-y-4 text-left">
-                <ScrollArea className="h-[55vh] pr-4 -mr-4">
-                    <div className="space-y-4 py-2">
+                <div className="h-[40vh] overflow-y-auto pr-4 -mr-4 space-y-4 py-2">
                         <div className="p-4 border rounded-2xl bg-muted/20 space-y-4">
                             <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-orange-600">Club Identity</h4>
                             <FormField name="clubName" control={clubSignupForm.control} render={({ field }) => (
@@ -436,9 +464,12 @@ export function AuthForm({ defaultRole = 'athlete' }: { defaultRole?: 'athlete' 
                                 )} />
                             </div>
                         </div>
+                        <ClubPolicyAcceptance
+                          accepted={clubPolicyAccepted}
+                          onAcceptChange={setClubPolicyAccepted}
+                        />
                     </div>
-                </ScrollArea>
-                <Button type="submit" className="w-full h-12 rounded-xl bg-orange-600 hover:bg-orange-50 text-white font-black uppercase tracking-widest shadow-xl shadow-orange-600/20" disabled={isProcessing}>
+                <Button type="submit" className="w-full h-12 rounded-xl bg-orange-600 hover:bg-orange-50 text-white font-black uppercase tracking-widest shadow-xl shadow-orange-600/20" disabled={isProcessing || !clubPolicyAccepted}>
                   {isProcessing ? <Loader2 className="animate-spin h-5 w-5" /> : "Register My Club"}
                 </Button>
               </form>

@@ -13,13 +13,16 @@ const SERVICE_FEES_DOC = 'serviceFees';
 
 const DEFAULT_SERVICE_FEE: ServiceFeeConfig = {
   deferralFeePaisa: 200000,
-  categoryChangeFeePaisa: 200000
+  categoryChangeFeePaisa: 200000,
+  deferralFeeUsdCents: 5000,         // $50.00 default
+  categoryChangeFeeUsdCents: 5000,   // $50.00 default
+  minimumAgeYears: 16,
 };
 
 const DEFAULT_GLOBAL_FEES: GlobalServiceFees = {
   Triathlon: DEFAULT_SERVICE_FEE,
   Duathlon: DEFAULT_SERVICE_FEE,
-  Swimming: { deferralFeePaisa: 100000, categoryChangeFeePaisa: 100000 },
+  Swimming: { deferralFeePaisa: 100000, categoryChangeFeePaisa: 100000, deferralFeeUsdCents: 3000, categoryChangeFeeUsdCents: 3000, minimumAgeYears: 9 },
   Marathon: DEFAULT_SERVICE_FEE,
   Cycling: DEFAULT_SERVICE_FEE,
   Other: DEFAULT_SERVICE_FEE,

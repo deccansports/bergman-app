@@ -6,8 +6,22 @@ import { startJob, updateJobProgress } from '@/lib/jobManager';
 import { parse as parseDateFns, isValid as isDateValid } from 'date-fns';
 import { _updateUserFromParticipantData } from '@/lib/actions/userActions';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 // This function now represents the background processing task
 async function processUserUploadJob(jobId: string, fileBuffer: Buffer) {
+  // Safety check for Firebase configuration
+  if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+    await updateJobProgress(jobId, {
+      status: 'failed',
+      message: 'Firebase not configured',
+      progress: 0,
+      results: []
+    });
+    return;
+  }
+  
   const actionName = '[API /bulk-upload-users BG Job]';
   let successCount = 0;
   let errorCount = 0;

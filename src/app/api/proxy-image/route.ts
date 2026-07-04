@@ -11,7 +11,13 @@ export async function GET(request: NextRequest) {
 
   try {
     // Fetch the image from the external URL
-    const response = await fetch(imageUrl);
+    const response = await fetch(imageUrl, {
+      headers: {
+        'Accept': '*/*',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+      },
+      cache: 'no-store',
+    });
 
     if (!response.ok) {
       throw new Error(`Failed to fetch image: ${response.statusText}`);
@@ -22,7 +28,7 @@ export async function GET(request: NextRequest) {
     const imageBuffer = Buffer.from(await imageBlob.arrayBuffer());
     
     const headers = new Headers();
-    headers.set('Content-Type', imageBlob.type);
+    headers.set('Content-Type', imageBlob.type || 'application/octet-stream');
     headers.set('Cache-Control', 'public, max-age=31536000, immutable');
     // Set Content-Disposition to 'inline' to suggest browser to display the file, not download it.
     headers.set('Content-Disposition', 'inline');

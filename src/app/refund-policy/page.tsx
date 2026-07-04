@@ -1,70 +1,100 @@
-// src/app/refund-policy/page.tsx
-"use client";
-
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
-import { useRouter } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
+import { getServiceFeesAction } from '@/lib/actions';
 
-export default function RefundPolicyPage() {
-  const router = useRouter();
-  const refundContent = `
-Return / Refund / Cancellation Policy – Bergman Triathlon
+const formatInr = (paisa: number) => `₹${(paisa / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatUsd = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-1. **Refund Policy**
-- 6+ months before event: 70% refund (excluding GST and processing charges).
-- 4 months before event: 50% refund (excluding GST).
-- 3 months before event: 20% refund (excluding GST).
-- 2 months or less before event: No refund.
-- Refunds are processed within 15 working days of cancellation request approval.
+export default async function RefundPolicyPage() {
+  const feeRes = await getServiceFeesAction();
+  const triathlonFees = feeRes.fees?.Triathlon;
+  const swimathonFees = feeRes.fees?.Swimming;
 
-2. **Deferral Policy**
-- Deferral requests must be submitted 60 days prior to the event using the official form.
-- Only one deferral per entry is allowed. The participant must pay any entry fee difference when transferring to a future event.
-- Deferral fee: ₹2,499
-- Deferral is valid for 1 year from the original event date.
+  const deferralInr = formatInr(triathlonFees?.deferralFeePaisa ?? 200000);
+  const deferralUsd = formatUsd(triathlonFees?.deferralFeeUsdCents ?? 5000);
+  const categoryChangeInr = formatInr(triathlonFees?.categoryChangeFeePaisa ?? 200000);
+  const categoryChangeUsd = formatUsd(triathlonFees?.categoryChangeFeeUsdCents ?? 5000);
 
-3. **Transfer & Category Change**
-- Name transfers and category changes are allowed up to 60 days before the event.
-- Name change: ₹2,499
-- Category change (lower or higher): ₹2,499 + fee difference (if applicable)
-- No refunds for switching to a lower category.
-
-4. **No Show / Force Majeure**
-- No refunds or transfers will be granted in the event of no-show or event cancellation due to natural calamities, political unrest, or unforeseen circumstances beyond the control of the organizers.
-  `;
+  const swimDeferralInr = formatInr(swimathonFees?.deferralFeePaisa ?? 100000);
+  const swimDeferralUsd = formatUsd(swimathonFees?.deferralFeeUsdCents ?? 3000);
+  const swimCategoryChangeInr = formatInr(swimathonFees?.categoryChangeFeePaisa ?? 100000);
+  const swimCategoryChangeUsd = formatUsd(swimathonFees?.categoryChangeFeeUsdCents ?? 3000);
+  const triathlonMinAge = triathlonFees?.minimumAgeYears ?? 16;
+  const swimathonMinAge = swimathonFees?.minimumAgeYears ?? 9;
 
   return (
     <div className="container mx-auto py-12 px-4 max-w-4xl">
       <Card className="max-w-3xl mx-auto shadow-lg">
         <CardHeader>
           <CardTitle className="text-3xl font-bold text-primary">Return, Refund & Cancellation Policy – Bergman Triathlon</CardTitle>
-          <CardDescription className="text-md text-muted-foreground pt-1">Details on refunds, deferrals, and transfers.</CardDescription>
+          <CardDescription className="text-md text-muted-foreground pt-1">Details on refunds, deferrals, and category changes.</CardDescription>
         </CardHeader>
         <CardContent>
           <ScrollArea className="h-[60vh] pr-4">
-             <div className="prose prose-sm sm:prose lg:prose-lg xl:prose-xl max-w-none text-foreground">
-              {refundContent.split('\n').map((paragraph, index) => {
-                const trimmed = paragraph.trim();
-                if (trimmed.startsWith('**') && trimmed.endsWith('**')) {
-                   return <h2 key={index} className="font-semibold text-xl mt-6 mb-3 text-primary">{trimmed.substring(2, trimmed.length - 2)}</h2>;
-                } else if (trimmed.match(/^\d+\.\s\*\*/)) { 
-                  const titleContent = trimmed.substring(trimmed.indexOf('**') + 2, trimmed.lastIndexOf('**'));
-                  return <h3 key={index} className="font-medium text-lg mt-4 mb-1.5">{`${trimmed.substring(0, trimmed.indexOf('**'))} ${titleContent}`}</h3>;
-                } else if (trimmed.match(/^\d+\.\s/)) { 
-                  return <h3 key={index} className="font-medium text-lg mt-4 mb-1.5">{trimmed}</h3>;
-                } else if (trimmed.startsWith('- ')) {
-                  return <li key={index} className="ml-6 list-disc my-1">{trimmed.substring(2)}</li>;
-                }
-                return <p key={index} className="my-2.5 leading-relaxed">{trimmed || <br />}</p>;
-              })}
+            <div className="space-y-6 text-sm sm:text-base leading-7">
+              <section>
+                <h3 className="text-lg font-semibold mb-2">1. Refund Policy</h3>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>If cancelled within 48 hours of registration: 90% refund (excluding GST).</li>
+                  <li>6+ months before event: 70% refund (excluding GST and processing charges and platform fees).</li>
+                  <li>4 months before event: 50% refund (excluding GST).</li>
+                  <li>3 months before event: 20% refund (excluding GST).</li>
+                  <li>2 months or less before event: No refund.</li>
+                  <li>Approved refunds are processed within 15 working days.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-semibold mb-2">2. Deferral Policy</h3>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>Deferral requests must be submitted at least 60 days before event date.</li>
+                  <li>Only one deferral per entry is allowed, subject to approval.</li>
+                  <li>Fee difference may apply when moving to a higher-priced event/category.</li>
+                  <li>Deferral validity: 1 year from original event date.</li>
+                </ul>
+                <p className="mt-2"><strong>Deferral Fee:</strong> {deferralInr} / {deferralUsd}</p>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-semibold mb-2">3. Category Change</h3>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>Category change requests are allowed up to 60 days before event date.</li>
+                  <li>
+                    Triathlon Fees: Deferral {deferralInr} / {deferralUsd}, Category Change {categoryChangeInr} / {categoryChangeUsd}
+                  </li>
+                  <li>
+                    Swimathon (Sub-category Type) Fees: Deferral {swimDeferralInr} / {swimDeferralUsd}, Category Change {swimCategoryChangeInr} / {swimCategoryChangeUsd}
+                  </li>
+                  <li>No fee-difference refund applies when switching to a lower category.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-semibold mb-2">4. No Show / Force Majeure</h3>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>No refund/transfer in case of no-show.</li>
+                  <li>No refund if event is cancelled due to force majeure, natural calamity, safety risk, or regulatory restriction.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-semibold mb-2">5. Age Eligibility</h3>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>Triathlon minimum age: {triathlonMinAge} years on race day.</li>
+                  <li>Swimathon (Sub-category Type) minimum age: {swimathonMinAge} years and above on race day.</li>
+                </ul>
+              </section>
             </div>
           </ScrollArea>
         </CardContent>
-         <CardFooter className="border-t pt-6">
-          <Button variant="outline" onClick={() => router.back()}>
-            <ArrowLeft className="mr-2 h-4 w-4" /> Go Back
+        <CardFooter className="border-t pt-6">
+          <Button asChild variant="outline">
+            <Link href="/">
+              <ArrowLeft className="mr-2 h-4 w-4" /> Go Back
+            </Link>
           </Button>
         </CardFooter>
       </Card>

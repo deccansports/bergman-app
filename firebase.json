@@ -25,17 +25,6 @@
         "firebase-debug.*.log",
         "functions"
       ]
-    },
-    {
-      "backendId": "bmapp",
-      "rootDir": ".",
-      "ignore": [
-        "node_modules",
-        ".git",
-        "firebase-debug.log",
-        "firebase-debug.*.log",
-        "functions"
-      ]
     }
   ],
   "functions": [

@@ -701,6 +701,9 @@ export default function ClubDashboardPage() {
                                 </div>
                                 <div className="text-left">
                                     <h4 className="font-bold text-sm text-left">Club Logo</h4>
+                                    <p className="mt-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs font-medium text-primary">
+                                        📸 Logo Tip: For best display, upload square logos (1:1 aspect ratio) like 512×512px or 1024×1024px in PNG/JPG format.
+                                    </p>
                                     <div className="text-[10px] text-muted-foreground mt-1 text-left space-y-1">
                                         <p className="font-bold text-primary">Recommended Specs:</p>
                                         <p>• Dimensions: 500 x 500 pixels (1:1 Square)</p>

@@ -72,6 +72,25 @@ export async function findInvoiceByReference(referenceNumber: string): Promise<a
 }
 
 /**
+ * FIND INVOICE BY INVOICE NUMBER
+ */
+export async function findInvoiceByInvoiceNumber(invoiceNumber: string): Promise<any | null> {
+  if (!invoiceNumber) return null;
+  const normalized = String(invoiceNumber).trim().toUpperCase();
+  try {
+    const data = await zohoFetch('/invoices', { params: { invoice_number_contains: normalized } });
+    if (!data?.invoices || !Array.isArray(data.invoices)) return null;
+
+    return data.invoices.find((inv: any) => {
+      const number = String(inv?.invoice_number || '').trim().toUpperCase();
+      return number === normalized;
+    }) || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * GET INVOICE BY ID
  */
 export async function getZohoInvoiceById(invoiceId: string): Promise<any | null> {

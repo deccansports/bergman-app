@@ -3,7 +3,9 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import {
   differenceInDays,
+  differenceInHours,
   parseISO,
+  parse,
   isValid as isDateValid,
   isBefore,
   differenceInYears,
@@ -21,6 +23,7 @@ import {
   DAYS_FOR_3_MONTHS_REFUND,
   CANCELLATION_WITHIN_2_DAYS_REFUND_PERCENTAGE,
   INDIAN_STATES,
+  USA_STATES,
 } from "@/lib/constants";
 
 import countryFlags from "./countryFlagsEmoji.json";
@@ -69,6 +72,77 @@ export function sanitizeMoney(value: any): number {
   const num = Number(value);
   if (isNaN(num) || num < 0) return 0;
   return Math.round(num);
+}
+
+/**
+ * Robust hidden-event detector.
+ * Handles legacy shapes like `hidden`, `visibility: 'hidden'`, string flags, etc.
+ */
+export function isEventHidden(event: any): boolean {
+  const raw = event?.isHidden ?? event?.hidden ?? event?.visibility;
+  const homepageRaw = event?.showOnHomepage;
+  const publishRaw = event?.isPublished ?? event?.published;
+  const statusRaw = event?.status;
+
+  // 1) Explicit hidden flag always wins (supports true/false and 1/0)
+  if (typeof raw === 'boolean') return raw;
+  if (typeof raw === 'number') return raw === 1;
+
+  const normalized = String(raw ?? '').trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'hidden') return true;
+  if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'visible') return false;
+
+  // Explicit homepage visibility toggle support
+  if (typeof homepageRaw === 'boolean' && homepageRaw === false) return true;
+  if (typeof homepageRaw === 'number' && homepageRaw === 0) return true;
+
+  // Explicit publish-state toggle support
+  if (typeof publishRaw === 'boolean' && publishRaw === false) return true;
+  if (typeof publishRaw === 'number' && publishRaw === 0) return true;
+
+  const normalizedHomepage = String(homepageRaw ?? '').trim().toLowerCase();
+  const normalizedPublish = String(publishRaw ?? '').trim().toLowerCase();
+  const normalizedStatus = String(statusRaw ?? '').trim().toLowerCase();
+
+  return (
+    normalizedHomepage === 'false' ||
+    normalizedHomepage === '0' ||
+    normalizedPublish === 'false' ||
+    normalizedPublish === '0' ||
+    normalizedStatus === 'hidden' ||
+    normalizedStatus === 'archived'
+  );
+}
+
+/**
+ * Robust hidden-ticket detector.
+ * Handles legacy shapes like `hidden`, `visibility: 'hidden'`, string flags, etc.
+ */
+export function isTicketHidden(ticket: any): boolean {
+  const raw = ticket?.isHidden ?? ticket?.hidden ?? ticket?.visibility;
+
+  if (typeof raw === 'boolean') return raw;
+  if (typeof raw === 'number') return raw === 1;
+
+  const normalized = String(raw ?? '').trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'hidden') return true;
+  if (normalized === 'false' || normalized === '0' || normalized === 'no' || normalized === 'visible') return false;
+
+  return false;
+}
+
+export function getEventRegistrationButtonState(event: any): 'show' | 'hide' | 'sold_out' {
+  const raw = event?.registrationButtonState ?? event?.registrationButtonVisibility ?? event?.registrationCtaState;
+
+  if (typeof raw === 'string') {
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'show' || normalized === 'visible' || normalized === 'live') return 'show';
+    if (normalized === 'hide' || normalized === 'hidden' || normalized === 'disabled') return 'hide';
+    if (normalized === 'sold_out' || normalized === 'soldout' || normalized === 'sold out') return 'sold_out';
+  }
+
+  if (event?.isSoldOut === true) return 'sold_out';
+  return 'show';
 }
 
 export function hmsToSeconds(timeString?: string | null): number {
@@ -137,6 +211,15 @@ export function normalizeStatus(status?: string | null): string {
   return status;
 }
 
+export function isFinalRaceStatus(status?: string | null): boolean {
+  const normalized = normalizeStatus(status);
+  return normalized === 'Finished' || normalized === 'DNF' || normalized === 'DNS' || normalized === 'DNQ';
+}
+
+export function isFinisherGoodiesEligible(status?: string | null): boolean {
+  return normalizeStatus(status) === 'Finished';
+}
+
 export const isTriathlonEvent = (raceCategory?: string | null) => !!raceCategory && raceCategory.trim().toUpperCase().includes("TRIATHLON");
 export const isDuathlonEvent = (raceCategory?: string | null) => !!raceCategory && raceCategory.trim().toUpperCase().includes("DUATHLON");
 
@@ -203,8 +286,17 @@ export function calculateAgeGroup(
 ) {
   if (!dob) return { age: null, ageCategory: null };
   try {
-    const birthDate = parseISO(dob);
-    if (!isDateValid(birthDate)) return { age: null, ageCategory: null };
+    const dobRaw = String(dob).trim();
+    const birthDateCandidates = [
+      parseISO(dobRaw),
+      parse(dobRaw, 'dd/MM/yyyy', new Date()),
+      parse(dobRaw, 'MM/dd/yyyy', new Date()),
+      parse(dobRaw, 'dd-MM-yyyy', new Date()),
+      parse(dobRaw, 'MM-dd-yyyy', new Date()),
+      parse(dobRaw, 'yyyy-MM-dd', new Date()),
+    ];
+    const birthDate = birthDateCandidates.find((d) => isDateValid(d));
+    if (!birthDate || !isDateValid(birthDate)) return { age: null, ageCategory: null };
 
     const refDate = referenceDate ? parseISO(referenceDate) : new Date();
     const age = differenceInYears(refDate, birthDate);
@@ -255,11 +347,14 @@ export function calculateRefundAmount(
 
     let percentage = 0;
     const daysUntilEvent = differenceInDays(eventDate, today);
+    let withinRegistrationGraceWindow = false;
 
     if (registeredAtStr) {
       const regDate = parseISO(registeredAtStr);
-      if (isDateValid(regDate) && differenceInDays(today, regDate) <= 2) {
+      const hoursSinceRegistration = isDateValid(regDate) ? differenceInHours(new Date(), regDate) : Infinity;
+      if (isDateValid(regDate) && hoursSinceRegistration >= 0 && hoursSinceRegistration <= 48) {
         percentage = CANCELLATION_WITHIN_2_DAYS_REFUND_PERCENTAGE;
+        withinRegistrationGraceWindow = true;
       }
     }
 
@@ -271,7 +366,11 @@ export function calculateRefundAmount(
     }
 
     const base = originalAmountPaidPaisa - (taxAmountPaisa ?? 0) - (processingFeePaisa ?? 0) - (platformFeePaisa ?? 0);
-    return { refundAmountPaisa: Math.max(0, Math.round((base * percentage) / 100)), percentage, policyApplied: `${percentage}% refund`, daysUntilEvent, canCancel: daysUntilEvent >= 60 };
+    const canCancel = daysUntilEvent >= 60 || withinRegistrationGraceWindow;
+    const policyApplied = withinRegistrationGraceWindow
+      ? `${percentage}% refund (within 48 hours of registration)`
+      : `${percentage}% refund`;
+    return { refundAmountPaisa: Math.max(0, Math.round((base * percentage) / 100)), percentage, policyApplied, daysUntilEvent, canCancel };
   } catch {
     return { refundAmountPaisa: 0, percentage: 0, policyApplied: "Error", daysUntilEvent: Infinity, canCancel: false };
   }
@@ -324,6 +423,30 @@ export function getStateName(stateInput?: string | null): string | undefined {
   return found?.name;
 }
 
+/**
+ * Returns a canonical state name for India/USA inputs.
+ * Example: `MH` and `Maharashtra` both normalize to `Maharashtra`.
+ */
+export function normalizeStateNameForCountry(stateInput?: string | null, countryInput?: string | null): string | undefined {
+  if (!stateInput) return undefined;
+
+  const search = stateInput.trim().toUpperCase();
+  const country = (countryInput || '').trim().toLowerCase();
+
+  const indiaAliases = new Set(['india', 'in', 'bharat']);
+  const usaAliases = new Set(['united states', 'united states of america', 'usa', 'us']);
+
+  let source = [...INDIAN_STATES, ...USA_STATES];
+  if (indiaAliases.has(country)) source = INDIAN_STATES;
+  if (usaAliases.has(country)) source = USA_STATES;
+
+  const found = source.find(
+    s => s.value.toUpperCase() === search || s.name.toUpperCase() === search || s.label.toUpperCase() === search
+  );
+
+  return found?.name || stateInput.trim();
+}
+
 export function getPace(seconds: number, distanceKm?: number | null, type: 'swim' | 'bike' | 'run' | 'transition' = 'run'): string {
   if (!distanceKm || distanceKm <= 0 || !seconds || seconds <= 0) return "-";
   if (type === 'swim') {
@@ -357,4 +480,94 @@ export function interpolatePositionFromPaths(gpxPaths: { path: google.maps.LatLn
   }
   const last = gpxPaths[gpxPaths.length - 1].path.slice(-1)[0];
   return last || null;
+}
+/**
+ * Checks if a ticket sale window is currently open
+ * Considers both date and time bounds
+ * @param openDate - ISO date string (YYYY-MM-DD)
+ * @param startTime - Optional HH:mm format time (defaults to 00:00)
+ * @param closeDate - ISO date string (YYYY-MM-DD)
+ * @param endTime - Optional HH:mm format time (defaults to 23:59)
+ * @returns true if current time falls within the open/close window
+ */
+export function isTicketSaleOpen(
+  openDate?: string | null,
+  startTime?: string | null,
+  closeDate?: string | null,
+  endTime?: string | null
+): boolean {
+  const now = new Date();
+
+  // If no dates specified, sale is open
+  if (!openDate && !closeDate) return true;
+
+  const normDate = (raw: string): string | null => {
+    const value = String(raw || '').trim();
+    if (!value) return null;
+
+    // Already yyyy-MM-dd
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+
+    // ISO / timestamp-like
+    if (value.includes('T')) {
+      const iso = parseISO(value);
+      if (isDateValid(iso)) return format(iso, 'yyyy-MM-dd');
+    }
+
+    // Common admin-entered date formats
+    const patterns = [
+      'dd MMM yyyy',
+      'dd MMMM yyyy',
+      'MMM dd yyyy',
+      'MMM d yyyy',
+      'MMMM dd yyyy',
+      'MMMM d yyyy',
+      'dd/MM/yyyy',
+      'MM/dd/yyyy',
+      'yyyy/MM/dd',
+    ];
+
+    for (const p of patterns) {
+      const parsed = parse(value, p, new Date());
+      if (isDateValid(parsed)) return format(parsed, 'yyyy-MM-dd');
+    }
+
+    // Final fallback
+    const fallback = new Date(value);
+    if (isDateValid(fallback)) return format(fallback, 'yyyy-MM-dd');
+
+    return null;
+  };
+
+  // Normalise to HH:mm (accepts HH:mm or HH:mm:ss)
+  const normTime = (raw: string | null | undefined, fallback: string): string => {
+    const value = String(raw || '').trim() || fallback;
+    const match = value.match(/^(\d{1,2}):(\d{2})/);
+    if (!match) return fallback;
+    const hh = String(Math.min(Math.max(Number(match[1]), 0), 23)).padStart(2, '0');
+    const mm = String(Math.min(Math.max(Number(match[2]), 0), 59)).padStart(2, '0');
+    return `${hh}:${mm}`;
+  };
+
+  // Construct start datetime
+  if (openDate) {
+    const openDateStr = normDate(openDate);
+    if (!openDateStr) return false;
+    const startTimeStr = normTime(startTime, "00:00");
+    const startDatetime = parse(`${openDateStr} ${startTimeStr}`, "yyyy-MM-dd HH:mm", new Date());
+    if (!isDateValid(startDatetime)) return false;
+    if (now < startDatetime) return false;
+  }
+
+  // Construct end datetime
+  if (closeDate) {
+    const closeDateStr = normDate(closeDate);
+    if (!closeDateStr) return false;
+    const endTimeStr = normTime(endTime, "23:59");
+    const endDatetime = parse(`${closeDateStr} ${endTimeStr}`, "yyyy-MM-dd HH:mm", new Date());
+    if (!isDateValid(endDatetime)) return false;
+    if (now > endDatetime) return false;
+  }
+
+  return true;
 }

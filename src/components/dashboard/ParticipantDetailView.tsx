@@ -16,7 +16,7 @@ import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose, DialogDescription } from '@/components/ui/dialog';
 import Image from 'next/image';
-import { isValidImageUrl } from '@/lib/utils';
+import { getCountryFlagEmoji, isValidImageUrl } from '@/lib/utils';
 import jsPDF from 'jspdf';
 import { useToast } from '@/hooks/use-toast';
 import { waiverTextTemplate } from '@/lib/constants/waiver';
@@ -122,10 +122,25 @@ export default function ParticipantDetailView({ participant }: ParticipantDetail
         }
     };
 
+    const currencyCode: 'INR' | 'USD' =
+        String((participant as any).currency || '').toUpperCase() === 'USD' ||
+        participant.pricingBreakdown?.currency === 'USD' ||
+        participant.paymentMethod?.toLowerCase().includes('stripe')
+            ? 'USD'
+            : 'INR';
+
     const formatCurrency = (amount: number | null | undefined) => {
         if (amount === null || amount === undefined) return 'N/A';
-        return `₹${(amount / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        const symbol = currencyCode === 'USD' ? '$' : '₹';
+        const locale = currencyCode === 'USD' ? 'en-US' : 'en-IN';
+        return `${symbol}${(amount / 100).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     };
+
+    const displayPaymentMethod = (() => {
+        const rawMethod = String(participant.paymentMethod || '').trim();
+        if (currencyCode === 'USD') return 'Stripe';
+        return rawMethod || 'Online';
+    })();
 
     const formatDate = (dateString: string | null | undefined) => {
         if (!dateString) return 'N/A';
@@ -138,6 +153,7 @@ export default function ParticipantDetailView({ participant }: ParticipantDetail
     
     const checkInStatusVariant = participant.checkInStatus === 'CheckedIn' ? 'default' : 'destructive';
     const ticketStatusVariant = participant.ticketStatus?.toLowerCase() === 'active' ? 'default' : 'destructive';
+    const countryFlag = getCountryFlagEmoji(participant.country);
 
     const locationStr = [participant.address, participant.city, participant.pincode].filter(Boolean).join(', ');
     const stateCountryStr = [participant.state, participant.country].filter(Boolean).join(', ');
@@ -153,7 +169,7 @@ export default function ParticipantDetailView({ participant }: ParticipantDetail
                     <ScrollArea className="h-[60vh] pr-4">
                         <div className="space-y-1 text-sm">
                             <h4 className="font-black text-[10px] uppercase tracking-widest pt-2 text-primary">Identity</h4>
-                            <DetailRow icon={UserCircle} label="Full Name" value={participant.name} />
+                            <DetailRow icon={UserCircle} label="Full Name" value={countryFlag ? `${countryFlag} ${participant.name || ''}`.trim() : participant.name} />
                             <DetailRow icon={Mail} label="Email Address" value={participant.email} />
                             <DetailRow icon={Smartphone} label="Contact No." value={participant.mobile} />
                             <DetailRow icon={Smartphone} label="Emergency Contact" value={participant.emergencyContactNumber} />
@@ -178,7 +194,7 @@ export default function ParticipantDetailView({ participant }: ParticipantDetail
 
                             <h4 className="font-black text-[10px] uppercase tracking-widest pt-4 border-t mt-4 text-primary">Financials</h4>
                             <DetailRow icon={Banknote} label="Payment ID" value={participant.paymentId || participant.transactionId} />
-                            <DetailRow icon={CreditCard} label="Method" value={participant.paymentMethod || 'Online'} />
+                            <DetailRow icon={CreditCard} label="Method" value={displayPaymentMethod} />
                             <DetailRow icon={Banknote} label="Total Paid" value={formatCurrency(participant.amountPaidPaisa)} />
                             <DetailRow icon={Info} label="Invoice No." value={participant.invoiceNumber} />
 

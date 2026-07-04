@@ -11,6 +11,7 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 
 type AssetType = 
   | 'image' 
+  | 'finishLedLogoUrl'
   | 'swimGpxUrl' | 'bikeGpxUrl' | 'runGpxUrl' | 'run1GpxUrl' | 'run2GpxUrl'
   | 'athleteGuideBookUrl';
 
@@ -31,7 +32,7 @@ export async function POST(request: NextRequest) {
     
     // Validate file type and size
     const isGpxUpload = type.toLowerCase().includes('gpx');
-    const isImageUpload = type === 'image';
+    const isImageUpload = type === 'image' || type === 'finishLedLogoUrl';
     const isPdfUpload = type === 'athleteGuideBookUrl';
 
     let fileTypeIsValid = false;
@@ -66,8 +67,10 @@ export async function POST(request: NextRequest) {
     let docRef: FirebaseFirestore.DocumentReference;
 
     if (isImageUpload) {
-        filePath = `event-images/${eventId}/${type}-${Date.now()}.${fileExtension}`;
-        fieldToUpdate = 'photoUrl';
+        filePath = type === 'finishLedLogoUrl'
+          ? `event-branding/${eventId}/finish-led-logo-${Date.now()}.${fileExtension}`
+          : `event-images/${eventId}/${type}-${Date.now()}.${fileExtension}`;
+        fieldToUpdate = type === 'finishLedLogoUrl' ? 'finishLedLogoUrl' : 'photoUrl';
         docRef = adminDb.collection('events').doc(eventId);
     } else if (isPdfUpload) {
         filePath = `event-documents/${eventId}/guidebook-${Date.now()}.${fileExtension}`;

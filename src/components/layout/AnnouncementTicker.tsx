@@ -3,7 +3,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useAuth } from '@/context/AuthContext';
 import { getActiveAnnouncementsAction } from '@/lib/actions/announcementActions';
 import type { Announcement, AnnouncementType } from '@/lib/types';
@@ -23,51 +23,91 @@ export function AnnouncementTicker() {
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    if (authLoading) return;
+    const role: AnnouncementType | 'admin' = currentUser?.isAdmin
+      ? 'admin'
+      : currentUser?.ownedClubId
+        ? 'club'
+        : 'athlete';
+    const cacheKey = `announcementTicker:${role}`;
+    let hasCache = false;
+
+    try {
+      const cached = typeof window !== 'undefined' ? sessionStorage.getItem(cacheKey) : null;
+      if (cached) {
+        const parsed = JSON.parse(cached) as Announcement[];
+        if (Array.isArray(parsed)) {
+          setAnnouncements(parsed.filter(a => a?.isTicker));
+          setIsLoaded(true);
+          hasCache = true;
+        }
+      }
+    } catch {
+      // ignore cache parse errors
+    }
+
+    // Do not block UI while network fetch is in progress.
+    setIsLoaded(true);
 
     const fetchAnnouncements = async () => {
-        let role: AnnouncementType | 'admin' = 'athlete';
-        if (currentUser?.isAdmin) role = 'admin';
-        else if (currentUser?.ownedClubId) role = 'club';
-
         try {
             const res = await getActiveAnnouncementsAction({ role });
             if (res.success && res.announcements && Array.isArray(res.announcements)) {
-                setAnnouncements(res.announcements.filter(a => a.isTicker));
+                const tickerAnnouncements = res.announcements.filter(a => a.isTicker);
+                setAnnouncements(tickerAnnouncements);
+                if (typeof window !== 'undefined') {
+                  sessionStorage.setItem(cacheKey, JSON.stringify(tickerAnnouncements));
+                }
             }
         } catch (error) {
             console.error("Failed to load announcements:", error);
-        } finally {
-            setIsLoaded(true);
         }
     };
 
     fetchAnnouncements();
   }, [currentUser, authLoading]);
 
-  const handleTickerClick = () => {
-    const active = announcements[currentIndex];
-    if (!active) return;
+  useEffect(() => {
+    if (announcements.length === 0) return;
+    setCurrentIndex((prev) => (prev >= announcements.length ? 0 : prev));
+  }, [announcements]);
 
-    if (active.linkUrl) {
-        const url = active.linkUrl.trim();
+  const handleTickerClick = (announcement: Announcement) => {
+    if (!announcement) return;
+
+    if (announcement.linkUrl) {
+        const url = announcement.linkUrl.trim();
         if (url.startsWith('http')) {
             window.open(url, '_blank');
         } else {
             router.push(url);
         }
-    } else if (active.isModal) {
-        setSelectedAnnouncement(active);
+    } else if (announcement.isModal) {
+        setSelectedAnnouncement(announcement);
     }
   };
 
-  const nextAnnouncement = () => {
-    setCurrentIndex((prev) => (prev + 1) % announcements.length);
-  };
+  const isSingleAnnouncement = announcements.length === 1;
+  const active = announcements[currentIndex];
+  const activeTitleLength = active?.title?.length || 24;
+  const configuredSpeed = Number(active?.tickerSpeedSeconds ?? 15);
+  const baseDuration = Number.isFinite(configuredSpeed)
+    ? Math.min(40, Math.max(5, configuredSpeed))
+    : 15;
+  const marqueeDuration = isSingleAnnouncement
+    ? Math.max(baseDuration, activeTitleLength * 0.18)
+    : baseDuration;
+
+  useEffect(() => {
+    if (announcements.length <= 1) return;
+    const timer = setTimeout(() => {
+      setCurrentIndex((prev) => (prev + 1) % announcements.length);
+    }, marqueeDuration * 1000 + 120);
+
+    return () => clearTimeout(timer);
+  }, [currentIndex, announcements.length, marqueeDuration]);
 
   if (isDismissed || !isLoaded || announcements.length === 0) return null;
 
-  const active = announcements[currentIndex];
   if (!active) return null;
 
   const bgClass = {
@@ -90,31 +130,30 @@ export function AnnouncementTicker() {
             </div>
 
             <div className="relative flex-1 h-9 overflow-hidden">
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={active.id}
-                  initial={{ x: '100%' }}
-                  animate={{ x: '-100%' }}
-                  transition={{ 
-                    duration: Math.max(12, active.title.length * 0.3),
-                    ease: "linear",
-                  }}
-                  onAnimationComplete={nextAnnouncement}
-                  className="absolute whitespace-nowrap flex items-center h-full cursor-pointer pr-[100%]"
-                  onClick={handleTickerClick}
-                >
-                  <span className="text-xs sm:text-sm font-bold uppercase tracking-tight flex items-center gap-4">
-                    {active.title}
-                    {active.linkUrl ? (
-                        <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded uppercase font-black tracking-widest flex items-center gap-1">
-                            Link <ArrowRight className="h-2 w-2"/>
-                        </span>
-                    ) : active.isModal ? (
-                        <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded uppercase font-black tracking-widest">Details &rarr;</span>
-                    ) : null}
-                  </span>
-                </motion.div>
-              </AnimatePresence>
+              <motion.div
+                key={`${active.id}-${currentIndex}`}
+                initial={{ x: '100%' }}
+                animate={{ x: '-110%' }}
+                transition={{
+                  duration: marqueeDuration,
+                  ease: 'linear',
+                  repeat: isSingleAnnouncement ? Infinity : 0,
+                  repeatType: 'loop',
+                }}
+                className="absolute left-0 top-0 h-full whitespace-nowrap flex items-center cursor-pointer"
+                onClick={() => handleTickerClick(active)}
+              >
+                <span className="text-xs sm:text-sm font-bold uppercase tracking-tight flex items-center gap-4 px-2">
+                  {active.title}
+                  {active.linkUrl ? (
+                    <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded uppercase font-black tracking-widest flex items-center gap-1">
+                      Link <ArrowRight className="h-2 w-2"/>
+                    </span>
+                  ) : active.isModal ? (
+                    <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded uppercase font-black tracking-widest">Details &rarr;</span>
+                  ) : null}
+                </span>
+              </motion.div>
             </div>
           </div>
 

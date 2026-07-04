@@ -1,8 +1,9 @@
 // src/components/admin/PaymentsTab.tsx
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/AuthContext';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -21,6 +22,8 @@ interface Props {
 
 export default function PaymentsTab({ selectedEventId }: Props) {
   const { toast } = useToast();
+  const { currentUser } = useAuth();
+  const isViewOnlyAdmin = !!(currentUser?.isAdmin && currentUser?.adminAccessMode === 'view');
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -45,8 +48,24 @@ export default function PaymentsTab({ selectedEventId }: Props) {
   }, [toast]);
   
   useEffect(() => {
-    fetchPayments(searchTerm || undefined, searchBy, selectedEventId || undefined);
-  }, [selectedEventId, fetchPayments, searchTerm, searchBy]);
+    fetchPayments(undefined, undefined, selectedEventId || undefined);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedEventId]);
+
+  const filteredPayments = useMemo(() => {
+    if (!searchTerm.trim()) return payments;
+    const term = searchTerm.toLowerCase().trim();
+    return payments.filter((p) => {
+      switch (searchBy) {
+        case 'paymentId': return p.id?.toLowerCase().includes(term);
+        case 'orderId': return (p as any).order_id?.toLowerCase().includes(term);
+        case 'email': return p.email?.toLowerCase().includes(term);
+        case 'contact': return String(p.contact || '').toLowerCase().includes(term);
+        case 'method': return p.method?.toLowerCase().includes(term);
+        default: return true;
+      }
+    });
+  }, [payments, searchTerm, searchBy]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,8 +129,8 @@ export default function PaymentsTab({ selectedEventId }: Props) {
                 <TableHeader><TableRow><TableHead>Payment ID</TableHead><TableHead>Amount</TableHead><TableHead>Method</TableHead><TableHead>Contact</TableHead><TableHead>Notes</TableHead><TableHead>Date</TableHead><TableHead>Status</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
                 <TableBody>
                     {isLoading ? <TableRow><TableCell colSpan={8} className="text-center p-8"><Loader2 className="animate-spin h-8 w-8 text-primary mx-auto"/></TableCell></TableRow>
-                    : payments.length === 0 ? <TableRow><TableCell colSpan={8} className="text-center py-8">No payments found for the current filter.</TableCell></TableRow>
-                    : payments.map(p => (
+                    : filteredPayments.length === 0 ? <TableRow><TableCell colSpan={8} className="text-center py-8">No payments found for the current filter.</TableCell></TableRow>
+                    : filteredPayments.map(p => (
                         <TableRow key={p.id}>
                             <TableCell className="font-mono text-xs">{p.id.replace('pay_', '')}</TableCell>
                             <TableCell>₹{(p.amount / 100).toFixed(2)}</TableCell>
@@ -126,13 +145,13 @@ export default function PaymentsTab({ selectedEventId }: Props) {
                                 {p.status === 'captured' && p.amount_refunded === 0 && (
                                     <AlertDialog>
                                         <AlertDialogTrigger asChild>
-                                            <Button size="xs" variant="destructive" disabled={isRefunding === p.id}>
+                                            <Button size="xs" variant="destructive" disabled={isRefunding === p.id || isViewOnlyAdmin}>
                                                 {isRefunding === p.id ? <Loader2 className="animate-spin h-4 w-4"/> : 'Refund'}
                                             </Button>
                                         </AlertDialogTrigger>
                                         <AlertDialogContent>
                                             <AlertDialogHeader><AlertDialogTitle>Confirm Full Refund</AlertDialogTitle><AlertDialogDescription>This will initiate a full refund of ₹{(p.amount/100).toFixed(2)} for payment {p.id}. This action cannot be undone.</AlertDialogDescription></AlertDialogHeader>
-                                            <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={()=>handleRefund(p.id)} disabled={isRefunding===p.id}>Confirm Refund</AlertDialogAction></AlertDialogFooter>
+                                            <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={()=>handleRefund(p.id)} disabled={isRefunding===p.id || isViewOnlyAdmin}>Confirm Refund</AlertDialogAction></AlertDialogFooter>
                                         </AlertDialogContent>
                                     </AlertDialog>
                                 )}

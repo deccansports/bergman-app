@@ -1,0 +1,1194 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8"/>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="x-apple-disable-message-reformatting"/>
+  <title>{{ params.event_name }} — Your Influencer Collab Kit</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Bebas+Neue&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', Arial, sans-serif;
+      background-color: #05080e;
+      color: #eef4ff;
+      margin: 0;
+      padding: 0;
+      -webkit-text-size-adjust: 100%;
+      -ms-text-size-adjust: 100%;
+    }
+
+    /* ── WRAPPER ── */
+    .email-wrapper {
+      width: 100%;
+      background-color: #05080e;
+      padding: 0;
+      margin: 0;
+    }
+    .email-container {
+      max-width: 640px;
+      margin: 0 auto;
+      background-color: #05080e;
+    }
+
+    /* ══════════════════════════
+       LOGO HEADER
+    ══════════════════════════ */
+    .logo-header {
+      background-color: #080d18;
+      border-bottom: 1px solid rgba(0,200,255,0.12);
+      padding: 20px 28px;
+    }
+    .logo-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .logo-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .logo-wordmark {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 34px;
+      letter-spacing: 6px;
+      line-height: 1;
+    }
+    .lw-berg { color: #eef4ff; }
+    .lw-man  { color: #00c8ff; }
+    .logo-tagline {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: #3d5068;
+      margin-top: 3px;
+    }
+    .logo-badge {
+      background-color: #ff6b00;
+      color: #ffffff;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 6px 16px;
+      border-radius: 100px;
+    }
+
+    /* ══════════════════════════
+       TOPBAR
+    ══════════════════════════ */
+    .topbar {
+      background-color: #0c1220;
+      border-bottom: 1px solid rgba(0,200,255,0.09);
+      padding: 14px 28px;
+    }
+    .topbar-event {
+      font-size: 15px;
+      font-weight: 800;
+      color: #eef4ff;
+      line-height: 1;
+    }
+    .topbar-sub {
+      font-size: 11px;
+      color: #3d5068;
+      margin-top: 4px;
+      letter-spacing: 0.4px;
+    }
+    .topbar-sub span {
+      color: #00c8ff;
+      font-weight: 700;
+    }
+
+    /* ══════════════════════════
+       HERO BANNER
+    ══════════════════════════ */
+    .hero {
+      background: linear-gradient(155deg, #080f1e 0%, #05080e 100%);
+      border-left: 1px solid rgba(0,200,255,0.09);
+      border-right: 1px solid rgba(0,200,255,0.09);
+      padding: 0;
+      overflow: hidden;
+    }
+    .hero-image-wrap {
+      position: relative;
+      width: 100%;
+      line-height: 0;
+    }
+    .hero-image {
+      width: 100%;
+      max-height: 340px;
+      object-fit: cover;
+      display: block;
+    }
+    .hero-overlay {
+      background: linear-gradient(0deg, rgba(4,8,14,0.95) 0%, rgba(4,8,14,0.5) 50%, transparent 100%);
+      padding: 20px 28px 24px;
+    }
+    .hero-tag {
+      display: inline-block;
+      background-color: rgba(0,200,255,0.10);
+      border: 1px solid rgba(0,200,255,0.30);
+      border-radius: 100px;
+      padding: 5px 14px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: #00c8ff;
+      margin-bottom: 14px;
+    }
+    .hero-headline {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 52px;
+      line-height: 0.93;
+      letter-spacing: 2px;
+      margin-bottom: 14px;
+    }
+    .hl-1 { display: block; color: #eef4ff; }
+    .hl-2 { display: block; color: #00c8ff; }
+    .hl-3 { display: block; color: #ff6b00; }
+    .hero-sub {
+      font-size: 13px;
+      color: #3d5068;
+      line-height: 1.8;
+      border-left: 3px solid #ff6b00;
+      padding-left: 13px;
+      margin-bottom: 22px;
+    }
+
+    /* Hero stats strip */
+    .hero-stats {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .hstat {
+      background-color: rgba(0,200,255,0.05);
+      border: 1px solid rgba(0,200,255,0.12);
+      border-radius: 10px;
+      padding: 10px 16px;
+      flex: 1;
+      min-width: 100px;
+      text-align: center;
+    }
+    .hstat-num {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 22px;
+      letter-spacing: 1px;
+      line-height: 1;
+      color: #00c8ff;
+    }
+    .hstat-num-g { color: #aaff00; }
+    .hstat-num-a { color: #ff6b00; }
+    .hstat-lbl {
+      font-size: 9px;
+      color: #3d5068;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 3px;
+    }
+
+    /* ══════════════════════════
+       MAIN CARD
+    ══════════════════════════ */
+    .main-card {
+      background-color: #080d18;
+      border: 1px solid rgba(0,200,255,0.09);
+      border-top: none;
+      padding: 36px 32px;
+    }
+
+    /* Divider */
+    .divider {
+      height: 1px;
+      background: linear-gradient(90deg, #00c8ff, #aaff00, #ff6b00, transparent);
+      margin: 28px 0;
+      border: none;
+    }
+
+    /* Section label */
+    .section-label {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #3d5068;
+      margin-bottom: 14px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(0,200,255,0.09);
+    }
+
+    /* ══════════════════════════
+       OFFICIAL LETTER
+    ══════════════════════════ */
+    .official-letter {
+      background-color: #0c1220;
+      border: 1px solid rgba(0,200,255,0.09);
+      border-left: 3px solid #00c8ff;
+      border-radius: 14px;
+      padding: 26px 28px;
+      margin-bottom: 0;
+    }
+    .ol-salute {
+      font-size: 11px;
+      font-weight: 700;
+      color: #3d5068;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    .ol-greeting {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 28px;
+      letter-spacing: 2px;
+      color: #eef4ff;
+      line-height: 1;
+      margin-bottom: 20px;
+    }
+    .ol-body {
+      font-size: 14px;
+      line-height: 1.85;
+      color: rgba(238,244,255,0.86);
+    }
+    .ol-body p { margin-bottom: 14px; }
+    .ol-event-name { color: #00c8ff; font-weight: 800; }
+
+    /* Kit list */
+    .ol-kit-list {
+      background-color: rgba(0,200,255,0.04);
+      border: 1px solid rgba(0,200,255,0.12);
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin: 0 0 14px 0;
+      list-style: none;
+    }
+    .ol-kit-list li {
+      font-size: 14px;
+      font-weight: 600;
+      color: #eef4ff;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(0,200,255,0.06);
+    }
+    .ol-kit-list li:last-child { border-bottom: none; }
+
+    /* Highlight box */
+    .ol-highlight {
+      background-color: rgba(0,200,255,0.06);
+      border: 1px solid rgba(0,200,255,0.20);
+      border-radius: 10px;
+      padding: 14px 18px;
+      font-size: 14px;
+      color: #eef4ff;
+      line-height: 1.7;
+      margin-bottom: 14px;
+    }
+
+    /* Urgency box */
+    .ol-urgent {
+      background-color: rgba(255,107,0,0.07);
+      border: 1px solid rgba(255,107,0,0.25);
+      border-radius: 10px;
+      padding: 14px 18px;
+      font-size: 14px;
+      color: #eef4ff;
+      line-height: 1.6;
+      margin-bottom: 14px;
+    }
+    .ol-urgent-label {
+      color: #ff6b00;
+      font-weight: 800;
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 5px;
+    }
+
+    /* Important box */
+    .ol-important {
+      background-color: rgba(245,197,24,0.05);
+      border: 1px solid rgba(245,197,24,0.22);
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin-bottom: 14px;
+    }
+    .ol-important-head {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #f5c518;
+      margin-bottom: 12px;
+    }
+    .ol-important-list {
+      list-style: none;
+      padding: 0; margin: 0;
+    }
+    .ol-important-list li {
+      font-size: 13px;
+      color: rgba(238,244,255,0.82);
+      padding: 5px 0;
+      padding-left: 14px;
+      position: relative;
+      line-height: 1.5;
+    }
+    .ol-important-list li::before {
+      content: '•';
+      color: #f5c518;
+      font-weight: 800;
+      position: absolute;
+      left: 0;
+    }
+    .ol-handle {
+      color: #00c8ff;
+      font-weight: 700;
+      background-color: rgba(0,200,255,0.08);
+      border: 1px solid rgba(0,200,255,0.22);
+      border-radius: 4px;
+      padding: 1px 7px;
+      font-size: 12px;
+    }
+    .ol-reshare  { color: #aaff00; font-weight: 600; font-size: 14px; margin-bottom: 10px; }
+    .ol-together { font-size: 15px; font-weight: 700; color: #eef4ff; margin-bottom: 10px; }
+    .ol-reach    { font-size: 13px; color: #3d5068; margin-bottom: 0; }
+
+    /* Signature */
+    .ol-sig {
+      margin-top: 22px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(0,200,255,0.09);
+    }
+    .ol-sig-regards { font-size: 12px; color: #3d5068; margin-bottom: 5px; }
+    .ol-sig-name {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 28px;
+      letter-spacing: 2px;
+      color: #eef4ff;
+      line-height: 1;
+    }
+    .ol-sig-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #3d5068;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-top: 3px;
+    }
+    .ol-sig-brand {
+      font-size: 12px;
+      font-weight: 800;
+      color: #00c8ff;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-top: 6px;
+    }
+
+    /* ══════════════════════════
+       IMAGE ASSET CARDS
+    ══════════════════════════ */
+    .assets-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 12px;
+      margin: 0 -12px;
+    }
+    .asset-card {
+      background-color: #0a1020;
+      border: 1px solid rgba(0,200,255,0.12);
+      border-radius: 14px;
+      overflow: hidden;
+      vertical-align: top;
+      width: 50%;
+    }
+    .asset-card-header {
+      padding: 12px 15px;
+      border-bottom: 1px solid rgba(0,200,255,0.09);
+    }
+    .ac-post-header  { border-top: 2px solid #00c8ff; }
+    .ac-story-header { border-top: 2px solid #ff6b00; }
+    .ah-label {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #eef4ff;
+    }
+    .ah-sub {
+      font-size: 10px;
+      color: #3d5068;
+      margin-top: 2px;
+    }
+    .ah-dim {
+      display: inline-block;
+      margin-top: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      font-family: monospace;
+      background-color: rgba(0,200,255,0.08);
+      border: 1px solid rgba(0,200,255,0.22);
+      color: #00c8ff;
+      padding: 2px 8px;
+      border-radius: 5px;
+    }
+    .ah-dim-s {
+      background-color: rgba(255,107,0,0.08);
+      border-color: rgba(255,107,0,0.22);
+      color: #ff6b00;
+    }
+
+    /* ★ Firestore image ★ */
+    .asset-img {
+      width: 100%;
+      height: 180px;
+      object-fit: cover;
+      display: block;
+      background-color: #0c1828;
+    }
+    .asset-footer-row {
+      padding: 10px 15px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .asset-ready {
+      font-size: 11px;
+      font-weight: 700;
+      color: #aaff00;
+    }
+
+    /* ★ DOWNLOAD BUTTON ★ */
+    .dl-btn {
+      display: inline-block;
+      background-color: rgba(0,200,255,0.12);
+      border: 1px solid rgba(0,200,255,0.30);
+      border-radius: 7px;
+      padding: 7px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #00c8ff !important;
+      text-decoration: none;
+    }
+
+    /* Firestore pill */
+    .firestore-pill {
+      background-color: rgba(0,200,255,0.03);
+      border: 1px solid rgba(0,200,255,0.12);
+      border-radius: 10px;
+      padding: 12px 16px;
+      margin-top: 16px;
+    }
+    .fp-title { font-size: 12px; font-weight: 700; color: #00c8ff; margin-bottom: 3px; }
+    .fp-sub   { font-size: 11px; color: #3d5068; }
+    .fp-id    { font-family: monospace; color: #eef4ff; }
+
+    /* ══════════════════════════
+       CAPTION SECTION
+    ══════════════════════════ */
+    .caption-section {
+      background-color: #0a1020;
+      border: 1px solid rgba(0,200,255,0.12);
+      border-radius: 16px;
+      overflow: hidden;
+      margin-bottom: 24px;
+    }
+    .caption-header {
+      padding: 16px 22px;
+      border-bottom: 1px solid rgba(0,200,255,0.09);
+      background: linear-gradient(90deg, rgba(0,200,255,0.05), transparent);
+    }
+    .caption-header-title { font-size: 15px; font-weight: 800; color: #eef4ff; }
+    .caption-header-sub   { font-size: 12px; color: #3d5068; margin-top: 2px; }
+
+    .caption-body { padding: 22px; }
+
+    /* Platform label tabs */
+    .platform-label {
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #00c8ff;
+      margin-bottom: 10px;
+      padding: 5px 12px;
+      background-color: rgba(0,200,255,0.08);
+      border: 1px solid rgba(0,200,255,0.22);
+      border-radius: 100px;
+      display: inline-block;
+    }
+    .platform-label-story {
+      color: #ff6b00;
+      background-color: rgba(255,107,0,0.08);
+      border-color: rgba(255,107,0,0.22);
+    }
+    .platform-label-linkedin {
+      color: #aaff00;
+      background-color: rgba(170,255,0,0.07);
+      border-color: rgba(170,255,0,0.22);
+    }
+
+    .caption-box {
+      font-size: 14px;
+      line-height: 2;
+      color: rgba(238,244,255,0.90);
+      background-color: #0c1220;
+      border: 1px solid rgba(0,200,255,0.09);
+      border-radius: 10px;
+      padding: 18px 20px;
+      margin-bottom: 20px;
+      white-space: pre-line;
+    }
+
+    /* ══════════════════════════
+       HASHTAGS
+    ══════════════════════════ */
+    .hashtags-section { margin-bottom: 20px; }
+    .hashtag-table { width: 100%; border-collapse: collapse; }
+    .hashtag-chips-flex { display: flex; flex-wrap: wrap; gap: 8px; }
+    .hashtag-chip {
+      display: inline-block;
+      padding: 10px 14px;
+      border-radius: 100px;
+      font-size: 13px;
+      font-weight: 700;
+      text-align: center;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+    .hc-1 { background-color: rgba(0,200,255,0.09);  border: 1px solid rgba(0,200,255,0.28);  color: #00c8ff; }
+    .hc-2 { background-color: rgba(255,107,0,0.09);  border: 1px solid rgba(255,107,0,0.28);  color: #ff6b00; }
+    .hc-3 { background-color: rgba(170,255,0,0.07);  border: 1px solid rgba(170,255,0,0.25);  color: #aaff00; }
+    .hc-4 { background-color: rgba(245,197,24,0.08); border: 1px solid rgba(245,197,24,0.25); color: #f5c518; }
+    .hc-5 { background-color: rgba(155,92,255,0.09); border: 1px solid rgba(155,92,255,0.25); color: #bb88ff; }
+    .hc-rank { font-size: 10px; font-weight: 800; opacity: 0.6; display: block; margin-top: 2px; }
+
+    .hashtags-all-box {
+      background-color: #0c1220;
+      border: 1px solid rgba(0,200,255,0.09);
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-size: 13px;
+      color: rgba(238,244,255,0.55);
+      line-height: 2;
+      letter-spacing: 0.5px;
+      margin-top: 10px;
+    }
+
+    /* ══════════════════════════
+       POSTING GUIDE
+    ══════════════════════════ */
+    .tips-table { width: 100%; border-collapse: separate; border-spacing: 12px; margin: 0 -12px; }
+    .tip-card {
+      background-color: #0a1020;
+      border: 1px solid rgba(0,200,255,0.09);
+      border-radius: 12px;
+      padding: 16px;
+      vertical-align: top;
+      width: 50%;
+    }
+    .tip-card-do   { border-top: 2px solid #aaff00; }
+    .tip-card-dont { border-top: 2px solid #ff6b00; }
+    .tip-head {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 12px;
+    }
+    .tip-do   { color: #aaff00; }
+    .tip-dont { color: #ff6b00; }
+    .tip-list { list-style: none; padding: 0; margin: 0; }
+    .tip-list li {
+      font-size: 12px;
+      color: rgba(238,244,255,0.72);
+      padding: 5px 0;
+      padding-left: 16px;
+      position: relative;
+      line-height: 1.5;
+      border-bottom: 1px solid rgba(0,200,255,0.04);
+    }
+    .tip-list li:last-child { border-bottom: none; }
+    .tip-do-item::before   { content: '✓'; color: #aaff00; font-weight: 800; position: absolute; left: 0; }
+    .tip-dont-item::before { content: '✗'; color: #ff6b00; font-weight: 800; position: absolute; left: 0; }
+
+    /* ══════════════════════════
+       ACTION BUTTONS
+       ★ All white text on dark ★
+    ══════════════════════════ */
+    .actions-section { margin-bottom: 24px; }
+    .btn-table { width: 100%; border-collapse: separate; border-spacing: 10px; margin: 0 -10px; }
+
+    .btn-primary {
+      display: block;
+      width: 100%;
+      padding: 15px 20px;
+      background: linear-gradient(135deg, #00c8ff, #005a85);
+      color: #ffffff !important;
+      font-size: 14px;
+      font-weight: 800;
+      text-align: center;
+      text-decoration: none;
+      border-radius: 12px;
+      letter-spacing: 0.3px;
+    }
+    .btn-accent {
+      display: block;
+      width: 100%;
+      padding: 15px 20px;
+      background: linear-gradient(135deg, #ff6b00, #bb2200);
+      color: #ffffff !important;
+      font-size: 14px;
+      font-weight: 800;
+      text-align: center;
+      text-decoration: none;
+      border-radius: 12px;
+      letter-spacing: 0.3px;
+    }
+    .btn-green {
+      display: block;
+      width: 100%;
+      padding: 15px 20px;
+      background: linear-gradient(135deg, #3a8f00, #265f00);
+      color: #ffffff !important;
+      font-size: 14px;
+      font-weight: 800;
+      text-align: center;
+      text-decoration: none;
+      border-radius: 12px;
+      letter-spacing: 0.3px;
+    }
+    .btn-gold {
+      display: block;
+      width: 100%;
+      padding: 15px 20px;
+      background: linear-gradient(135deg, #b88a00, #7a5c00);
+      color: #ffffff !important;
+      font-size: 14px;
+      font-weight: 800;
+      text-align: center;
+      text-decoration: none;
+      border-radius: 12px;
+      letter-spacing: 0.3px;
+    }
+
+    /* ══════════════════════════
+       FOOTER
+    ══════════════════════════ */
+    .footer-sig {
+      background-color: #0c1220;
+      border: 1px solid rgba(0,200,255,0.09);
+      border-radius: 16px;
+      padding: 26px 28px;
+    }
+    .fs-cta {
+      font-family: 'Bebas Neue', Arial, sans-serif;
+      font-size: 26px;
+      letter-spacing: 2px;
+      color: #eef4ff;
+      line-height: 1;
+      margin-bottom: 5px;
+    }
+    .fs-sub  { font-size: 13px; color: #3d5068; margin-bottom: 14px; }
+    .fs-pill {
+      display: inline-block;
+      font-size: 11px;
+      color: #3d5068;
+      background-color: #0a1020;
+      border: 1px solid rgba(0,200,255,0.09);
+      border-radius: 6px;
+      padding: 4px 10px;
+      margin: 2px 4px 2px 0;
+    }
+    .fs-sig-name  { font-family: 'Bebas Neue', Arial, sans-serif; font-size: 24px; letter-spacing: 2px; color: #eef4ff; line-height: 1; }
+    .fs-sig-title { font-size: 11px; font-weight: 700; color: #3d5068; letter-spacing: 1px; text-transform: uppercase; margin-top: 3px; }
+    .fs-sig-brand { font-size: 12px; font-weight: 800; color: #00c8ff; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }
+
+    /* Colour strip */
+    .color-strip {
+      height: 5px;
+      background: linear-gradient(90deg, #00c8ff 0%, #aaff00 33%, #ff6b00 66%, #f5c518 100%);
+      border-radius: 0 0 4px 4px;
+      margin-top: 22px;
+    }
+
+    /* ══════════════════════════
+       RESPONSIVE
+    ══════════════════════════ */
+    @media only screen and (max-width: 600px) {
+      .email-container  { width: 100% !important; }
+      .main-card        { padding: 18px 14px !important; }
+      .logo-header      { padding: 14px 16px !important; }
+      .topbar           { padding: 12px 16px !important; }
+      .hero-headline    { font-size: 36px !important; }
+      .hero-overlay     { padding: 16px 16px 20px !important; }
+
+      /* ── Asset cards: stack vertically ── */
+      .assets-table     { border-spacing: 0 !important; margin: 0 !important; display: block !important; }
+      .assets-table tr  { display: block !important; }
+      .asset-card       { display: block !important; width: 100% !important; margin-bottom: 14px !important;
+                          border-radius: 12px !important; }
+      .asset-img-post   { height: 300px !important; object-fit: cover !important; }
+      .asset-img-story  { height: 420px !important; object-fit: cover !important; }
+
+      /* ── Tip cards: stack vertically ── */
+      .tips-table       { border-spacing: 0 !important; margin: 0 !important; display: block !important; }
+      .tips-table tr    { display: block !important; }
+      .tip-card         { display: block !important; width: 100% !important; margin-bottom: 12px !important; }
+
+      /* ── Action buttons: stack vertically ── */
+      .btn-table        { border-spacing: 0 !important; margin: 0 !important; display: block !important; }
+      .btn-table tr     { display: block !important; }
+      .btn-table td     { display: block !important; width: 100% !important;
+                          padding: 0 0 10px 0 !important; }
+      .btn-primary,
+      .btn-accent,
+      .btn-green,
+      .btn-gold         { font-size: 15px !important; padding: 16px 20px !important; }
+
+      .logo-badge       { display: none !important; }
+      .firestore-pill   { margin-top: 0 !important; }
+    }
+  </style>
+</head>
+<body>
+<div class="email-wrapper">
+<div class="email-container">
+
+  <!-- ════════════════════════════
+       ★ BERGMAN LOGO HEADER ★
+  ════════════════════════════ -->
+  <div class="logo-header" style="background-color:#080d18;border-bottom:1px solid rgba(0,200,255,0.12);padding:18px 24px;">
+    <table role="presentation" style="width:100%;border-collapse:collapse;">
+      <tr>
+        <!-- Left: logo + event name -->
+        <td style="vertical-align:middle;">
+          <table role="presentation" style="border-collapse:collapse;">
+            <tr>
+              <td style="vertical-align:middle;padding-right:14px;">
+                <img
+                  src="https://firebasestorage.googleapis.com/v0/b/racehub-ao1fu.firebasestorage.app/o/BERGMAN%20LOGOS%2Fbm.png?alt=media&token=893533c9-e655-40d3-bfc2-9ae07c51a3b3"
+                  alt="Bergman"
+                  width="60" height="60"
+                  style="width:60px;height:60px;object-fit:contain;display:block;border-radius:10px;"
+                />
+              </td>
+              <td style="vertical-align:middle;">
+                <div style="font-family:'Bebas Neue',Arial,sans-serif;font-size:20px;letter-spacing:3px;color:#eef4ff;line-height:1.1;">{{ params.event_name }}</div>
+                <div style="font-size:10px;color:#3d5068;letter-spacing:1.5px;text-transform:uppercase;margin-top:5px;">Official Influencer Kit</div>
+              </td>
+            </tr>
+          </table>
+        </td>
+        <!-- Right: badge -->
+        <td style="vertical-align:middle;text-align:right;white-space:nowrap;">
+          <span style="display:inline-block;background-color:#ff6b00;color:#ffffff;font-size:10px;font-weight:800;letter-spacing:1px;text-transform:uppercase;padding:6px 14px;border-radius:100px;">Official Collab</span>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ════════════════════════════
+       TOPBAR
+  ════════════════════════════ -->
+  <div class="topbar">
+    <div class="topbar-sub" style="margin-top:0;">
+      {{ params.event_date }} &nbsp;·&nbsp; {{ params.event_location }}
+      &nbsp;·&nbsp; <span>Influencer Kit Ready</span>
+      &nbsp;·&nbsp;
+      <span style="white-space:nowrap;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align:middle;margin-right:3px;display:inline-block;">
+          <rect x="2" y="2" width="20" height="20" rx="5" ry="5" stroke="#00c8ff" stroke-width="2" fill="none"/>
+          <circle cx="12" cy="12" r="5" stroke="#00c8ff" stroke-width="2" fill="none"/>
+          <circle cx="17.5" cy="6.5" r="1.2" fill="#00c8ff"/>
+        </svg>
+        <a href="https://www.instagram.com/bergman_bengaluru" style="color:#00c8ff;text-decoration:none;font-weight:700;">bergman_bengaluru</a>
+      </span>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════
+       HERO — Firestore image
+  ══════════���═════════════════ -->
+  <div class="hero">
+    <div class="hero-image-wrap">
+      <!--
+        ★ FIRESTORE IMAGE — auto loaded ★
+        src = {{ params.img1080x1080 }}
+      -->
+      <img
+        class="hero-img"
+        src="{{ params.img1080x1080 }}"
+        alt=""
+        width="640"
+        style="width:100%;max-height:340px;object-fit:cover;display:block;"
+      />
+    </div>
+    <div class="hero-overlay">
+      <div class="hero-tag">&#9679; Official Influencer Collab Kit</div>
+      <div class="hero-headline">
+        <span class="hl-1">THREE</span>
+        <span class="hl-2">DISCIPLINES.</span>
+        <span class="hl-3">ONE STORY. 🔥</span>
+      </div>
+      <p class="hero-sub">
+        From the first stroke to the final stride — this wasn't just a race,
+        it was a test of grit, endurance, and mindset.
+      </p>
+      <div class="hero-stats">
+        <div class="hstat">
+          <div class="hstat-num">2</div>
+          <div class="hstat-lbl">Assets Ready</div>
+        </div>
+        <div class="hstat">
+          <div class="hstat-num hstat-num-g">5</div>
+          <div class="hstat-lbl">Power Tags</div>
+        </div>
+        <div class="hstat">
+          <div class="hstat-num hstat-num-a">3</div>
+          <div class="hstat-lbl">Captions</div>
+        </div>
+        <div class="hstat">
+          <div class="hstat-num">∞</div>
+          <div class="hstat-lbl">Reach</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════
+       MAIN CARD
+  ════════════════════════════ -->
+  <div class="main-card">
+
+    <!-- OFFICIAL LETTER -->
+    <div class="section-label">Official Communication</div>
+
+    <div class="official-letter">
+      <div class="ol-salute">Dear Influencer &amp; Athlete,</div>
+      <div class="ol-greeting">🏁 &nbsp;Greetings from Team Bergman!</div>
+
+      <div class="ol-body">
+        <p>
+          We're excited to collaborate with you for
+          <strong class="ol-event-name">{{ params.event_name }}</strong>.
+        </p>
+        <p>Your official <strong>Influencer Collab Kit</strong> is now ready — including:</p>
+      </div>
+
+      <ul class="ol-kit-list">
+        <li>📸 &nbsp;High-quality post &amp; story creatives</li>
+        <li>✍️ &nbsp;Ready-to-use caption</li>
+        <li>🔥 &nbsp;Optimized hashtags for reach</li>
+      </ul>
+
+      <div class="ol-highlight">
+        You don't need to create anything —
+        <strong>just download, post, and tag us.</strong>
+      </div>
+
+      <div class="ol-urgent">
+        <div class="ol-urgent-label">⚡ Time Sensitive</div>
+        Please post within <strong>48 hours</strong> to maximise visibility and engagement.
+      </div>
+
+      <div class="ol-important">
+        <div class="ol-important-head">📌 Important</div>
+        <ul class="ol-important-list">
+          <li>
+            Tag us: &nbsp;
+            <span class="ol-handle">{{ params.instagram_handle }}</span>
+          </li>
+          <li>Use <strong>all provided hashtags</strong> in every post</li>
+          <li>Share <strong>both</strong> the post &amp; the story</li>
+        </ul>
+      </div>
+
+      <div class="ol-body">
+        <p class="ol-reshare">We'll be resharing top content across our official pages. 🙌</p>
+        <p class="ol-together">Let's inspire the community together 💪🔥</p>
+        <p class="ol-reach">If you need anything, feel free to reach out.</p>
+      </div>
+
+      <!-- Signature -->
+      <div class="ol-sig">
+        <div class="ol-sig-regards">Regards,</div>
+        <div class="ol-sig-name">Team Bergman</div>
+      </div>
+    </div><!-- /official-letter -->
+
+    <hr class="divider"/>
+
+    <!-- ★ IMAGE ASSET CARDS — Firestore ★ -->
+    <div class="section-label">Your Content Assets — Auto Loaded from Bergman Media</div>
+
+    <!-- Asset cards — single-column stacked (works in Gmail Android, no @media needed) -->
+    <table role="presentation" style="width:100%;border-collapse:collapse;">
+
+      <!-- POST 1080×1080 -->
+      <tr>
+        <td style="padding-bottom:16px;">
+          <table role="presentation" style="width:100%;border-collapse:collapse;background-color:#0a1020;border:1px solid rgba(0,200,255,0.18);border-top:3px solid #00c8ff;border-radius:14px;overflow:hidden;">
+            <tr>
+              <td style="padding:12px 15px;border-bottom:1px solid rgba(0,200,255,0.09);">
+                <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#eef4ff;">🖼️ &nbsp;Instagram Post</div>
+                <div style="font-size:10px;color:#3d5068;margin-top:3px;">Feed · Square</div>
+                <span style="display:inline-block;margin-top:6px;font-size:10px;font-weight:700;font-family:monospace;background-color:rgba(0,200,255,0.08);border:1px solid rgba(0,200,255,0.22);color:#00c8ff;padding:2px 8px;border-radius:5px;">1080 × 1080 px</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="line-height:0;font-size:0;">
+                <img src="{{ params.img1080x1080 }}" alt="Post Image 1080x1080" width="600"
+                     style="width:100%;max-width:100%;height:auto;display:block;background-color:#0c1828;" />
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:12px 15px;">
+                <table role="presentation" style="width:100%;border-collapse:collapse;">
+                  <tr>
+                    <td style="font-size:11px;font-weight:700;color:#aaff00;">✦ Auto Loaded</td>
+                    <td style="text-align:right;">
+                      <a href="{{ params.img1080x1080 }}" target="_blank"
+                         style="display:inline-block;background-color:rgba(0,200,255,0.12);border:1px solid rgba(0,200,255,0.35);border-radius:8px;padding:8px 18px;font-size:13px;font-weight:700;color:#00c8ff;text-decoration:none;">
+                        ⬇ Download Post
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- STORY 1080×1920 -->
+      <tr>
+        <td style="padding-bottom:16px;">
+          <table role="presentation" style="width:100%;border-collapse:collapse;background-color:#0a1020;border:1px solid rgba(255,107,0,0.22);border-top:3px solid #ff6b00;border-radius:14px;overflow:hidden;">
+            <tr>
+              <td style="padding:12px 15px;border-bottom:1px solid rgba(255,107,0,0.09);">
+                <div style="font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:#eef4ff;">📱 &nbsp;Instagram Story</div>
+                <div style="font-size:10px;color:#3d5068;margin-top:3px;">Story · Vertical</div>
+                <span style="display:inline-block;margin-top:6px;font-size:10px;font-weight:700;font-family:monospace;background-color:rgba(255,107,0,0.08);border:1px solid rgba(255,107,0,0.22);color:#ff6b00;padding:2px 8px;border-radius:5px;">1080 × 1920 px</span>
+              </td>
+            </tr>
+            <tr>
+              <td style="line-height:0;font-size:0;">
+                <img src="{{ params.img1080x1920 }}" alt="Story Image 1080x1920" width="600"
+                     style="width:100%;max-width:100%;height:auto;display:block;background-color:#0c1828;" />
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:12px 15px;">
+                <table role="presentation" style="width:100%;border-collapse:collapse;">
+                  <tr>
+                    <td style="font-size:11px;font-weight:700;color:#aaff00;">✦ Auto Loaded</td>
+                    <td style="text-align:right;">
+                      <a href="{{ params.img1080x1920 }}" target="_blank"
+                         style="display:inline-block;background-color:rgba(255,107,0,0.12);border:1px solid rgba(255,107,0,0.35);border-radius:8px;padding:8px 18px;font-size:13px;font-weight:700;color:#ff6b00;text-decoration:none;">
+                        ⬇ Download Story
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+    </table>
+
+    <!-- Firestore info pill -->
+    <div class="firestore-pill">
+      <div class="fp-title">🔥 Auto-loaded from Bergman Media Library</div>
+      <div class="fp-sub">
+        Firebase Storage · Event ID: <span class="fp-id">{{ params.event_id }}</span>
+        · Uploaded by Bergman team · ✓ Verified
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- CAPTIONS -->
+    <div class="caption-section">
+      <div class="caption-header">
+        <div class="caption-header-title">✍️ &nbsp;Your {{ params.event_type }} Caption</div>
+        <div class="caption-header-sub">Ready to copy &amp; paste · crafted for maximum reach</div>
+      </div>
+      <div class="caption-body">
+
+        <!-- Instagram -->
+        <div class="platform-label">📸 Instagram</div>
+        <div class="caption-box">Three disciplines. One story. 🏁🔥
+
+From the first stroke to the final stride — this wasn't just a race, it was a test of grit, endurance, and mindset.
+
+Proud to be part of {{ params.event_name }} — where athletes push beyond limits and discover what they're truly capable of.
+
+🏊🚴🏃 This is more than a race. This is Bergman.
+
+Are you ready to take on the challenge?
+
+👉 Join the movement.
+👉 Be part of the next start line.
+
+Tag your training partner &amp; let's go 💪</div>
+
+        <!-- Story -->
+        <div class="platform-label platform-label-story">📱 Story</div>
+        <div class="caption-box">Race mode ON 🏁🔥
+
+{{ params.event_name }}
+
+Who's joining next? 💪
+
+{{ params.instagram_handle }}</div>
+
+        <!-- LinkedIn -->
+        <div class="platform-label platform-label-linkedin">💼 LinkedIn</div>
+        <div class="caption-box">Endurance teaches you more than just fitness — it builds discipline, resilience, and mental strength.
+
+Proud to have participated in {{ params.event_name }}, a platform that brings together athletes pushing their limits across swimming, cycling, and running.
+
+Events like these are not just races — they are communities that inspire growth and performance.
+
+Looking forward to the next challenge.
+
+#Endurance #Triathlon #Performance #Mindset #Bergman</div>
+
+      </div>
+    </div>
+
+    <!-- HASHTAGS -->
+    <div class="section-label">5 Power Hashtags</div>
+    <div class="hashtags-section">
+      <!-- Chips: table layout so they wrap correctly in Gmail/Outlook -->
+      <table role="presentation" style="border-collapse:collapse;width:100%;">
+        <tr>
+          <td style="padding:4px 6px 4px 0;">
+            <span style="display:inline-block;padding:9px 14px;border-radius:100px;font-size:13px;font-weight:700;white-space:nowrap;background-color:rgba(0,200,255,0.09);border:1px solid rgba(0,200,255,0.28);color:#00c8ff;">
+              #BergmanTriathlon<br><span style="font-size:10px;font-weight:800;opacity:0.6;">Brand Tag</span>
+            </span>
+          </td>
+          <td style="padding:4px 6px 4px 0;">
+            <span style="display:inline-block;padding:9px 14px;border-radius:100px;font-size:13px;font-weight:700;white-space:nowrap;background-color:rgba(255,107,0,0.09);border:1px solid rgba(255,107,0,0.28);color:#ff6b00;">
+              #SwimBikeRun<br><span style="font-size:10px;font-weight:800;opacity:0.6;">Community</span>
+            </span>
+          </td>
+          <td style="padding:4px 6px 4px 0;">
+            <span style="display:inline-block;padding:9px 14px;border-radius:100px;font-size:13px;font-weight:700;white-space:nowrap;background-color:rgba(170,255,0,0.07);border:1px solid rgba(170,255,0,0.25);color:#aaff00;">
+              #EnduranceAthlete<br><span style="font-size:10px;font-weight:800;opacity:0.6;">Discovery</span>
+            </span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:4px 6px 4px 0;">
+            <span style="display:inline-block;padding:9px 14px;border-radius:100px;font-size:13px;font-weight:700;white-space:nowrap;background-color:rgba(245,197,24,0.08);border:1px solid rgba(245,197,24,0.25);color:#f5c518;">
+              #RaceDayVibes<br><span style="font-size:10px;font-weight:800;opacity:0.6;">Trending</span>
+            </span>
+          </td>
+          <td style="padding:4px 6px 4px 0;">
+            <span style="display:inline-block;padding:9px 14px;border-radius:100px;font-size:13px;font-weight:700;white-space:nowrap;background-color:rgba(155,92,255,0.09);border:1px solid rgba(155,92,255,0.25);color:#bb88ff;">
+              #PushYourLimits<br><span style="font-size:10px;font-weight:800;opacity:0.6;">Motivation</span>
+            </span>
+          </td>
+          <td style="padding:4px 0;"></td>
+        </tr>
+      </table>
+      <div class="hashtags-all-box" style="background-color:#0c1220;border:1px solid rgba(0,200,255,0.09);border-radius:10px;padding:14px 16px;font-size:13px;color:rgba(238,244,255,0.55);line-height:2;letter-spacing:0.5px;margin-top:12px;word-break:break-word;">
+        #BergmanTriathlon &nbsp; #SwimBikeRun &nbsp; #EnduranceAthlete &nbsp; #RaceDayVibes &nbsp; #PushYourLimits
+      </div>
+    </div>
+
+    <hr class="divider"/>
+
+    <!-- POSTING GUIDE -->
+    <div class="section-label">Brand &amp; Posting Guide</div>
+    <!-- Tip cards — single-column stacked -->
+    <table role="presentation" style="width:100%;border-collapse:collapse;">
+      <tr>
+        <td style="padding-bottom:12px;">
+          <table role="presentation" style="width:100%;border-collapse:collapse;background-color:#0a1020;border:1px solid rgba(0,200,255,0.09);border-top:2px solid #aaff00;border-radius:12px;">
+            <tr><td style="padding:14px 16px;">
+              <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#aaff00;margin-bottom:12px;">✅ DO THIS</div>
+              <table role="presentation" style="width:100%;border-collapse:collapse;">
+                <tr><td style="font-size:13px;color:rgba(238,244,255,0.80);padding:5px 0 5px 18px;position:relative;line-height:1.5;border-bottom:1px solid rgba(0,200,255,0.06);">✓&nbsp; Tag <strong>{{ params.instagram_handle }}</strong> in every post</td></tr>
+                <tr><td style="font-size:13px;color:rgba(238,244,255,0.80);padding:5px 0 5px 18px;line-height:1.5;border-bottom:1px solid rgba(0,200,255,0.06);">✓&nbsp; Use all 5 hashtags for maximum reach</td></tr>
+                <tr><td style="font-size:13px;color:rgba(238,244,255,0.80);padding:5px 0 5px 18px;line-height:1.5;border-bottom:1px solid rgba(0,200,255,0.06);">✓&nbsp; Post within <strong>48 hours</strong> of the event</td></tr>
+                <tr><td style="font-size:13px;color:rgba(238,244,255,0.80);padding:5px 0 5px 18px;line-height:1.5;border-bottom:1px solid rgba(0,200,255,0.06);">✓&nbsp; Share both feed post <strong>AND</strong> story</td></tr>
+                <tr><td style="font-size:13px;color:rgba(238,244,255,0.80);padding:5px 0 5px 18px;line-height:1.5;border-bottom:1px solid rgba(0,200,255,0.06);">✓&nbsp; Save story to your Bergman Highlight</td></tr>
+                <tr><td style="font-size:13px;color:rgba(238,244,255,0.80);padding:5px 0 5px 18px;line-height:1.5;">✓&nbsp; Post 6–9 AM or 6–9 PM for peak reach</td></tr>
+              </table>
+            </td></tr>
+          </table>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding-bottom:12px;">
+          <table role="presentation" style="width:100%;border-collapse:collapse;background-color:#0a1020;border:1px solid rgba(255,107,0,0.12);border-top:2px solid #ff6b00;border-radius:12px;">
+            <tr><td style="padding:14px 16px;">
+              <div style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:1.5px;color:#ff6b00;margin-bottom:12px;">❌ DON'T</div>
+              <table role="presentation" style="width:100%;border-collapse:collapse;">
+                <tr><td style="font-size:13px;color:rgba(238,244,255,0.80);padding:5px 0 5px 18px;line-height:1.5;border-bottom:1px solid rgba(255,107,0,0.06);">✗&nbsp; Don't crop the Bergman watermark</td></tr>
+                <tr><td style="font-size:13px;color:rgba(238,244,255,0.80);padding:5px 0 5px 18px;line-height:1.5;border-bottom:1px solid rgba(255,107,0,0.06);">✗&nbsp; Don't tag competitor events</td></tr>
+                <tr><td style="font-size:13px;color:rgba(238,244,255,0.80);padding:5px 0 5px 18px;line-height:1.5;border-bottom:1px solid rgba(255,107,0,0.06);">✗&nbsp; Don't post after 11 PM</td></tr>
+                <tr><td style="font-size:13px;color:rgba(238,244,255,0.80);padding:5px 0 5px 18px;line-height:1.5;border-bottom:1px solid rgba(255,107,0,0.06);">✗&nbsp; Don't delete within 30 days</td></tr>
+                <tr><td style="font-size:13px;color:rgba(238,244,255,0.80);padding:5px 0 5px 18px;line-height:1.5;border-bottom:1px solid rgba(255,107,0,0.06);">✗&nbsp; Don't skip the story</td></tr>
+                <tr><td style="font-size:13px;color:rgba(238,244,255,0.80);padding:5px 0 5px 18px;line-height:1.5;">✗&nbsp; Don't remove discipline emojis</td></tr>
+              </table>
+            </td></tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+
+    <hr class="divider"/>
+
+    <!-- ★ ACTION BUTTONS — all white text ★ -->
+    <div class="section-label">Take Action Now</div>
+    <div class="actions-section">
+
+      <!-- Download buttons — full-width stacked -->
+      <table role="presentation" style="width:100%;border-collapse:collapse;">
+        <tr>
+          <td style="padding-bottom:12px;">
+            <a href="{{ params.img1080x1080 }}" target="_blank"
+               style="display:block;width:100%;padding:16px 20px;background:linear-gradient(135deg,#00c8ff,#005a85);color:#ffffff;font-size:15px;font-weight:800;text-align:center;text-decoration:none;border-radius:12px;box-sizing:border-box;">
+              ⬇️ Download Post (1080×1080)
+            </a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding-bottom:12px;">
+            <a href="{{ params.img1080x1920 }}" target="_blank"
+               style="display:block;width:100%;padding:16px 20px;background:linear-gradient(135deg,#ff6b00,#bb2200);color:#ffffff;font-size:15px;font-weight:800;text-align:center;text-decoration:none;border-radius:12px;box-sizing:border-box;">
+              ⬇️ Download Story (1080×1920)
+            </a>
+          </td>
+        </tr>
+      </table>
+
+    </div>
+
+    <!-- FOOTER -->
+    <div class="footer-sig">
+      <div class="fs-cta">SWIM. BIKE. RUN. INSPIRE. 🏅</div>
+      <div class="fs-sub">Tag us · We reshare · Let's inspire the community together 💪🔥</div>
+      <div style="margin-bottom:16px">
+        <span class="fs-pill"> {{ params.event_location }}</span>
+        <span class="fs-pill">📸 {{ params.instagram_handle }}</span>
+      </div>
+      <div class="fs-sig-name">Team Bergman</div>
+    </div>
+
+    <div class="color-strip"></div>
+
+  </div><!-- /main-card -->
+
+</div><!-- /email-container -->
+</div><!-- /email-wrapper -->
+</body>
+</html>

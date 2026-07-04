@@ -5,8 +5,11 @@ import { getFirestoreInstance, getAuthInstance } from '@/lib/firebaseAdmin';
 import { sendAiSensyMessage } from '@/lib/auth/aisensyService';
 import { FieldValue, FieldPath } from 'firebase-admin/firestore';
 import { startJob, updateJobProgress } from '@/lib/jobManager';
+import { getEventParticipants } from '@/lib/dataLayerOptimized';
+import { getCalendarEventsAction } from '@/lib/actions/eventActions';
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 const TOKEN_MAP: Record<string, string> = {
   '{{name}}': 'name',
@@ -95,12 +98,12 @@ async function runBroadcastJob(jobId: string, data: any, adminUid: string) {
       });
 
     } else if (targetType === 'event' && eventId) {
-      const eventSnap = await db.collection('events').doc(eventId).get();
-      logEventName = eventSnap.data()?.eventName || 'Event Broadcast';
+      const calendar = await getCalendarEventsAction();
+      logEventName = calendar.events?.find((event) => event.id === eventId)?.eventName || 'Event Broadcast';
 
       if (excludeRegistered) {
-        const registeredSnap = await db.collection('events').doc(eventId).collection('participants').select('email').get();
-        const registeredEmails = new Set(registeredSnap.docs.map(d => d.data().email?.toLowerCase()).filter(Boolean));
+        const registeredParticipants = await getEventParticipants(eventId);
+        const registeredEmails = new Set(registeredParticipants.map((participant: any) => participant?.email?.toLowerCase()).filter(Boolean));
         const usersSnap = await db.collection('users').get();
         usersSnap.forEach(doc => {
           const u = doc.data();
@@ -110,16 +113,12 @@ async function runBroadcastJob(jobId: string, data: any, adminUid: string) {
           }
         });
       } else {
-        let query: FirebaseFirestore.Query = db.collection('events').doc(eventId).collection('participants');
-        if (ticketIds?.length) {
-          query = query.where('ticketId', 'in', ticketIds);
-        }
-        const snap = await query.get();
-        snap.forEach(doc => {
-          const d = doc.data();
-          if (d.mobile && (!statusFilter || statusFilter.includes(d.ticketStatus)) && !seen.has(d.mobile)) {
+        const participants = await getEventParticipants(eventId);
+        participants.forEach((d: any) => {
+          if (ticketIds?.length && !ticketIds.includes(d?.ticketId)) return;
+          if (d?.mobile && (!statusFilter || statusFilter.includes(d.ticketStatus)) && !seen.has(d.mobile)) {
             seen.add(d.mobile);
-            recipients.push({ name: d.name, mobile: d.mobile, email: d.email, bibNumber: d.bibNumber, ticketName: d.ticketName, bookingId: d.bookingId, eventName: logEventName, id: doc.id });
+            recipients.push({ name: d.name, mobile: d.mobile, email: d.email, bibNumber: d.bibNumber, ticketName: d.ticketName, bookingId: d.bookingId, eventName: logEventName, id: d.id || d.bookingId });
           }
         });
       }

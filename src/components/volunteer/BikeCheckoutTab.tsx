@@ -23,6 +23,29 @@ interface BikeCheckoutTabProps {
   volunteerName: string;
 }
 
+const getBelStatus = (participant: EventParticipant | null): string => {
+  if (!participant) return 'Unknown';
+  const fromParticipant = String((participant as any)?.belStatus || (participant as any)?.belTier || '').trim();
+  if (fromParticipant) return fromParticipant;
+  const fromProfile = String((participant as any)?.userProfile?.belStatus || (participant as any)?.userProfile?.belTier || '').trim();
+  if (fromProfile) return fromProfile;
+  const qualified = (participant as any)?.belQualified ?? (participant as any)?.userProfile?.belQualified;
+  if (qualified === true) return 'Qualified';
+  if (qualified === false) return 'Not Qualified';
+  return 'Unknown';
+};
+
+const belBadgeClass = (status: string): string => {
+  const s = status.toLowerCase();
+  if (s.includes('gold')) return 'bg-amber-400/20 text-amber-700 border-amber-500/40';
+  if (s.includes('silver')) return 'bg-slate-300/30 text-slate-700 border-slate-400/40';
+  if (s.includes('bronze')) return 'bg-orange-300/25 text-orange-800 border-orange-500/40';
+  if (s.includes('qualified')) return 'bg-emerald-500/15 text-emerald-700 border-emerald-500/40';
+  if (s.includes('provisional')) return 'bg-sky-500/15 text-sky-700 border-sky-500/40';
+  if (s.includes('not')) return 'bg-rose-500/15 text-rose-700 border-rose-500/40';
+  return 'bg-muted text-muted-foreground border-border';
+};
+
 export default function BikeCheckoutTab({ eventId, volunteerId, volunteerName }: BikeCheckoutTabProps) {
   const { toast } = useToast();
   const RESEND_OTP_COOLDOWN_SECONDS = 30;
@@ -206,6 +229,7 @@ export default function BikeCheckoutTab({ eventId, volunteerId, volunteerName }:
               <CardContent className="p-0 text-sm space-y-4">
                 <div className="grid grid-cols-2 gap-2 text-xs">
                     <p><strong>BIB:</strong> <span className="font-bold text-primary">{bikeCheckoutParticipant.bibNumber || 'N/A'}</span></p>
+                  <p><strong>BEL:</strong> <Badge variant="outline" className={belBadgeClass(getBelStatus(bikeCheckoutParticipant))}>{getBelStatus(bikeCheckoutParticipant)}</Badge></p>
                     <p><strong>Bike Check-in:</strong> <Badge variant={bikeCheckoutParticipant.bikeCheckInStatus === 'CheckedIn' ? 'default' : 'destructive'}>{bikeCheckoutParticipant.bikeCheckInStatus || 'Pending'}</Badge></p>
                     <p><strong>Bike Check-out:</strong> <Badge variant={bikeCheckoutParticipant.bikeCheckOutStatus === 'CheckedOut' ? 'default' : 'secondary'}>{bikeCheckoutParticipant.bikeCheckOutStatus || 'Pending'}</Badge></p>
                 </div>

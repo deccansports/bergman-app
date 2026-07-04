@@ -110,6 +110,7 @@ export async function POST(request: Request) {
                 recipientEmail: recipient.email,
                 recipientName: recipient.name,
                 subject: subject,
+              hasAttachment: false,
                 eventId: 'CLUB_OWNER_CAMPAIGN',
                 eventName: 'Club Owner Campaign',
                 ticketIds: [],

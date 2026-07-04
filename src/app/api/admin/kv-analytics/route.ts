@@ -25,18 +25,31 @@ type HighReadSource = {
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: Request) {
   const KV_LOG_KEY = 'system:kv-analytics-log';
   try {
+    const { searchParams } = new URL(req.url);
+    const limitParam = Number(searchParams.get('limit') || 500);
+    const limit = Number.isFinite(limitParam) ? Math.max(50, Math.min(5000, Math.floor(limitParam))) : 500;
+
     const logs = await getKV<KVLog[]>(KV_LOG_KEY, 'admin:kv-analytics-tab-api');
 
     if (!logs || !Array.isArray(logs) || logs.length === 0) {
       return NextResponse.json({ 
         logs: [], 
         summary: { reads24h: 0, writes24h: 0, cacheMisses24h: 0 },
-        highReadSources: []
+        highReadSources: [],
+        generatedAt: new Date().toISOString(),
       });
     }
+
+    const sortedLogs = [...logs].sort((a, b) => {
+      const aTime = new Date(a.timestamp || 0).getTime() || 0;
+      const bTime = new Date(b.timestamp || 0).getTime() || 0;
+      return bTime - aTime;
+    });
+
+    const recentLogs = sortedLogs.slice(0, limit);
 
     // Calculate Stats
     const now = new Date();
@@ -46,7 +59,7 @@ export async function GET() {
     let writes24h = 0;
     let cacheMisses24h = 0;
 
-    logs.forEach(l => {
+    sortedLogs.forEach(l => {
       if (l.timestamp && new Date(l.timestamp) >= twentyFourHoursAgo) {
         if (l.operation === 'READ') reads24h++;
         if (l.operation === 'WRITE') writes24h++;
@@ -57,7 +70,7 @@ export async function GET() {
     const summary = { reads24h, writes24h, cacheMisses24h };
     
     const sourceStats: { [source: string]: { totalReads: number } } = {};
-    logs.filter(l => l.operation === 'READ').forEach(log => {
+    sortedLogs.filter(l => l.operation === 'READ').forEach(log => {
       if (!sourceStats[log.source]) {
         sourceStats[log.source] = { totalReads: 0 };
       }
@@ -73,9 +86,12 @@ export async function GET() {
       .slice(0, 10);
 
     return NextResponse.json({ 
-      logs: logs, // Return the full log array
+      logs: recentLogs,
       summary,
-      highReadSources 
+      highReadSources,
+      generatedAt: new Date().toISOString(),
+      totalLogs: sortedLogs.length,
+      returnedLogs: recentLogs.length,
     });
 
   } catch (e: any) {

@@ -1,15 +1,16 @@
 // src/components/layout/SpotlightSection.tsx
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../ui/select';
 import Link from 'next/link';
 import { ArrowRight, Trophy, Award, Users, Loader2, Building } from 'lucide-react';
 import type { RankedAthlete, ClubRankingEntry, LegacyAthlete } from '@/lib/types';
-import { getAthleteRankingData, getClubRankingData, getLegacyAthletesAction } from '@/lib/actions';
+import { getAthleteRankingData, getBelSeasonLeaderboardAction, getClubRankingData, getLegacyAthletesAction } from '@/lib/actions';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getInitials, getCountryFlagEmoji, cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -21,8 +22,17 @@ const SpotlightCard = ({ children, className }: { children: React.ReactNode, cla
     </div>
 );
 
-const AthleteSpotlightCard = ({ athlete, rank }: { athlete: RankedAthlete, rank: number }) => {
+const getBelBadgeClasses = (belTier: string) => {
+    if (belTier === 'Gold') return 'border-yellow-300 bg-yellow-50 text-yellow-700';
+    if (belTier === 'Silver') return 'border-slate-300 bg-slate-50 text-slate-700';
+    if (belTier === 'Bronze') return 'border-amber-300 bg-amber-50 text-amber-700';
+    if (belTier === 'Provisional') return 'border-purple-300 bg-purple-50 text-purple-700';
+    return 'border-muted-foreground/30 bg-muted/40 text-muted-foreground';
+};
+
+const AthleteSpotlightCard = ({ athlete, rank, belTier }: { athlete: RankedAthlete, rank: number, belTier?: string | null }) => {
     const borderClass = 'border-primary/50 shadow-sm';
+    const visibleBelTier = belTier && belTier !== 'No Tier' ? belTier : null;
     
     return (
         <SpotlightCard className={cn("flex flex-col items-center text-center relative transition-transform hover:scale-105", borderClass)}>
@@ -33,6 +43,11 @@ const AthleteSpotlightCard = ({ athlete, rank }: { athlete: RankedAthlete, rank:
             </Avatar>
             <p className="mt-2 font-semibold text-foreground">{getCountryFlagEmoji(athlete.country)} {athlete.name}</p>
             <p className="text-xs text-muted-foreground">{athlete.clubName || 'Unaffiliated'}</p>
+            {visibleBelTier && (
+              <Badge variant="outline" className={cn("mt-2 text-[10px] font-black uppercase tracking-widest", getBelBadgeClasses(visibleBelTier))}>
+                  BEL {visibleBelTier}
+              </Badge>
+            )}
             <p className="mt-2 font-bold text-lg text-primary">{athlete.totalPoints} pts</p>
         </SpotlightCard>
     );
@@ -83,6 +98,7 @@ export default function SpotlightSection({ initialTopAthletes, initialTopClubs, 
   const [topAthletes, setTopAthletes] = useState(initialTopAthletes);
   const [topClubs, setTopClubs] = useState(initialTopClubs);
   const [legacyAthletes, setLegacyAthletes] = useState(initialLegacyAthletes);
+    const [belLookup, setBelLookup] = useState<Map<string, string>>(new Map());
   const [isRankingLoading, setIsRankingLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('athletes');
 
@@ -147,6 +163,38 @@ export default function SpotlightSection({ initialTopAthletes, initialTopClubs, 
     fetchSpotlightData();
   }, [selectedYear, currentYear, initialTopAthletes, initialTopClubs, initialLegacyAthletes]);
 
+    useEffect(() => {
+        let mounted = true;
+
+        async function loadBelLookup() {
+            const yearNum = parseInt(selectedYear, 10);
+            const belResult = await getBelSeasonLeaderboardAction(yearNum);
+            if (!mounted || !belResult.success) return;
+
+            const lookup = new Map<string, string>();
+            (belResult.rankings || []).forEach((athlete) => {
+                if (athlete.athleteId) lookup.set(`uid:${athlete.athleteId}`, athlete.belTier);
+                if (athlete.email) lookup.set(`email:${athlete.email.toLowerCase()}`, athlete.belTier);
+                if (athlete.mobile) lookup.set(`mobile:${String(athlete.mobile).replace(/\D/g, '')}`, athlete.belTier);
+            });
+            setBelLookup(lookup);
+        }
+
+        loadBelLookup();
+        return () => {
+            mounted = false;
+        };
+    }, [selectedYear]);
+
+    const getBelTierForAthlete = useCallback((athlete: RankedAthlete) => {
+        const athleteUid = athlete.athleteId ? `uid:${athlete.athleteId}` : null;
+        const email = athlete.email ? `email:${athlete.email.toLowerCase()}` : null;
+        const mobile = athlete.mobile ? `mobile:${String(athlete.mobile).replace(/\D/g, '')}` : null;
+        const rawTier = (athleteUid && belLookup.get(athleteUid)) || (email && belLookup.get(email)) || (mobile && belLookup.get(mobile)) || null;
+        if (!rawTier || rawTier === 'Unranked' || rawTier === 'No Tier') return null;
+        return rawTier;
+    }, [belLookup]);
+
   const getLinkProps = () => {
     switch (activeTab) {
       case 'clubs': return { href: '/club-rankings', text: 'Club' };
@@ -195,13 +243,13 @@ export default function SpotlightSection({ initialTopAthletes, initialTopClubs, 
                           <div className="text-left">
                               <h3 className="text-2xl font-bold text-center mb-6">Top Male Athletes</h3>
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                                  {topAthletes.male.map((athlete, i) => <AthleteSpotlightCard key={athlete.athleteId} athlete={athlete} rank={i + 1} />)}
+                                  {topAthletes.male.map((athlete, i) => <AthleteSpotlightCard key={athlete.athleteId} athlete={athlete} rank={i + 1} belTier={getBelTierForAthlete(athlete)} />)}
                               </div>
                           </div>
                           <div className="mt-12 text-left">
                               <h3 className="text-2xl font-bold text-center mb-6">Top Female Athletes</h3>
                               <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                                  {topAthletes.female.map((athlete, i) => <AthleteSpotlightCard key={athlete.athleteId} athlete={athlete} rank={i + 1} />)}
+                                  {topAthletes.female.map((athlete, i) => <AthleteSpotlightCard key={athlete.athleteId} athlete={athlete} rank={i + 1} belTier={getBelTierForAthlete(athlete)} />)}
                               </div>
                           </div>
                       </TabsContent>

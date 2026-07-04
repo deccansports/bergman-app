@@ -21,9 +21,10 @@ import type { EventCalendarEntry, EventParticipant, Club } from '@/lib/types';
 import { GENDERS, BLOOD_GROUPS, KID_TSHIRT_SIZES, ADULT_TSHIRT_SIZES, NO_CLUB_SELECTED_VALUE, INDIAN_STATES } from '@/lib/constants';
 import { countriesByContinent } from '@/lib/countries';
 import { COUNTRY_CODES } from '@/lib/constants/country-codes';
-import { toDateStringSafe } from '@/lib/utils';
+import { toDateStringSafe, isValidImageUrl } from '@/lib/utils';
 import { differenceInYears, parseISO } from 'date-fns';
-import { DialogFooter, DialogClose } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import Image from 'next/image';
 
 interface ParticipantFormProps {
   eventDetails: EventCalendarEntry;
@@ -36,6 +37,14 @@ interface ParticipantFormProps {
 
 const GST_STATUSES = ["Yes", "No"];
 
+const getIdProofType = (url?: string | null): 'pdf' | 'image' | 'other' => {
+  if (!url) return 'other';
+  const cleanUrl = url.split('?')[0].toLowerCase();
+  if (cleanUrl.endsWith('.pdf')) return 'pdf';
+  if (/\.(png|jpg|jpeg|webp|gif|bmp|svg|avif)$/.test(cleanUrl)) return 'image';
+  return isValidImageUrl(url) ? 'image' : 'other';
+};
+
 export default function ParticipantForm({ 
   eventDetails, 
   editingParticipant, 
@@ -44,7 +53,9 @@ export default function ParticipantForm({
   allClubs,
   onIdProofFileChange 
 }: ParticipantFormProps) {
+  const { toast } = useToast();
   const [dialCode, setDialCode] = useState('+91');
+  const [isIdProofModalOpen, setIsIdProofModalOpen] = useState(false);
   
   const defaultFormValues = useMemo(() => {
     let mobileOnly = editingParticipant.mobile || '';
@@ -68,6 +79,7 @@ export default function ParticipantForm({
       bloodGroup: editingParticipant.bloodGroup || "",
       tshirtSize: editingParticipant.tshirtSize || "",
       bibNumber: editingParticipant.bibNumber || "",
+      ageCategory: editingParticipant.ageCategory || "",
       address: editingParticipant.address || "",
       city: editingParticipant.city || "",
       pincode: editingParticipant.pincode || "",
@@ -124,16 +136,33 @@ export default function ParticipantForm({
   }, [dobValue]);
 
   const handleLocalSubmit = async (data: AdminParticipantEditFormInput) => {
+      const normalizedMobile = (data.mobile || '').replace(/\D/g, '');
       const finalData = {
           ...data,
-          mobile: `${dialCode}${data.mobile?.replace(/\D/g, '')}`
+        mobile: normalizedMobile ? `${dialCode}${normalizedMobile}` : ""
       };
       await onSubmitCallback(finalData);
   };
 
+  const handleInvalidSubmit = () => {
+    const firstError = Object.values(form.formState.errors)[0] as any;
+    const message = firstError?.message || 'Please fix highlighted fields before saving.';
+    toast({
+      variant: 'destructive',
+      title: 'Validation failed',
+      description: String(message),
+    });
+  };
+
+  const idProofType = getIdProofType(editingParticipant?.idProofUrl);
+  const proxiedIdProofUrl = editingParticipant?.idProofUrl
+    ? `/api/proxy-image?url=${encodeURIComponent(editingParticipant.idProofUrl)}`
+    : null;
+
   return (
+    <>
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(handleLocalSubmit)} className="space-y-6 flex flex-col flex-1 overflow-hidden">
+      <form onSubmit={form.handleSubmit(handleLocalSubmit, handleInvalidSubmit)} className="space-y-6 flex flex-col flex-1 overflow-hidden">
         <ScrollArea className="flex-1 -mx-2 px-2">
           <div className="space-y-8 py-4 pb-10 text-left">
             <div className="space-y-4">
@@ -242,6 +271,19 @@ export default function ParticipantForm({
                   </FormItem>
                 )}/>
               </div>
+              <FormField control={form.control} name="ageCategory" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Age Group/Category</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value ?? ""}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Select age category" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      {(eventDetails.ageCategories || []).map((ac) => (<SelectItem key={ac} value={ac}>{ac}</SelectItem>))}
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>Override the automatically calculated age category</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}/>
             </div>
 
             <div className="space-y-4">
@@ -332,20 +374,88 @@ export default function ParticipantForm({
                 <FormField control={form.control} name="consentPromotions" render={({ field }) => (<FormItem className="flex items-center gap-2"><FormControl><Checkbox checked={!!field.value} onCheckedChange={field.onChange}/></FormControl><CheckboxLabel>Consent to Promotions</CheckboxLabel></FormItem>)}/>
                 <FormField control={form.control} name="sendConfirmation" render={({ field }) => (<FormItem className="flex items-center gap-2 pt-2"><FormControl><Checkbox checked={!!field.value} onCheckedChange={field.onChange}/></FormControl><CheckboxLabel>Send Confirmation Email/WhatsApp</CheckboxLabel></FormItem>)}/>
               </div>
-            </div>
-          </div>
-        </ScrollArea>
 
-        <DialogFooter className="border-t pt-4 flex-shrink-0">
-          <DialogClose asChild>
-            <Button variant="ghost">Cancel</Button>
-          </DialogClose>
-          <Button type="submit" disabled={isLoading}>
-            {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Save className="mr-2 h-4 w-4"/>}
-            Save Changes
-          </Button>
-        </DialogFooter>
-      </form>
-    </Form>
-  );
+              <div className="space-y-3 border rounded-xl p-3 bg-muted/20">
+                <FormLabel>ID Proof</FormLabel>
+                <Input
+                  type="file"
+                  accept="image/*,.pdf"
+                  onChange={(e) => onIdProofFileChange(e.target.files?.[0] || null)}
+                />
+                {editingParticipant?.idProofUrl && (
+                  <Button type="button" variant="outline" onClick={() => setIsIdProofModalOpen(true)}>
+                    View Current ID Proof
+                  </Button>
+                )}
+              </div>
+              </div>
+            </div>
+          </ScrollArea>
+  
+            <DialogFooter className="border-t pt-4 flex-shrink-0">
+                {form.formState.submitCount > 0 && !form.formState.isValid && (
+                  <p className="w-full text-sm text-destructive text-left">
+                    Please fix highlighted fields before saving.
+                  </p>
+                )}
+                <DialogClose asChild>
+                  <Button variant="ghost">Cancel</Button>
+                </DialogClose>
+                <Button type="submit" disabled={isLoading}>
+                  {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Save className="mr-2 h-4 w-4"/>}
+                  Save Changes
+                </Button>
+              </DialogFooter>
+          </form>
+        </Form>
+
+        <Dialog open={isIdProofModalOpen} onOpenChange={setIsIdProofModalOpen}>
+          <DialogContent className="max-w-3xl flex flex-col h-[90vh]">
+            <DialogHeader>
+              <DialogTitle className="text-left font-black uppercase tracking-tight italic">Identity Proof</DialogTitle>
+              <DialogDescription className="text-left">
+                Uploaded by {editingParticipant?.name}
+              </DialogDescription>
+            </DialogHeader>
+            <ScrollArea className="flex-1 flex items-center justify-center p-4 pr-6 border rounded-xl bg-muted/30">
+              {editingParticipant?.idProofUrl && (
+                idProofType === 'pdf' ? (
+                  <iframe
+                    src={proxiedIdProofUrl || editingParticipant.idProofUrl}
+                    title="Identity Proof PDF"
+                    className="w-full h-[68vh] rounded-lg bg-white"
+                  />
+                ) : idProofType === 'image' ? (
+                  <Image
+                    src={proxiedIdProofUrl || editingParticipant.idProofUrl}
+                    alt="Identity Proof"
+                    width={1200}
+                    height={1600}
+                    unoptimized
+                    className="max-w-full h-auto object-contain rounded-lg"
+                  />
+                ) : (
+                  <div className="text-center text-sm text-muted-foreground space-y-2">
+                    <p>Preview unavailable for this file type.</p>
+                    <a href={editingParticipant.idProofUrl} target="_blank" rel="noreferrer" className="text-primary underline">
+                      Open document in new tab
+                    </a>
+                  </div>
+                )
+              )}
+            </ScrollArea>
+            <DialogFooter className="pt-4 border-t gap-2 sm:justify-end">
+              {editingParticipant?.idProofUrl && (
+                <Button asChild variant="outline" className="rounded-xl font-bold uppercase text-[10px] tracking-widest">
+                  <a href={editingParticipant.idProofUrl} target="_blank" rel="noreferrer">Open in New Tab</a>
+                </Button>
+              )}
+              <DialogClose asChild>
+                <Button type="button" className="rounded-xl font-bold uppercase text-[10px] tracking-widest">Close</Button>
+              </DialogClose>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </>
+    );
 }

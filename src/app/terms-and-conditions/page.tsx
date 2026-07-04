@@ -1,157 +1,190 @@
-// src/app/terms-and-conditions/page.tsx
-"use client";
-
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'; 
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
-import { useRouter } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
+import { getServiceFeesAction } from '@/lib/actions';
 
-export default function TermsAndConditionsPage() {
-  const router = useRouter();
-  const termsContent = `
-Bergman Race Rules & Regulations
+const formatInr = (paisa: number) => `₹${(paisa / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatUsd = (cents: number) => `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-**General Rules**
-The Organisers reserve the right to limit or refuse participation at their discretion.
-Participants may be removed from the race if deemed physically unfit to continue.
-The Organisers may modify rules and regulations without prior notice.
-The race route may be changed with advance notice to participants.
-It is the participant’s responsibility to be familiar with all rules and avoid any violations.
-Entries and bib numbers are non-transferable and non-refundable under any circumstances.
-The Organisers reserve the right to cancel any offline registration without notice. In such cases, the paid amount will be refunded.
+export default async function TermsAndConditionsPage() {
+  const feeRes = await getServiceFeesAction();
+  const triathlonFees = feeRes.fees?.Triathlon;
+  const swimathonFees = feeRes.fees?.Swimming;
 
-**Cancellation Policy**
-6+ months before the event: 70% refund (excluding GST and processing charges).
-4 months before the event: 50% refund (excluding GST).
-3 months before the event: 20% refund (excluding GST).
-2 months or less before the event: No refund.
-Post-registration confirmation or within 6 months of the event: Only 70% refund (excluding GST).
+  const deferralInr = formatInr(triathlonFees?.deferralFeePaisa ?? 200000);
+  const deferralUsd = formatUsd(triathlonFees?.deferralFeeUsdCents ?? 5000);
+  const categoryChangeInr = formatInr(triathlonFees?.categoryChangeFeePaisa ?? 200000);
+  const categoryChangeUsd = formatUsd(triathlonFees?.categoryChangeFeeUsdCents ?? 5000);
 
-**Deferral, Transfer & Category Change Policy**
-All deferral, transfer, or category change requests must be made at least 60 days prior to the event via the official form.
-Deferral to the next year’s event will require paying the entry fee difference if applicable.
-Once approved, no further deferral or transfer requests will be accepted.
-Deferral is valid for 1 year from the original event date.
-Charges:
-- Deferral / Name Transfer / Category Change: ₹2,499
-- Category change (lower to higher): ₹2,499 + fee difference + GST
-- Category change (higher to lower): ₹2,499 (No refund of fee difference)
-
-**Weather Disclaimer**
-In case of bad weather, the Organisers may:
-- Delay the race start
-- Shorten or modify the course
-- Cancel the event entirely (No refund applicable)
-If swimming conditions are unsafe, the swim leg may be replaced with a run.
-Use of banned substances is prohibited. Random doping tests may be conducted.
-Outside support, including hydration/nutrition refills outside aid stations, is not allowed.
-Respect for volunteers, spectators, and staff is mandatory.
-Littering outside of designated bins is strictly prohibited.
-Athletes are responsible for their own progress and must not assist others unless pre-approved by the Event Director. Violators will be disqualified.
-No nudity outside changing areas; headphones are not permitted at any point during the race.
-Participants must be familiar with the course and follow the marked route at all times.
-
-**Race Entry Rules**
-Open to participants of all nationalities.
-On-the-spot entries are not accepted.
-Participants must be 18 years of age or older on race day.
-Entries are non-transferable to other participants or future events.
-No switching between race distances is allowed.
-Any participant found providing false information or using someone else’s identity will be disqualified and banned from future events.
-The Organisers reserve the right to reschedule or cancel the event due to force majeure or hazardous conditions (no refunds).
-The Organisers are not liable for errors in entry details submitted by participants.
-Bib swapping is strictly prohibited. Offenders will be disqualified and banned.
-
-**Athlete Check-in Rules**
-Participants must check in during allocated times and attend the mandatory race briefing.
-Bicycles must be racked within designated time slots. Failure to do so will result in disqualification.
-The timing chip must be worn on the left ankle throughout the race.
-Lost or malfunctioning chips are the participant’s responsibility.
-Race numbers must be visible and unaltered.
-
-**Bike Check-in**
-Bike check-in is only permitted during assigned time slots.
-Helmets are mandatory during bike check-in and will be inspected for safety (smart helmets not allowed).
-Bikes must have the official sticker and be racked in the designated spot.
-You may leave helmets and bike shoes attached to the bike. Other gear must be brought on race morning.
-
-**Bike Check-out**
-- Bicycles must be picked up within the specified time slot after the race finishes.
-- The athlete must present their bib number to retrieve their bike.
-- The organizers are not responsible for bikes not collected within the designated time.
-
-**Swimming Rules**
-Proper swimming attire or trisuit must be worn; no coverage past elbows or knees.
-Swim caps provided by the organisers are mandatory.
-Goggles are allowed; no fins, paddles, snorkels, or aids.
-Wetsuits:
-- Compulsory below 21°C
-- Optional up to 23°C
-- Not allowed beyond 23°C
-Support crews are prohibited. Receiving outside help will lead to disqualification.
-Only participants and officials are allowed on the swim course.
-Swimmers needing help should raise an arm; once assisted, they must retire from the race.
-
-**Cycling Rules**
-No support vehicles or pacers allowed.
-Participants must follow all traffic laws unless instructed by race officials.
-Headphones and bare torso are not permitted.
-Drafting is prohibited (14 meters or 7 bike lengths).
-Helmets must be worn from the time the bike is unracked until it is racked back.
-
-**Running Rules**
-Runners must always wear their race numbers clearly visible at the front of the body.
-No support vehicles or pacers are allowed.
-Athletes must stay on the designated path throughout the course.
-No bare torsos or headphones allowed.
-
----
-
-Terms and Conditions – Bergman Triathlon
-1. Registration
-By registering for Bergman Triathlon, you agree to abide by all event rules, regulations, and decisions made by the organizers.
-Registrations are accepted on a first-come, first-served basis and are only confirmed upon successful payment.
-You must be 18 years of age or older on race day to participate.
-All information submitted during registration must be accurate and truthful.
-Bib number and registration are non-transferable and non-refundable, except as per the deferral/cancellation policies outlined below.
-2. Code of Conduct
-Participants must follow race instructions, maintain sportsmanship, and treat volunteers, officials, and fellow athletes with respect.
-Use of banned substances or outside assistance during the race will result in disqualification.
-3. Rights Reserved
-The organizers reserve the right to:
-- Modify or cancel the event due to unforeseen circumstances (weather, safety, force majeure).
-- Amend rules and policies at any time without prior notice.
-- Disqualify participants for non-compliance with the rules or for misconduct.
-`;
+  const swimDeferralInr = formatInr(swimathonFees?.deferralFeePaisa ?? 100000);
+  const swimDeferralUsd = formatUsd(swimathonFees?.deferralFeeUsdCents ?? 3000);
+  const swimCategoryChangeInr = formatInr(swimathonFees?.categoryChangeFeePaisa ?? 100000);
+  const swimCategoryChangeUsd = formatUsd(swimathonFees?.categoryChangeFeeUsdCents ?? 3000);
+  const triathlonMinAge = triathlonFees?.minimumAgeYears ?? 16;
+  const swimathonMinAge = swimathonFees?.minimumAgeYears ?? 9;
 
   return (
     <div className="container mx-auto py-12 px-4 max-w-4xl">
-      <Card className="max-w-3xl mx-auto shadow-lg">
+      <Card className="max-w-4xl mx-auto shadow-lg">
         <CardHeader>
           <CardTitle className="text-3xl font-bold text-primary">Terms and Conditions – Bergman Triathlon</CardTitle>
-           <CardDescription className="text-md text-muted-foreground pt-1">Read the terms carefully before participating.</CardDescription>
+          <CardDescription className="text-md text-muted-foreground pt-1">Read the terms carefully before participating.</CardDescription>
         </CardHeader>
+
         <CardContent>
-          <ScrollArea className="h-[60vh] pr-4">
-            <div className="prose prose-sm sm:prose lg:prose-lg xl:prose-xl max-w-none text-foreground">
-              {termsContent.split('\n').map((paragraph, index) => {
-                const trimmed = paragraph.trim();
-                if (trimmed.startsWith('**') && trimmed.endsWith('**')) {
-                  return <h2 key={index} className="font-semibold text-xl mt-6 mb-3 text-primary">{trimmed.substring(2, trimmed.length - 2)}</h2>;
-                } else if (trimmed.match(/^\d+\.\s/)) { 
-                  return <h3 key={index} className="font-medium text-lg mt-4 mb-1.5">{trimmed}</h3>;
-                } else if (trimmed.match(/^- /)) { 
-                  return <li key={index} className="ml-6 list-disc my-1">{trimmed.substring(1).trim()}</li>;
-                }
-                return <p key={index} className="my-2.5 leading-relaxed">{trimmed || <br />}</p>;
-              })}
+          <ScrollArea className="h-[68vh] pr-4">
+            <div className="space-y-6 text-sm sm:text-base leading-7">
+              <section>
+                <h2 className="text-xl font-semibold text-primary mb-2">Bergman Race Rules & Regulations</h2>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-semibold mb-2">General Rules</h3>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>The Organisers reserve the right to accept, reject, or limit participation at their sole discretion.</li>
+                  <li>Participants may be withdrawn from the event at any stage if deemed physically unfit or unable to continue safely.</li>
+                  <li>The Organisers reserve the right to amend rules, regulations, and event guidelines at any time without prior notice.</li>
+                  <li>The race route is subject to change; any updates will be communicated to participants in advance.</li>
+                  <li>All participants are responsible for understanding and adhering to the event rules and regulations.</li>
+                  <li>All entries are non-transferable and non-refundable. Bib numbers cannot be exchanged under any circumstances.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-semibold mb-2">Podium & Trophy Collection</h3>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>All podium finishers must collect their trophies at the official prize distribution ceremony.</li>
+                  <li>Trophies not collected at the venue during the ceremony will not be couriered, shipped, or sent later under any circumstances.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-semibold mb-2">Bib & Kit Collection Policy (OTP-Based System)</h3>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>Bib and kit collection will be conducted strictly through a secure OTP verification system.</li>
+                </ul>
+
+                <h4 className="text-base font-semibold mt-3 mb-1">Collection Process</h4>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>Participants must visit the designated Bib Collection Counter and provide their bib number.</li>
+                  <li>An OTP will be automatically sent to the participant&apos;s registered mobile number and email address.</li>
+                  <li>The bib kit will be handed over only after successful OTP verification.</li>
+                  <li>After collecting the bib kit, participants may proceed to the Goodies Counter to collect Event T-shirt, Bike stickers, Bag, Two transition bags, and Bib belt.</li>
+                </ul>
+
+                <h4 className="text-base font-semibold mt-3 mb-1">Mandatory Participant Presence</h4>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>Participants are required to be physically present to collect their bib kit.</li>
+                </ul>
+
+                <h4 className="text-base font-semibold mt-3 mb-1">No Kit Without OTP</h4>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>Under no circumstances will a bib or kit be issued without valid OTP verification.</li>
+                </ul>
+
+                <h4 className="text-base font-semibold mt-3 mb-1">Goodies Collection by Representative</h4>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>In case the participant is unable to attend, only goodies (not the bib kit) may be collected by an authorized representative.</li>
+                  <li>OTP verification from the registered participant is still mandatory.</li>
+                </ul>
+
+                <h4 className="text-base font-semibold mt-3 mb-1">Mobile Number Changes</h4>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>Any request to update a registered mobile number must be made at the Help Desk with valid ID proof (e.g., DigiLocker or government-issued ID).</li>
+                </ul>
+
+                <h4 className="text-base font-semibold mt-3 mb-1">No Exceptions Policy</h4>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>Failure to provide a valid OTP will result in denial of bib/kit or goodies collection. No exceptions will be made.</li>
+                </ul>
+
+                <h4 className="text-base font-semibold mt-3 mb-1">Uncollected Kits</h4>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>Bibs, kits, or goodies not collected during the official collection window will not be couriered, shipped, or distributed later under any circumstances.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-semibold mb-2">Cancellation Policy</h3>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>If cancelled within 48 hours of registration: 90% refund (excluding GST).</li>
+                  <li>6+ months before event: 70% refund (excluding GST and processing charges and platform fees).</li>
+                  <li>4 months before event: 50% refund (excluding GST).</li>
+                  <li>3 months before event: 20% refund (excluding GST).</li>
+                  <li>2 months or less before event: No refund.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-semibold mb-2">Deferral & Category Change Policy</h3>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>Requests must be raised at least 60 days before event date through official channels.</li>
+                  <li>Deferral is valid for 1 year from original event date, subject to policy and approval.</li>
+                  <li>Only one approved deferral per entry is allowed.</li>
+                  <li>Fee difference may apply when moving to a higher-priced category/event.</li>
+                </ul>
+                <div className="mt-3 rounded-lg border bg-muted/30 p-3 text-sm">
+                  <p className="font-semibold mb-1">Current System Service Fees</p>
+                  <div className="space-y-3">
+                    <div>
+                      <p className="font-semibold">Triathlon</p>
+                      <ul className="list-disc pl-6 space-y-1">
+                        <li>Deferral Fee: {deferralInr} / {deferralUsd}</li>
+                        <li>Category Change Fee: {categoryChangeInr} / {categoryChangeUsd}</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <p className="font-semibold">Swimathon (Sub-category Type)</p>
+                      <ul className="list-disc pl-6 space-y-1">
+                        <li>Deferral Fee: {swimDeferralInr} / {swimDeferralUsd}</li>
+                        <li>Category Change Fee: {swimCategoryChangeInr} / {swimCategoryChangeUsd}</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-semibold mb-2">Weather & Safety Disclaimer</h3>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>Race start may be delayed, route modified, or event cancelled for safety reasons.</li>
+                  <li>If swim conditions are unsafe, the swim leg may be replaced with a run segment.</li>
+                  <li>No outside pacing or unauthorized support is permitted.</li>
+                  <li>Littering outside designated zones is prohibited.</li>
+                  <li>Headphones and nudity outside changing areas are not allowed.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-semibold mb-2">Race Entry Rules</h3>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>Open to participants of all nationalities.</li>
+                  <li>Minimum age (Sub-category-wise): Triathlon - {triathlonMinAge} years, Swimathon (Sub-category Type) - {swimathonMinAge} years and above on race day.</li>
+                  <li>No bib swapping or identity misuse; violation can lead to disqualification and ban.</li>
+                  <li>Organisers may reschedule/cancel due to force majeure or hazardous conditions.</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-semibold mb-2">Athlete Check-in & Discipline</h3>
+                <ul className="list-disc pl-6 space-y-1">
+                  <li>Mandatory check-in and race briefing attendance are required.</li>
+                  <li>Timing chip must be worn as instructed throughout the race.</li>
+                  <li>Bike check-in and check-out must follow designated slots and controls.</li>
+                  <li>Swim, bike, and run segments must follow discipline-specific safety and conduct rules.</li>
+                </ul>
+              </section>
             </div>
           </ScrollArea>
         </CardContent>
-         <CardFooter className="border-t pt-6">
-          <Button variant="outline" onClick={() => router.back()}>
-            <ArrowLeft className="mr-2 h-4 w-4" /> Go Back
+
+        <CardFooter className="border-t pt-6">
+          <Button asChild variant="outline">
+            <Link href="/">
+              <ArrowLeft className="mr-2 h-4 w-4" /> Go Back
+            </Link>
           </Button>
         </CardFooter>
       </Card>

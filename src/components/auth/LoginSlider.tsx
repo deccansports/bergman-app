@@ -87,7 +87,7 @@ export default function LoginSlider({ mediaItems }: LoginSliderProps) {
                 >
                      <motion.div
                         key={`${currentItem.src}-zoom`}
-                        className="w-full h-full"
+                        className="relative w-full h-full"
                         data-parallax-layer="true"
                         style={{ scale: 1.05 }}
                         animate={{ scale: [1.05, 1.15, 1.05] }}
@@ -109,6 +109,7 @@ export default function LoginSlider({ mediaItems }: LoginSliderProps) {
                             src={currentItem.src}
                             alt={currentItem.alt || 'Login background'}
                             fill
+                            sizes="(min-width: 1024px) 55vw, 100vw"
                             className="object-cover"
                             priority={index === 0}
                             data-ai-hint={currentItem.dataAiHint || 'athlete background'}

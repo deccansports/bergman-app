@@ -28,3 +28,14 @@ setGlobalOptions({ maxInstances: 10 });
 //   logger.info("Hello logs!", {structuredData: true});
 //   response.send("Hello from Firebase!");
 // });
+
+export {
+	syncParticipantToKV,
+	syncEventToKV,
+	syncUserToKV,
+	syncRegistrationToKV,
+} from './syncToKV';
+
+export { autoRunBirthdayCampaignDaily } from './birthdayAutomation';
+export { autoRunFeibotLiveSync } from './feibotLiveSync';
+export { createCamera } from './createCloudflareLiveInput';

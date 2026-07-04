@@ -184,7 +184,16 @@ export async function createPaidFoodOrderAction(input: CreatePaidFoodOrderInput)
             });
         const itemsWithDetails = await Promise.all(itemDetailsPromises);
 
-        const orderData = { ...input, items: itemsWithDetails, status: 'Pending', createdAt: FieldValue.serverTimestamp() };
+        const orderData = {
+          ...input,
+          orderId: newOrderRef.id,
+          items: itemsWithDetails,
+          status: 'pending-payment',
+          razorpayOrderId: null,
+          paymentId: null,
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        };
         await newOrderRef.set(orderData);
 
         const notes = {
@@ -205,6 +214,11 @@ export async function createPaidFoodOrderAction(input: CreatePaidFoodOrderInput)
             currency: 'INR',
             receipt: newOrderRef.id,
             notes,
+        });
+
+        await newOrderRef.update({
+          razorpayOrderId: razorpayOrder.id,
+          updatedAt: FieldValue.serverTimestamp(),
         });
 
         return { success: true, message: 'Order created', razorpayOrder, razorpayKeyId: RAZORPAY_KEY_ID, notes };
@@ -228,6 +242,42 @@ interface VerifyPaidFoodPaymentInput {
     totalAmountPaisa: string; 
 }
 
+  async function findCapturedPaymentForFoodOrder(
+    razorpayInstance: Razorpay,
+    input: { firestoreDocId: string; orderId?: string | null; razorpayOrderId?: string | null }
+  ): Promise<any | null> {
+    const targetOrderId = String(input.razorpayOrderId || '').trim();
+    if (!targetOrderId) return null;
+
+    try {
+      const orderPayments = await (razorpayInstance as any).orders.fetchPayments(targetOrderId);
+      const payments = Array.isArray(orderPayments?.items)
+        ? orderPayments.items
+        : Array.isArray(orderPayments)
+          ? orderPayments
+          : [];
+      const captured = payments.find((payment: any) => payment?.status === 'captured');
+      if (captured) return captured;
+    } catch (error: any) {
+      console.warn('[findCapturedPaymentForFoodOrder] fetchPayments failed:', error?.message || error);
+    }
+
+    try {
+      const allPayments = await razorpayInstance.payments.all({ count: 100 } as any);
+      const payments = Array.isArray((allPayments as any)?.items) ? (allPayments as any).items : [];
+      return payments.find((payment: any) => {
+        if (payment?.status !== 'captured') return false;
+        const notes = payment?.notes || {};
+        return payment?.order_id === targetOrderId
+          || String(notes.firestoreDocId || '').trim() === input.firestoreDocId
+          || String(notes.orderId || '').trim() === String(input.orderId || '').trim();
+      }) || null;
+    } catch (error: any) {
+      console.warn('[findCapturedPaymentForFoodOrder] payments.all failed:', error?.message || error);
+      return null;
+    }
+  }
+
 
 export async function verifyPaidFoodPaymentAction(data: VerifyPaidFoodPaymentInput): Promise<{ success: boolean; message: string }> {
     const actionName = 'verifyPaidFoodPaymentAction';
@@ -247,12 +297,39 @@ export async function verifyPaidFoodPaymentAction(data: VerifyPaidFoodPaymentInp
         if (!orderSnap.exists) {
             throw new Error(`Order document ${firestoreDocId} not found.`);
         }
+
+        const existingOrder = orderSnap.data() as Partial<PaidFoodOrder> & Record<string, any>;
+        const isAlreadyPaidForSamePayment = existingOrder.status === 'Paid' && existingOrder.paymentId === razorpay_payment_id;
+        const isAlreadyFinalized = isAlreadyPaidForSamePayment && existingOrder.couponsIssued === true && (existingOrder.zohoSynced === true || !!existingOrder.invoiceId);
+        if (isAlreadyFinalized) {
+            return { success: true, message: 'Payment already verified and order already finalized.' };
+        }
+
+        const parsedItems = JSON.parse(data.items);
+        const normalizedBuyerEmail = String(data.buyerEmail || existingOrder.buyerEmail || '').trim().toLowerCase();
+
+        const finalOrderData = {
+            orderId: existingOrder.orderId || data.orderId || firestoreDocId,
+            razorpayOrderId: razorpay_order_id,
+            paymentId: razorpay_payment_id,
+            status: 'Paid' as const,
+            updatedAt: FieldValue.serverTimestamp(),
+            paymentVerifiedAt: FieldValue.serverTimestamp(),
+            buyerName: data.buyerName,
+            buyerEmail: normalizedBuyerEmail,
+            buyerMobile: data.buyerMobile,
+            totalAmountPaisa: parseInt(data.totalAmountPaisa, 10) || 0,
+            eventId: data.eventId || existingOrder.eventId || null,
+            eventName: data.eventName || existingOrder.eventName || null,
+        };
+
+        await orderDocRef.set(finalOrderData, { merge: true });
         
         // --- ZOHO LOGIC ---
-        const userQuery = await adminDb.collection('users').where('email', '==', data.buyerEmail.toLowerCase()).limit(1).get();
+        const userQuery = await adminDb.collection('users').where('email', '==', normalizedBuyerEmail).limit(1).get();
         
         const user: any = userQuery.empty 
-          ? { name: data.buyerName, email: data.buyerEmail, mobile: data.buyerMobile, state: null, uid: `transient_${data.buyerEmail}` } 
+          ? { name: data.buyerName, email: normalizedBuyerEmail, mobile: data.buyerMobile, state: null, uid: `transient_${normalizedBuyerEmail}` } 
           : { uid: userQuery.docs[0].id, ...userQuery.docs[0].data() };
 
         let customerId = user?.zohoCustomerId;
@@ -267,9 +344,6 @@ export async function verifyPaidFoodPaymentAction(data: VerifyPaidFoodPaymentInp
         if (!customerId) {
             throw new Error("Zoho customerId could not be resolved.");
         }
-
-
-        const parsedItems = JSON.parse(data.items);
         const userStateLower = user.state?.trim().toLowerCase();
         const isInterstate = userStateLower && userStateLower !== 'maharashtra';
         
@@ -328,39 +402,202 @@ export async function verifyPaidFoodPaymentAction(data: VerifyPaidFoodPaymentInp
                 invoiceFileName: invoiceFileName,
             });
         }
+        await orderDocRef.set({
+          invoiceId: createdInvoice.invoice_id,
+          invoiceNumber: createdInvoice.invoice_number,
+          zohoSynced: true,
+          zohoSyncError: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
         // --- END ZOHO LOGIC ---
 
-        const batch = adminDb.batch();
-        const finalOrderData = {
-            paymentId: razorpay_payment_id, status: 'Paid' as const, updatedAt: FieldValue.serverTimestamp(),
-            buyerName: data.buyerName, buyerEmail: data.buyerEmail, buyerMobile: data.buyerMobile,
-            totalAmountPaisa: parseInt(data.totalAmountPaisa, 10) || 0,
-            invoiceId: createdInvoice.invoice_id, invoiceNumber: createdInvoice.invoice_number, zohoSynced: true,
-        };
-        batch.update(orderDocRef, finalOrderData);
+        const existingCouponsSnap = await adminDb.collection(FOOD_COUPONS_COLLECTION)
+          .where('orderId', '==', (existingOrder.orderId || data.orderId || firestoreDocId))
+          .get();
+
+        const issuedCountByItem = new Map<string, number>();
+        existingCouponsSnap.docs.forEach(doc => {
+          const coupon = doc.data() as Partial<PaidFoodCoupon>;
+          const key = String(coupon.itemId || '');
+          if (!key) return;
+          issuedCountByItem.set(key, (issuedCountByItem.get(key) || 0) + 1);
+        });
+
+        const couponBatch = adminDb.batch();
+        const emailsToSend: Array<{ itemName: string; pricePerItem: number; couponCode: string }> = [];
 
         for (const item of parsedItems) {
-            for (let i = 0; i < item.quantity; i++) {
-                const couponCode = await generateUniqueFoodCouponCode(adminDb);
-                const couponRef = adminDb.collection(FOOD_COUPONS_COLLECTION).doc(couponCode);
-                const newCoupon: Omit<PaidFoodCoupon, 'id'> = {
-                    orderId: data.orderId, itemId: item.itemId, itemName: item.itemName,
-                    status: 'ISSUED', issuedAt: new Date().toISOString(),
-                };
-                batch.set(couponRef, newCoupon);
-                sendFoodOrderConfirmationEmail(data.buyerEmail, data.buyerName, data.orderId, item.itemName, item.pricePerItem, 1, couponCode).catch(e => console.error("Error sending Food Order Email:", e));
-            }
+          const itemId = String(item.itemId || '');
+          const alreadyIssued = issuedCountByItem.get(itemId) || 0;
+          const missingCount = Math.max(0, Number(item.quantity || 0) - alreadyIssued);
+
+          for (let i = 0; i < missingCount; i++) {
+            const couponCode = await generateUniqueFoodCouponCode(adminDb);
+            const couponRef = adminDb.collection(FOOD_COUPONS_COLLECTION).doc(couponCode);
+            const newCoupon: Omit<PaidFoodCoupon, 'id'> = {
+              orderId: String(existingOrder.orderId || data.orderId || firestoreDocId), itemId: item.itemId, itemName: item.itemName,
+              status: 'ISSUED', issuedAt: new Date().toISOString(),
+            };
+            couponBatch.set(couponRef, newCoupon);
+            emailsToSend.push({ itemName: item.itemName, pricePerItem: item.pricePerItem, couponCode });
+          }
         }
-        await batch.commit();
+        if (emailsToSend.length > 0) {
+          await couponBatch.commit();
+        }
+
+        await orderDocRef.set({
+          couponsIssued: true,
+          couponsIssuedCount: existingCouponsSnap.size + emailsToSend.length,
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        for (const email of emailsToSend) {
+          sendFoodOrderConfirmationEmail(normalizedBuyerEmail, data.buyerName, String(existingOrder.orderId || data.orderId || firestoreDocId), email.itemName, email.pricePerItem, 1, email.couponCode)
+            .catch(e => console.error("Error sending Food Order Email:", e));
+        }
         revalidatePath('/admin/dashboard');
         
         return { success: true, message: 'Payment verified and order finalized.' };
 
     } catch (e: any) {
         console.error(`[${actionName}] Error:`, e);
+        try {
+          const adminDb = getFirestoreInstance();
+          await adminDb.collection(FOOD_ORDERS_COLLECTION).doc(firestoreDocId).set({
+            status: 'Paid',
+            paymentId: razorpay_payment_id,
+            razorpayOrderId: razorpay_order_id,
+            buyerName: data.buyerName,
+            buyerEmail: String(data.buyerEmail || '').trim().toLowerCase(),
+            buyerMobile: data.buyerMobile,
+            totalAmountPaisa: parseInt(data.totalAmountPaisa, 10) || 0,
+            zohoSynced: false,
+            zohoSyncError: e?.message || 'Post-payment finalization failed.',
+            updatedAt: FieldValue.serverTimestamp(),
+            paymentVerifiedAt: FieldValue.serverTimestamp(),
+          }, { merge: true });
+        } catch (persistError: any) {
+          console.error(`[${actionName}] Failed to persist paid order fallback:`, persistError);
+        }
         return { success: false, message: `Server action failed: ${e.message}` };
     }
 }
+
+    export async function repairPaidFoodOrdersAction(options?: {
+      limit?: number;
+      eventId?: string;
+    }): Promise<{
+      success: boolean;
+      message: string;
+      scanned?: number;
+      repaired?: number;
+      skipped?: number;
+      failed?: number;
+    }> {
+      const actionName = 'repairPaidFoodOrdersAction';
+      if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+        return { success: false, message: 'Payment gateway is not configured.' };
+      }
+
+      try {
+        const adminDb = getFirestoreInstance();
+        const razorpayInstance = new Razorpay({ key_id: RAZORPAY_KEY_ID, key_secret: RAZORPAY_KEY_SECRET });
+        const limit = Math.min(Math.max(Number(options?.limit || 100), 1), 300);
+        const ordersSnap = await adminDb.collection(FOOD_ORDERS_COLLECTION).orderBy('createdAt', 'desc').limit(limit).get();
+
+        let scanned = 0;
+        let repaired = 0;
+        let skipped = 0;
+        let failed = 0;
+
+        for (const orderDoc of ordersSnap.docs) {
+          const order = orderDoc.data() as Partial<PaidFoodOrder> & Record<string, any>;
+          const status = String(order.status || '').trim().toLowerCase();
+          const orderEventId = String(order.eventId || '').trim();
+
+          if (options?.eventId && orderEventId !== options.eventId) {
+            continue;
+          }
+
+          scanned++;
+
+          const isTerminal = status === 'refunded' || status === 'cancelled';
+          const needsRepair = !isTerminal && (
+            status !== 'paid'
+            || !String(order.paymentId || '').trim()
+            || order.couponsIssued !== true
+            || order.zohoSynced !== true
+          );
+
+          if (!needsRepair) {
+            skipped++;
+            continue;
+          }
+
+          const payment = await findCapturedPaymentForFoodOrder(razorpayInstance, {
+            firestoreDocId: orderDoc.id,
+            orderId: String(order.orderId || orderDoc.id),
+            razorpayOrderId: String(order.razorpayOrderId || ''),
+          });
+
+          if (!payment || payment.status !== 'captured' || !payment.id || !payment.order_id) {
+            skipped++;
+            await orderDoc.ref.set({
+              lastRepairCheckedAt: FieldValue.serverTimestamp(),
+            }, { merge: true });
+            continue;
+          }
+
+          const shasum = crypto.createHmac('sha256', RAZORPAY_KEY_SECRET);
+          shasum.update(`${payment.order_id}|${payment.id}`);
+
+          const repairResult = await verifyPaidFoodPaymentAction({
+            razorpay_payment_id: payment.id,
+            razorpay_order_id: payment.order_id,
+            razorpay_signature: shasum.digest('hex'),
+            firestoreDocId: orderDoc.id,
+            orderId: String(order.orderId || orderDoc.id),
+            buyerName: String(order.buyerName || payment.notes?.buyerName || 'Food Buyer'),
+            buyerEmail: String(order.buyerEmail || payment.email || payment.notes?.buyerEmail || '').trim().toLowerCase(),
+            buyerMobile: String(order.buyerMobile || payment.contact || payment.notes?.buyerMobile || '').trim(),
+            eventId: order.eventId ? String(order.eventId) : null,
+            eventName: String(order.eventName || payment.notes?.eventName || 'Bergman Event'),
+            items: JSON.stringify(Array.isArray(order.items) ? order.items : []),
+            totalAmountPaisa: String(order.totalAmountPaisa || payment.amount || 0),
+          });
+
+          if (repairResult.success) {
+            repaired++;
+            await orderDoc.ref.set({
+              repairedAt: FieldValue.serverTimestamp(),
+              lastRepairCheckedAt: FieldValue.serverTimestamp(),
+              repairStatus: 'success',
+            }, { merge: true });
+          } else {
+            failed++;
+            await orderDoc.ref.set({
+              lastRepairCheckedAt: FieldValue.serverTimestamp(),
+              repairStatus: 'failed',
+              repairError: repairResult.message,
+            }, { merge: true });
+          }
+        }
+
+        revalidatePath('/admin/dashboard');
+        return {
+          success: true,
+          message: `Repair complete. Scanned ${scanned}, repaired ${repaired}, skipped ${skipped}, failed ${failed}.`,
+          scanned,
+          repaired,
+          skipped,
+          failed,
+        };
+      } catch (e: any) {
+        console.error(`[${actionName}] Error:`, e);
+        return { success: false, message: e?.message || 'Repair failed.' };
+      }
+    }
 
 export async function redeemFoodCouponAction(
     code: string,

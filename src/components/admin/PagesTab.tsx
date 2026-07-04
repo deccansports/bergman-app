@@ -1,13 +1,14 @@
 // src/components/admin/PagesTab.tsx
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import Link from 'next/link';
 import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
-import { FileText, PlusCircle, ArrowUp, ArrowDown, Trash2, Save, ExternalLink, Video, Home, Link as LinkIcon, Loader2, Edit, LogIn } from 'lucide-react';
+import { FileText, PlusCircle, ArrowUp, ArrowDown, Trash2, Save, ExternalLink, Video, Home, Link as LinkIcon, Loader2, Edit, LogIn, Calendar } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,8 +34,10 @@ import { Dialog, DialogClose, DialogTrigger, DialogContent, DialogHeader, Dialog
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Instagram, Facebook, Twitter, Youtube } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { isBefore, parseISO, startOfDay } from 'date-fns';
-import { isValidImageUrl } from '@/lib/utils';
+import { format, isBefore, parseISO, startOfDay } from 'date-fns';
+import { cn, isTicketHidden, isValidImageUrl } from '@/lib/utils';
+import { storage as firebaseClientStorage } from '@/lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 
 interface PagesTabProps {
@@ -42,6 +45,15 @@ interface PagesTabProps {
   isLoadingEvents: boolean;
   onDataRefresh: () => void;
 }
+
+const FOOTER_CATEGORY_OPTIONS = [
+    'Information',
+    'Explore',
+    'Races',
+    'News',
+    'Community',
+    'Support',
+];
 
 function SitePagesManager({ onDataRefresh }: { onDataRefresh: () => void }) {
     const [pages, setPages] = useState<Page[]>([]);
@@ -104,7 +116,10 @@ function SitePagesManager({ onDataRefresh }: { onDataRefresh: () => void }) {
             title: "New Page",
             slug: "new-page",
             published: false,
+            requiresLogin: false,
             showInHeader: true,
+            showInFooter: false,
+            footerCategory: 'Explore',
             blocks: [{ id: `b${Date.now()}`, html: "<p>Start writing here...</p>" }],
             url: null,
             eventId: null,
@@ -132,8 +147,17 @@ function SitePagesManager({ onDataRefresh }: { onDataRefresh: () => void }) {
     const handleSavePage = async () => {
         if (!selectedPage) return;
         setIsSaving(true);
+        const normalizedPage: Page = {
+            ...selectedPage,
+            url:
+                selectedPage.title.trim().toLowerCase() === 'work with team bergman' &&
+                (!selectedPage.url || selectedPage.url === selectedPage.slug)
+                    ? '/work-with-bergman'
+                    : selectedPage.url,
+        };
+
         const isNewPage = !pages.some(p => p.id === selectedPage.id);
-        const newPagesArray = isNewPage ? [...pages, selectedPage] : pages.map(p => p.id === selectedPage.id ? selectedPage : p);
+        const newPagesArray = isNewPage ? [...pages, normalizedPage] : pages.map(p => p.id === selectedPage.id ? normalizedPage : p);
         
         const result = await savePagesAction(newPagesArray);
         if (result.success) {
@@ -201,16 +225,37 @@ function SitePagesManager({ onDataRefresh }: { onDataRefresh: () => void }) {
                       disabled={isSaving}
                     />
                   </div>
+                                    <div>
+                                        <label className="text-sm font-medium">Footer Category</label>
+                                        <Select value={selectedPage.footerCategory || 'Explore'} onValueChange={(value) => handleUpdatePageDetails('footerCategory', value)} disabled={isSaving}>
+                                                <SelectTrigger>
+                                                        <SelectValue placeholder="Select footer category" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                        {FOOTER_CATEGORY_OPTIONS.map((category) => (
+                                                                <SelectItem key={category} value={category}>{category}</SelectItem>
+                                                        ))}
+                                                </SelectContent>
+                                        </Select>
+                                    </div>
                 </div>
                 <div className="flex items-center space-x-4 pt-2">
                   <div className="flex items-center space-x-2">
                     <Switch id="pagePublished" checked={selectedPage.published} onCheckedChange={(checked) => handleUpdatePageDetails('published', checked)} disabled={isSaving}/>
                     <label htmlFor="pagePublished">{selectedPage.published ? 'Published' : 'Draft'}</label>
                   </div>
+                                    <div className="flex items-center space-x-2">
+                                        <Switch id="requiresLogin" checked={!!selectedPage.requiresLogin} onCheckedChange={(checked) => handleUpdatePageDetails('requiresLogin', checked)} disabled={isSaving}/>
+                                        <label htmlFor="requiresLogin" className="inline-flex items-center gap-1.5"><LogIn className="h-4 w-4" /> Requires Login</label>
+                                    </div>
                    <div className="flex items-center space-x-2">
                     <Switch id="showInHeader" checked={selectedPage.showInHeader} onCheckedChange={(checked) => handleUpdatePageDetails('showInHeader', checked)} disabled={isSaving}/>
                     <label htmlFor="showInHeader">Show in Header</label>
                   </div>
+                                    <div className="flex items-center space-x-2">
+                                        <Switch id="showInFooter" checked={!!selectedPage.showInFooter} onCheckedChange={(checked) => handleUpdatePageDetails('showInFooter', checked)} disabled={isSaving}/>
+                                        <label htmlFor="showInFooter">Show in Footer</label>
+                                    </div>
                 </div>
 
                 <div className="space-y-3 pt-4 border-t">
@@ -260,16 +305,29 @@ function SitePagesManager({ onDataRefresh }: { onDataRefresh: () => void }) {
             </div>
             <div className="rounded-md border">
                 <Table>
-                    <TableHeader><TableRow><TableHead>Title</TableHead><TableHead>Path</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+                    <TableHeader><TableRow><TableHead>Title</TableHead><TableHead>Path</TableHead><TableHead>Status</TableHead><TableHead>Access</TableHead><TableHead>Placement</TableHead><TableHead>Footer Category</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
                     <TableBody>
                         {isLoadingPages ? (
-                           <TableRow><TableCell colSpan={4} className="text-center"><Loader2 className="animate-spin my-4" /></TableCell></TableRow>
+                           <TableRow><TableCell colSpan={7} className="text-center"><Loader2 className="animate-spin my-4" /></TableCell></TableRow>
                         ) : pages.map((page, index) => (
                             <TableRow key={page.id}>
                                 <TableCell className="font-medium flex items-center gap-2">{page.title}{page.url && page.url.startsWith('http') && <ExternalLink className="h-4 w-4 text-muted-foreground" />}</TableCell>
                                 <TableCell className="text-muted-foreground font-mono text-xs">{page.url || `/content/${page.slug}`}</TableCell>
                                 <TableCell>
                                     <Badge variant={page.published ? 'default' : 'secondary'}>{page.published ? 'Published' : 'Draft'}</Badge>
+                                </TableCell>
+                                <TableCell>
+                                    <Badge variant={page.requiresLogin ? 'secondary' : 'outline'}>{page.requiresLogin ? 'Login Required' : 'Public'}</Badge>
+                                </TableCell>
+                                <TableCell>
+                                    <div className="flex flex-wrap gap-1">
+                                        {page.showInHeader && <Badge variant="outline">Header</Badge>}
+                                        {!!page.showInFooter && <Badge variant="outline">Footer</Badge>}
+                                        {!page.showInHeader && !page.showInFooter && <Badge variant="secondary">Hidden from nav</Badge>}
+                                    </div>
+                                </TableCell>
+                                <TableCell>
+                                    <Badge variant="secondary">{page.footerCategory || 'Explore'}</Badge>
                                 </TableCell>
                                 <td className="p-3 text-right space-x-1">
                                     <Button size="icon" variant="ghost" onClick={() => handleMovePage(index, 'up')} disabled={index === 0 || isSaving}>
@@ -460,7 +518,17 @@ function HomepageSliderManager({ events, isLoadingEvents, onDataRefresh }: Pages
     };
 
     const handleAddItem = () => {
-        setEditingItem({ id: `item${Date.now()}`, type: 'image', src: '', alt: '', showOnHomepage: true });
+        setEditingItem({
+            id: `item${Date.now()}`,
+            type: 'image',
+            src: '',
+            alt: '',
+            customUrl: null,
+            header: null,
+            description: null,
+            customLinkText: null,
+            showOnHomepage: true,
+        });
         setIsModalOpen(true);
     };
 
@@ -505,7 +573,9 @@ function HomepageSliderManager({ events, isLoadingEvents, onDataRefresh }: Pages
                                         <TableCell><Badge variant="secondary">{item.type}</Badge></TableCell>
                                         <TableCell className="text-xs font-mono max-w-xs truncate">{item.src}</TableCell>
                                         <TableCell className="text-xs">
-                                            {item.eventId ? (
+                                            {item.customUrl ? (
+                                                <Badge variant="outline" className="break-all">Custom URL</Badge>
+                                            ) : item.eventId ? (
                                                 <Badge variant="secondary">Event: {events.find(e => e.id === item.eventId)?.eventName || 'N/A'}</Badge>
                                             ) : item.pageSlug ? (
                                                 <Badge variant="outline">{item.pageSlug}</Badge>
@@ -545,6 +615,49 @@ interface SliderItemModalProps {
 
 function SliderItemModal({ isOpen, onClose, item, onSave, events }: SliderItemModalProps) {
     const [currentItem, setCurrentItem] = useState(item);
+    const [isUploadingImage, setIsUploadingImage] = useState(false);
+    const [isUploadingMobileImage, setIsUploadingMobileImage] = useState(false);
+    const [isDraggingImage, setIsDraggingImage] = useState(false);
+    const [isDraggingMobileImage, setIsDraggingMobileImage] = useState(false);
+    const [activeGestureTarget, setActiveGestureTarget] = useState<'desktop' | 'mobile' | null>(null);
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const mobileFileInputRef = useRef<HTMLInputElement | null>(null);
+    const [uploadError, setUploadError] = useState<string | null>(null);
+    const { toast } = useToast();
+    const gestureRef = useRef<{
+        target: 'desktop' | 'mobile' | null;
+        pointers: Map<number, { x: number; y: number }>;
+        lastDistance: number | null;
+    }>({ target: null, pointers: new Map(), lastDistance: null });
+
+    const desktopFocusX = currentItem.desktopFocusX ?? 50;
+    const desktopFocusY = currentItem.desktopFocusY ?? 50;
+    const desktopZoom = currentItem.desktopZoom ?? 1;
+    const mobileFocusX = currentItem.mobileFocusX ?? desktopFocusX;
+    const mobileFocusY = currentItem.mobileFocusY ?? desktopFocusY;
+    const mobileZoom = currentItem.mobileZoom ?? 1;
+    const previewEvent = useMemo(
+        () => (currentItem.eventId ? events.find((event) => event.id === currentItem.eventId) || null : null),
+        [events, currentItem.eventId]
+    );
+    const previewTitle = previewEvent?.eventName || currentItem.header || 'Hero title';
+    const previewDescription = previewEvent?.description || currentItem.description || 'Hero description text appears here.';
+    const previewDateText = previewEvent?.eventDate && previewEvent.eventDate !== 'TBD'
+        ? format(parseISO(previewEvent.eventDate), 'dd MMM yyyy')
+        : 'Date TBD';
+    const previewRegisterLink = previewEvent
+        ? (previewEvent.customSlug ? `/event-form/${previewEvent.customSlug}` : previewEvent.registrationUrl || '#')
+        : (currentItem.customUrl || '#');
+    const previewDetailsLink = previewEvent
+        ? `/races/${previewEvent.customSlug ? previewEvent.customSlug : previewEvent.id}`
+        : (currentItem.customUrl || '#');
+    const previewWaitlistLink = previewEvent
+        ? `/waitlist/${previewEvent.customSlug || String(previewEvent.eventName || '').toLowerCase().trim().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '')}`
+        : (currentItem.customUrl || '#');
+    const previewHasSoldOutTickets = !!previewEvent && (previewEvent.ticketDefinitions || []).some((ticket: any) => {
+        const maybeDeleted = (ticket as any)?.isDeleted || !!(ticket as any)?.deletedAt;
+        return !maybeDeleted && !isTicketHidden(ticket) && ticket.isSoldOut === true;
+    });
 
     const upcomingEvents = useMemo(() => {
         const today = startOfDay(new Date());
@@ -557,7 +670,268 @@ function SliderItemModal({ isOpen, onClose, item, onSave, events }: SliderItemMo
 
     useEffect(() => {
         setCurrentItem(item);
+        setUploadError(null);
+        setIsDraggingImage(false);
     }, [item]);
+
+    const uploadImageFile = useCallback(async (file: File) => {
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+            setUploadError('Only image files are supported.');
+            toast({ variant: 'destructive', title: 'Invalid file', description: 'Please upload an image file.' });
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            setUploadError('Image must be 5MB or less.');
+            toast({ variant: 'destructive', title: 'File too large', description: 'Image must be 5MB or less.' });
+            return;
+        }
+        if (!firebaseClientStorage) {
+            setUploadError('Firebase Storage is not configured.');
+            toast({ variant: 'destructive', title: 'Upload unavailable', description: 'Firebase Storage is not configured.' });
+            return;
+        }
+
+        setIsUploadingImage(true);
+        setUploadError(null);
+        try {
+            const safeName = file.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '');
+            const path = `homepage-slider/${currentItem.id || 'item'}/${Date.now()}-${safeName}`;
+            const storageRef = ref(firebaseClientStorage, path);
+            await uploadBytes(storageRef, file);
+            const downloadURL = await getDownloadURL(storageRef);
+            setCurrentItem((prev) => ({ ...prev, type: 'image', src: downloadURL }));
+            toast({ title: 'Image uploaded', description: 'The slider image has been uploaded successfully.' });
+        } catch (error: any) {
+            console.error('Homepage slider image upload failed:', error);
+            setUploadError(error?.message || 'Failed to upload image.');
+            toast({ variant: 'destructive', title: 'Upload failed', description: error?.message || 'Failed to upload image.' });
+        } finally {
+            setIsUploadingImage(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    }, [currentItem.id, toast]);
+
+    const uploadMobileImageFile = useCallback(async (file: File) => {
+        if (!file) return;
+        if (!file.type.startsWith('image/')) {
+            setUploadError('Only image files are supported.');
+            toast({ variant: 'destructive', title: 'Invalid file', description: 'Please upload an image file.' });
+            return;
+        }
+        if (file.size > 5 * 1024 * 1024) {
+            setUploadError('Image must be 5MB or less.');
+            toast({ variant: 'destructive', title: 'File too large', description: 'Image must be 5MB or less.' });
+            return;
+        }
+        if (!firebaseClientStorage) {
+            setUploadError('Firebase Storage is not configured.');
+            toast({ variant: 'destructive', title: 'Upload unavailable', description: 'Firebase Storage is not configured.' });
+            return;
+        }
+
+        setIsUploadingMobileImage(true);
+        setUploadError(null);
+        try {
+            const safeName = file.name.replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '');
+            const path = `homepage-slider/${currentItem.id || 'item'}/mobile-${Date.now()}-${safeName}`;
+            const storageRef = ref(firebaseClientStorage, path);
+            await uploadBytes(storageRef, file);
+            const downloadURL = await getDownloadURL(storageRef);
+            setCurrentItem((prev) => ({ ...prev, mobileSrc: downloadURL }));
+            toast({ title: 'Mobile image uploaded', description: 'The mobile banner image has been uploaded successfully.' });
+        } catch (error: any) {
+            console.error('Homepage slider mobile image upload failed:', error);
+            setUploadError(error?.message || 'Failed to upload image.');
+            toast({ variant: 'destructive', title: 'Upload failed', description: error?.message || 'Failed to upload image.' });
+        } finally {
+            setIsUploadingMobileImage(false);
+            if (mobileFileInputRef.current) mobileFileInputRef.current.value = '';
+        }
+    }, [currentItem.id, toast]);
+
+    const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) void uploadImageFile(file);
+    };
+
+    const handleMobileFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) void uploadMobileImageFile(file);
+    };
+
+    const handleUploadDrop = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        setIsDraggingImage(false);
+        const file = e.dataTransfer.files?.[0];
+        if (file) void uploadImageFile(file);
+    };
+
+    const handleMobileUploadDrop = (e: React.DragEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        setIsDraggingMobileImage(false);
+        const file = e.dataTransfer.files?.[0];
+        if (file) void uploadMobileImageFile(file);
+    };
+
+        const updateFocus = (target: 'desktop' | 'mobile', clientX: number, clientY: number, rect: DOMRect) => {
+                const x = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
+                const y = Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100));
+                setCurrentItem(prev => target === 'desktop'
+                    ? { ...prev, desktopFocusX: x, desktopFocusY: y }
+                    : { ...prev, mobileFocusX: x, mobileFocusY: y }
+                );
+        };
+
+        const updateZoom = (target: 'desktop' | 'mobile', value: number) => {
+                setCurrentItem(prev => target === 'desktop'
+                    ? { ...prev, desktopZoom: value }
+                    : { ...prev, mobileZoom: value }
+                );
+        };
+
+        const resetControls = (target: 'desktop' | 'mobile') => {
+            setCurrentItem(prev => target === 'desktop'
+              ? { ...prev, desktopFocusX: 50, desktopFocusY: 50, desktopZoom: 1 }
+              : { ...prev, mobileFocusX: 50, mobileFocusY: 50, mobileZoom: 1 }
+            );
+        };
+
+        const getZoomForTarget = (target: 'desktop' | 'mobile') =>
+            target === 'desktop' ? (currentItem.desktopZoom ?? 1) : (currentItem.mobileZoom ?? 1);
+
+        const getFocusForTarget = (target: 'desktop' | 'mobile') => ({
+            x: target === 'desktop' ? (currentItem.desktopFocusX ?? 50) : (currentItem.mobileFocusX ?? 50),
+            y: target === 'desktop' ? (currentItem.desktopFocusY ?? 50) : (currentItem.mobileFocusY ?? 50),
+        });
+
+        const updateFocusForTarget = (target: 'desktop' | 'mobile', x: number, y: number) => {
+            setCurrentItem(prev => target === 'desktop'
+                ? { ...prev, desktopFocusX: x, desktopFocusY: y }
+                : { ...prev, mobileFocusX: x, mobileFocusY: y }
+            );
+        };
+
+        const handlePreviewPointerDown = (
+            target: 'desktop' | 'mobile',
+            e: React.PointerEvent<HTMLDivElement>
+        ) => {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            gestureRef.current.target = target;
+            gestureRef.current.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            setActiveGestureTarget(target);
+
+            if (gestureRef.current.pointers.size === 2) {
+                const points = Array.from(gestureRef.current.pointers.values());
+                gestureRef.current.lastDistance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+            }
+        };
+
+        const handlePreviewPointerMove = (
+            target: 'desktop' | 'mobile',
+            e: React.PointerEvent<HTMLDivElement>
+        ) => {
+            if (gestureRef.current.target !== target) return;
+            if (!gestureRef.current.pointers.has(e.pointerId)) return;
+
+            gestureRef.current.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+            const points = Array.from(gestureRef.current.pointers.values());
+            const rect = e.currentTarget.getBoundingClientRect();
+
+            if (gestureRef.current.pointers.size >= 2) {
+                const distance = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+                const centerX = (points[0].x + points[1].x) / 2;
+                const centerY = (points[0].y + points[1].y) / 2;
+
+                if (gestureRef.current.lastDistance) {
+                    const ratio = distance / gestureRef.current.lastDistance;
+                    const nextZoom = Math.min(1.8, Math.max(1, getZoomForTarget(target) * ratio));
+                    updateZoom(target, nextZoom);
+                }
+
+                gestureRef.current.lastDistance = distance;
+                updateFocusForTarget(
+                    target,
+                    Math.max(0, Math.min(100, ((centerX - rect.left) / rect.width) * 100)),
+                    Math.max(0, Math.min(100, ((centerY - rect.top) / rect.height) * 100))
+                );
+                return;
+            }
+
+            if (gestureRef.current.pointers.size === 1) {
+                updateFocusForTarget(
+                    target,
+                    Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100)),
+                    Math.max(0, Math.min(100, ((e.clientY - rect.top) / rect.height) * 100))
+                );
+            }
+        };
+
+        const handlePreviewPointerUp = (target: 'desktop' | 'mobile', e: React.PointerEvent<HTMLDivElement>) => {
+            gestureRef.current.pointers.delete(e.pointerId);
+            if (gestureRef.current.pointers.size < 2) {
+                gestureRef.current.lastDistance = null;
+            }
+            if (gestureRef.current.pointers.size === 0) {
+                gestureRef.current.target = null;
+                setActiveGestureTarget(null);
+            }
+        };
+
+        const handlePreviewWheel = (target: 'desktop' | 'mobile', e: React.WheelEvent<HTMLDivElement>) => {
+            e.preventDefault();
+            const currentZoom = getZoomForTarget(target);
+            const nextZoom = Math.min(1.8, Math.max(1, currentZoom - (e.deltaY * 0.0015)));
+            updateZoom(target, nextZoom);
+        };
+
+        const renderPreviewCtaRow = (compact = false) => {
+            const buttonSizeClass = compact ? 'h-7 px-3 text-[10px]' : 'h-9 px-4 text-xs';
+            return (
+                <div className="flex flex-wrap gap-2">
+                    <Button asChild size="sm" className={cn(buttonSizeClass, 'bg-orange-600 text-white hover:bg-orange-700')}>
+                        <Link href={previewEvent ? previewRegisterLink : (currentItem.customUrl || '#')} target={previewRegisterLink.startsWith('http') ? '_blank' : '_self'} rel={previewRegisterLink.startsWith('http') ? 'noopener noreferrer' : undefined}>
+                            {previewEvent ? 'Register Now' : (currentItem.customLinkText || 'Register Now')}
+                        </Link>
+                    </Button>
+                    {(previewEvent ? previewHasSoldOutTickets || currentItem.showWaitlistButton : !!currentItem.showWaitlistButton) && (
+                        <Button asChild size="sm" className={cn(buttonSizeClass, 'bg-sky-400 text-slate-950 hover:bg-sky-300')}>
+                            <Link href={previewWaitlistLink}>Join Waitlist</Link>
+                        </Button>
+                    )}
+                    <Button asChild size="sm" variant="outline" className={cn(buttonSizeClass, 'bg-white text-slate-900 hover:bg-slate-100')}>
+                        <Link href={previewDetailsLink}>Details</Link>
+                    </Button>
+                </div>
+            );
+        };
+
+        const renderPreviewOverlay = (compact = false) => (
+            <div className={cn('absolute inset-0 flex items-end text-white', compact ? 'p-3' : 'p-4')}>
+                <div className={cn('drop-shadow-lg', compact ? 'space-y-1.5' : 'max-w-md space-y-2')}>
+                    <div className={cn('inline-flex items-center rounded-full border border-white/15 bg-black/35 font-black uppercase tracking-[0.2em]', compact ? 'px-2 py-1 text-[9px]' : 'px-3 py-1 text-[10px]')}>
+                        {previewEvent ? 'Upcoming Event' : 'Homepage Hero'}
+                    </div>
+                    <h3 className={cn('font-black uppercase italic leading-none', compact ? 'text-xl' : 'text-2xl')}>
+                        {previewTitle}
+                    </h3>
+                    <p className={cn('text-white/85', compact ? 'text-[10px]' : 'text-xs')}>
+                        {previewDescription}
+                    </p>
+                    {previewEvent && (
+                        <div className={cn('flex items-center gap-2 font-black uppercase tracking-widest text-white/90', compact ? 'text-[9px]' : 'text-[10px]')}>
+                            <Calendar className={cn(compact ? 'h-3 w-3' : 'h-4 w-4', 'text-orange-400')} />
+                            {previewDateText}
+                        </div>
+                    )}
+                    {renderPreviewCtaRow(compact)}
+                    <p className={cn('uppercase tracking-widest text-white/70', compact ? 'text-[9px]' : 'text-[10px]')}>
+                        Drag • Scroll to zoom • Pinch to zoom
+                    </p>
+                </div>
+            </div>
+        );
 
     const handleSave = () => {
         onSave(currentItem);
@@ -565,28 +939,32 @@ function SliderItemModal({ isOpen, onClose, item, onSave, events }: SliderItemMo
     
     return (
         <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent>
+            <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
                 <DialogHeader><DialogTitle>{item.id.startsWith('item') ? 'Add' : 'Edit'} Media Item</DialogTitle></DialogHeader>
                 <div className="space-y-4 py-4">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <div className="space-y-1"><Label>Type</Label><Select value={currentItem.type} onValueChange={(v) => setCurrentItem(c => ({ ...c, type: v as 'image'|'video' }))}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="image">Image</SelectItem><SelectItem value="video">Video</SelectItem></SelectContent></Select></div>
                       <div className="space-y-1">
-                          <Label>Link To Page / Event</Label>
+                          <Label>Link To</Label>
+                          {/** customUrl is supported in the underlying data model */}
                           <Select
-                              value={currentItem.eventId ? `event-${currentItem.eventId}` : currentItem.pageSlug ? `page-${currentItem.pageSlug}` : 'none'}
+                              value={currentItem.eventId ? `event-${currentItem.eventId}` : currentItem.pageSlug ? `page-${currentItem.pageSlug}` : (currentItem.customUrl !== null && currentItem.customUrl !== undefined) ? 'custom' : 'none'}
                               onValueChange={(v) => {
-                                  if (v.startsWith('event-')) {
-                                      setCurrentItem(c => ({...c, eventId: v.replace('event-', ''), pageSlug: null}));
+                                  if (v === 'custom') {
+                                      setCurrentItem(c => ({...c, customUrl: '', eventId: null, pageSlug: null}));
+                                  } else if (v.startsWith('event-')) {
+                                      setCurrentItem(c => ({...c, eventId: v.replace('event-', ''), pageSlug: null, customUrl: null}));
                                   } else if (v.startsWith('page-')) {
-                                      setCurrentItem(c => ({...c, eventId: null, pageSlug: v.replace('page-', '')}));
+                                      setCurrentItem(c => ({...c, eventId: null, pageSlug: v.replace('page-', ''), customUrl: null}));
                                   } else {
-                                      setCurrentItem(c => ({...c, eventId: null, pageSlug: null}));
+                                      setCurrentItem(c => ({...c, eventId: null, pageSlug: null, customUrl: null}));
                                   }
                               }}
                           >
                               <SelectTrigger><SelectValue placeholder="Link to..."/></SelectTrigger>
                               <SelectContent>
                                   <SelectItem value="none">None (Homepage)</SelectItem>
+                                  <SelectItem value="custom">Custom URL</SelectItem>
                                   <SelectGroup><SelectLabel>Special Pages</SelectLabel>
                                     <SelectItem value="page-media">Media Page</SelectItem>
                                     <SelectItem value="page-login">Login Page</SelectItem>
@@ -599,10 +977,187 @@ function SliderItemModal({ isOpen, onClose, item, onSave, events }: SliderItemMo
                           </Select>
                       </div>
                     </div>
-                    <div className="space-y-1"><Label>Source URL</Label><Input value={currentItem.src} onChange={e => setCurrentItem(c => ({...c, src: e.target.value }))} placeholder="https://..."/></div>
+                                        {currentItem.type === 'image' && (
+                                            <div className="space-y-6">
+                                                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                                                    <div
+                                                        className={cn(
+                                                            'rounded-xl border-2 border-dashed p-4 transition-colors',
+                                                            isDraggingImage ? 'border-primary bg-primary/5' : 'border-slate-300 bg-slate-50/50'
+                                                        )}
+                                                        onDragOver={(e) => { e.preventDefault(); setIsDraggingImage(true); }}
+                                                        onDragLeave={() => setIsDraggingImage(false)}
+                                                        onDrop={handleUploadDrop}
+                                                    >
+                                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                                            <div>
+                                                                <Label className="text-sm font-semibold">Desktop Banner</Label>
+                                                                <p className="text-xs text-muted-foreground">Recommended: 1920 × 1080 px. Drag and drop or upload.</p>
+                                                            </div>
+                                                            <Button type="button" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={isUploadingImage}>
+                                                                {isUploadingImage ? 'Uploading...' : 'Upload Desktop Image'}
+                                                            </Button>
+                                                        </div>
+                                                        <input
+                                                            ref={fileInputRef}
+                                                            type="file"
+                                                            accept="image/*"
+                                                            className="hidden"
+                                                            onChange={handleFileInputChange}
+                                                        />
+                                                        <div className="mt-4 overflow-hidden rounded-lg border bg-white">
+                                                            <div className="relative aspect-video w-full">
+                                                                <Image src={currentItem.src} alt={currentItem.alt || 'Desktop slider preview'} fill className="object-cover" style={{ objectPosition: `${desktopFocusX}% ${desktopFocusY}%`, transform: `scale(${desktopZoom})` }} />
+                                                            </div>
+                                                        </div>
+                                                        <div className="mt-3 space-y-2">
+                                                            <Label className="text-[10px] uppercase tracking-widest text-slate-500">Desktop Zoom</Label>
+                                                            <Input type="range" min="1" max="1.8" step="0.01" value={desktopZoom} onChange={(e) => updateZoom('desktop', Number(e.target.value))} />
+                                                        </div>
+                                                    </div>
+
+                                                    <div
+                                                        className={cn(
+                                                            'rounded-xl border-2 border-dashed p-4 transition-colors',
+                                                            isDraggingMobileImage ? 'border-primary bg-primary/5' : 'border-slate-300 bg-slate-50/50'
+                                                        )}
+                                                        onDragOver={(e) => { e.preventDefault(); setIsDraggingMobileImage(true); }}
+                                                        onDragLeave={() => setIsDraggingMobileImage(false)}
+                                                        onDrop={handleMobileUploadDrop}
+                                                    >
+                                                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                                            <div>
+                                                                <Label className="text-sm font-semibold">Mobile Banner</Label>
+                                                                <p className="text-xs text-muted-foreground">Recommended: 9:16 or mobile-safe crop. Drag and drop or upload.</p>
+                                                            </div>
+                                                            <Button type="button" variant="outline" onClick={() => mobileFileInputRef.current?.click()} disabled={isUploadingMobileImage}>
+                                                                {isUploadingMobileImage ? 'Uploading...' : 'Upload Mobile Image'}
+                                                            </Button>
+                                                        </div>
+                                                        <input
+                                                            ref={mobileFileInputRef}
+                                                            type="file"
+                                                            accept="image/*"
+                                                            className="hidden"
+                                                            onChange={handleMobileFileInputChange}
+                                                        />
+                                                        <div className="mt-4 overflow-hidden rounded-lg border bg-white">
+                                                            <div className="relative aspect-[9/16] w-full">
+                                                                <Image src={currentItem.mobileSrc || currentItem.src} alt={currentItem.alt || 'Mobile slider preview'} fill className="object-cover" style={{ objectPosition: `${mobileFocusX}% ${mobileFocusY}%`, transform: `scale(${mobileZoom})` }} />
+                                                            </div>
+                                                        </div>
+                                                        <div className="mt-3 space-y-2">
+                                                            <Label className="text-[10px] uppercase tracking-widest text-slate-500">Mobile Zoom</Label>
+                                                            <Input type="range" min="1" max="1.8" step="0.01" value={mobileZoom} onChange={(e) => updateZoom('mobile', Number(e.target.value))} />
+                                                        </div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="space-y-4 border-t pt-4">
+                                                    <h4 className="font-semibold text-sm">Focal Point & Responsive Preview</h4>
+                                                    <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+                                                        <div className="space-y-3 lg:col-span-2">
+                                                            <div className="flex items-center justify-between gap-3">
+                                                                <Label className="text-xs uppercase tracking-widest text-slate-500">Desktop focal point</Label>
+                                                                <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px] font-black uppercase tracking-widest" onClick={() => resetControls('desktop')}>
+                                                                    Reset
+                                                                </Button>
+                                                            </div>
+                                                            <div
+                                                                className={cn(
+                                                                    'relative overflow-hidden rounded-xl border bg-slate-950 aspect-video select-none touch-none',
+                                                                    activeGestureTarget === 'desktop' ? 'cursor-grabbing' : 'cursor-grab'
+                                                                )}
+                                                                onPointerDown={(e) => handlePreviewPointerDown('desktop', e)}
+                                                                onPointerMove={(e) => handlePreviewPointerMove('desktop', e)}
+                                                                onPointerUp={(e) => handlePreviewPointerUp('desktop', e)}
+                                                                onPointerCancel={(e) => handlePreviewPointerUp('desktop', e)}
+                                                                onWheel={(e) => handlePreviewWheel('desktop', e)}
+                                                            >
+                                                                <Image src={currentItem.src} alt="Desktop crop preview" fill className="object-cover will-change-transform" style={{ objectPosition: `${desktopFocusX}% ${desktopFocusY}%`, transform: `scale(${desktopZoom})`, transformOrigin: 'center center' }} />
+                                                                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/35 to-black/10" />
+                                                                <div className="pointer-events-none absolute inset-4 border border-white/25 border-dashed rounded-lg">
+                                                                  <div className="absolute left-1/3 top-0 bottom-0 w-px bg-white/20" />
+                                                                  <div className="absolute left-2/3 top-0 bottom-0 w-px bg-white/20" />
+                                                                  <div className="absolute top-1/3 left-0 right-0 h-px bg-white/20" />
+                                                                  <div className="absolute top-2/3 left-0 right-0 h-px bg-white/20" />
+                                                                </div>
+                                                                {renderPreviewOverlay(false)}
+                                                            </div>
+                                                            <div className="grid grid-cols-2 gap-2">
+                                                                <Input type="range" min="0" max="100" step="1" value={desktopFocusX} onChange={(e) => setCurrentItem(c => ({ ...c, desktopFocusX: Number(e.target.value) }))} />
+                                                                <Input type="range" min="0" max="100" step="1" value={desktopFocusY} onChange={(e) => setCurrentItem(c => ({ ...c, desktopFocusY: Number(e.target.value) }))} />
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="space-y-3">
+                                                            <div className="flex items-center justify-between gap-3">
+                                                                <Label className="text-xs uppercase tracking-widest text-slate-500">Mobile preview</Label>
+                                                                <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px] font-black uppercase tracking-widest" onClick={() => resetControls('mobile')}>
+                                                                    Reset
+                                                                </Button>
+                                                            </div>
+                                                            <div className="relative overflow-hidden rounded-xl border bg-slate-950 aspect-[9/16] max-w-[220px] mx-auto">
+                                                                <div
+                                                                    className={cn(
+                                                                        'relative h-full w-full select-none touch-none',
+                                                                        activeGestureTarget === 'mobile' ? 'cursor-grabbing' : 'cursor-grab'
+                                                                    )}
+                                                                    onPointerDown={(e) => handlePreviewPointerDown('mobile', e)}
+                                                                    onPointerMove={(e) => handlePreviewPointerMove('mobile', e)}
+                                                                    onPointerUp={(e) => handlePreviewPointerUp('mobile', e)}
+                                                                    onPointerCancel={(e) => handlePreviewPointerUp('mobile', e)}
+                                                                    onWheel={(e) => handlePreviewWheel('mobile', e)}
+                                                                >
+                                                                    <Image src={currentItem.mobileSrc || currentItem.src} alt="Mobile crop preview" fill className="object-cover will-change-transform" style={{ objectPosition: `${mobileFocusX}% ${mobileFocusY}%`, transform: `scale(${mobileZoom})`, transformOrigin: 'center center' }} />
+                                                                    <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/35 to-black/10" />
+                                                                    <div className="pointer-events-none absolute inset-3 border border-white/25 border-dashed rounded-lg">
+                                                                      <div className="absolute left-1/3 top-0 bottom-0 w-px bg-white/20" />
+                                                                      <div className="absolute left-2/3 top-0 bottom-0 w-px bg-white/20" />
+                                                                      <div className="absolute top-1/3 left-0 right-0 h-px bg-white/20" />
+                                                                      <div className="absolute top-2/3 left-0 right-0 h-px bg-white/20" />
+                                                                    </div>
+                                                                    {renderPreviewOverlay(true)}
+                                                                </div>
+                                                            </div>
+                                                            <div className="grid grid-cols-2 gap-2">
+                                                                <Input type="range" min="0" max="100" step="1" value={mobileFocusX} onChange={(e) => setCurrentItem(c => ({ ...c, mobileFocusX: Number(e.target.value) }))} />
+                                                                <Input type="range" min="0" max="100" step="1" value={mobileFocusY} onChange={(e) => setCurrentItem(c => ({ ...c, mobileFocusY: Number(e.target.value) }))} />
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="space-y-3 lg:col-span-3">
+                                                            <Label className="text-xs uppercase tracking-widest text-slate-500">Tablet preview</Label>
+                                                            <div className="relative overflow-hidden rounded-xl border bg-slate-950 aspect-[4/3]">
+                                                                <Image src={currentItem.mobileSrc || currentItem.src} alt="Tablet crop preview" fill className="object-cover will-change-transform" style={{ objectPosition: `${mobileFocusX}% ${mobileFocusY}%`, transform: `scale(${mobileZoom})`, transformOrigin: 'center center' }} />
+                                                                <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-black/10" />
+                                                                <div className="pointer-events-none absolute inset-4 border border-white/25 border-dashed rounded-lg" />
+                                                                {renderPreviewOverlay(false)}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                        <div className="space-y-1"><Label>Source URL</Label><Input value={currentItem.src} onChange={e => setCurrentItem(c => ({ ...c, src: e.target.value }))} placeholder="https://..."/></div>
+                                        <div className="space-y-1"><Label>Mobile Source URL</Label><Input value={currentItem.mobileSrc || ''} onChange={e => setCurrentItem(c => ({ ...c, mobileSrc: e.target.value }))} placeholder="https://..."/></div>
                     <div className="space-y-1"><Label>Alt Text</Label><Input value={currentItem.alt} onChange={e => setCurrentItem(c => ({...c, alt: e.target.value }))} placeholder="Description for screen readers"/></div>
                     <div className="space-y-1"><Label>AI Hint</Label><Input value={currentItem.dataAiHint || ''} onChange={e => setCurrentItem(c => ({...c, dataAiHint: e.target.value }))} placeholder="e.g., 'triathlon finish line'"/></div>
+                                        <div className="space-y-1"><Label>Mobile AI Hint</Label><Input value={currentItem.mobileDataAiHint || ''} onChange={e => setCurrentItem(c => ({...c, mobileDataAiHint: e.target.value }))} placeholder="e.g., 'runner close up'"/></div>
+                    {(currentItem.customUrl !== null && currentItem.customUrl !== undefined) && (
+                        <div className="space-y-3 border-t pt-4">
+                            <h4 className="font-semibold text-sm">Custom Link Settings</h4>
+                            <div className="space-y-1"><Label>Custom URL</Label><Input value={currentItem.customUrl || ''} onChange={e => setCurrentItem(c => ({...c, customUrl: e.target.value }))} placeholder="https://example.com"/></div>
+                        </div>
+                    )}
+                    <div className="space-y-3 border-t pt-4">
+                        <h4 className="font-semibold text-sm">Header & Description (Optional)</h4>
+                        <div className="space-y-1"><Label>Header/Title</Label><Input value={currentItem.header || ''} onChange={e => setCurrentItem(c => ({...c, header: e.target.value }))} placeholder="e.g., 'Join Our Championship'"/></div>
+                        <div className="space-y-1"><Label>Description</Label><Textarea value={currentItem.description || ''} onChange={e => setCurrentItem(c => ({ ...c, description: e.target.value }))} placeholder="Brief description or tagline for this slide" rows={3}/></div>
+                        <div className="space-y-1"><Label>Custom Link Button Text</Label><Input value={currentItem.customLinkText || ''} onChange={e => setCurrentItem(c => ({...c, customLinkText: e.target.value }))} placeholder="e.g., 'Register Now', 'Learn More'"/></div>
+                    </div>
                     <div className="flex items-center space-x-2"><Switch id="show-on-homepage" checked={currentItem.showOnHomepage !== false} onCheckedChange={checked => setCurrentItem(c => ({ ...c, showOnHomepage: checked }))} /><Label htmlFor="show-on-homepage">Show on Homepage Slider</Label></div>
+                    <div className="flex items-center space-x-2"><Switch id="show-waitlist-btn" checked={!!currentItem.showWaitlistButton} onCheckedChange={checked => setCurrentItem(c => ({ ...c, showWaitlistButton: checked }))} /><Label htmlFor="show-waitlist-btn">Show &ldquo;Join Waitlist&rdquo; button (for sold-out events)</Label></div>
                 </div>
                 <DialogFooter><Button variant="ghost" onClick={onClose}>Cancel</Button><Button onClick={handleSave}>Save</Button></DialogFooter>
             </DialogContent>

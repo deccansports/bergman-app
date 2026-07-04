@@ -90,7 +90,11 @@ export default function MerchandiseSection({ products }: MerchandiseSectionProps
           <div className="flex gap-6">
             {products.map((p) => {
               const mainImage = p.images?.[0];
-              const displayPrice = p.variants?.[0]?.salePrice || 0;
+              const firstVariant = p.variants?.[0];
+              const salePrice = firstVariant?.salePrice || 0;
+              const mrp = firstVariant?.mrp || 0;
+              const hasDiscount = mrp > salePrice;
+              const discountPct = hasDiscount ? Math.round(((mrp - salePrice) / mrp) * 100) : 0;
               return (
                 <div key={p.id} className="flex-[0_0_280px] sm:flex-[0_0_320px] min-w-0">
                   <motion.div 
@@ -119,7 +123,15 @@ export default function MerchandiseSection({ products }: MerchandiseSectionProps
                             {p.name}
                           </h3>
                           <div className="mt-auto flex items-center justify-between">
-                            <span className="text-xl font-black">₹{displayPrice}</span>
+                            <div className="flex flex-col items-start leading-tight">
+                              <span className="text-xl font-black">₹{salePrice.toLocaleString()}</span>
+                              {hasDiscount ? (
+                                <div className="flex items-center gap-2 text-xs">
+                                  <span className="text-muted-foreground line-through font-bold">₹{mrp.toLocaleString()}</span>
+                                  <span className="text-emerald-700 font-black">{discountPct}% OFF</span>
+                                </div>
+                              ) : null}
+                            </div>
                             <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-colors">
                               <ShoppingBag className="h-4 w-4" />
                             </div>

@@ -98,3 +98,19 @@
 .text-shadow-lg {
   text-shadow: 0 4px 10px rgba(0,0,0,0.5);
 }
+
+@keyframes influencer-marquee {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.influencer-marquee-track {
+  animation-name: influencer-marquee;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  will-change: transform;
+}

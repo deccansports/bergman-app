@@ -146,11 +146,14 @@ export default function EnquiriesTab() {
         </CardHeader>
         <CardContent className="p-0">
           <div className="rounded-none border-t overflow-x-auto text-left">
-            <Table>
-              <TableHeader className="bg-muted/30">
+            <div className="hidden md:block">
+              <Table>
+              <TableHeader className="bg-muted/30 hidden md:table-header-group">
                 <TableRow className="h-10 text-[10px] font-black uppercase tracking-widest border-b">
                   <TableHead className="pl-6">ID / Contact</TableHead>
-                  <TableHead className="w-[45%]">Message Content</TableHead>
+                  <TableHead className="w-[35%]">Message Content</TableHead>
+                  <TableHead>Event</TableHead>
+                  <TableHead>Category</TableHead>
                   <TableHead>Spam Score</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right pr-6">Action</TableHead>
@@ -160,8 +163,9 @@ export default function EnquiriesTab() {
                 {isLoading ? (
                   <TableRow><TableCell colSpan={5} className="text-center h-48"><Loader2 className="animate-spin h-8 w-8 mx-auto text-primary"/></TableCell></TableRow>
                 ) : filteredEnquiries.length === 0 ? (
-                  <TableRow><TableCell colSpan={5} className="text-center py-20 text-muted-foreground italic">No entries found in this category.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={7} className="text-center py-20 text-muted-foreground italic">No entries found in this category.</TableCell></TableRow>
                 ) : (
+                  // Desktop/table view
                   filteredEnquiries.map(enq => (
                     <TableRow key={enq.id} className={cn("h-16 hover:bg-muted/10 transition-colors text-xs border-border/50", enq.isSpam && "opacity-60")}>
                       <TableCell className="pl-6 text-left">
@@ -173,6 +177,8 @@ export default function EnquiriesTab() {
                         <p className="line-clamp-2 leading-relaxed text-left">{enq.message}</p>
                         <div className="text-[9px] font-bold text-slate-400 mt-1 uppercase text-left">{format(parseISO(enq.createdAt), 'MMM dd, yyyy · p')}</div>
                       </TableCell>
+                      <TableCell className="text-left">{(enq as any).selectedEventName || '—'}</TableCell>
+                      <TableCell className="text-left">{enq.ticketId || '—'}</TableCell>
                       <TableCell className="text-left">
                           {enq.isSpam ? (
                               <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200 gap-1.5 font-black uppercase text-[9px]">
@@ -194,7 +200,58 @@ export default function EnquiriesTab() {
                   ))
                 )}
               </TableBody>
-            </Table>
+              </Table>
+            </div>
+            {/* Mobile stacked list */}
+            <div className="md:hidden space-y-3 p-3">
+              {filteredEnquiries.map((enq) => (
+                <div
+                  key={enq.id}
+                  onClick={() => setSelectedEnquiry(enq)}
+                  role="button"
+                  tabIndex={0}
+                  className={cn(
+                    'rounded-lg border p-3 focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer',
+                    enq.isSpam && 'opacity-60',
+                    'aspect-square flex flex-col justify-between'
+                  )}
+                >
+                  <div className="overflow-hidden">
+                    <div className="font-mono text-xs text-muted-foreground">#{enq.ticketId}</div>
+                    <div className="mt-1">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setSelectedEnquiry(enq); }}
+                        className="font-black text-left text-base leading-tight"
+                      >
+                        {enq.name}
+                      </button>
+                      <div className="text-xs text-muted-foreground mt-1">{enq.email} · {enq.mobile}</div>
+                    </div>
+
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <div className="text-[11px] px-2 py-0.5 rounded bg-muted/20 text-muted-foreground">{(enq as any).selectedEventName || 'No event'}</div>
+                      <div className="text-[11px] px-2 py-0.5 rounded bg-muted/20 text-muted-foreground">{enq.ticketId || 'Any category'}</div>
+                    </div>
+
+                    <div className="mt-3 text-sm overflow-hidden line-clamp-5">{enq.message}</div>
+                  </div>
+
+                  <div className="mt-3">
+                    <div className="mb-2">
+                      {enq.isSpam ? (
+                        <Badge variant="outline" className="bg-red-50 text-red-600 border-red-200">Spam</Badge>
+                      ) : (
+                        <Badge variant="outline" className="bg-green-50 text-green-600 border-green-200">Valid</Badge>
+                      )}
+                    </div>
+                    <Button size="sm" className="w-full" onClick={(e) => { e.stopPropagation(); setSelectedEnquiry(enq); }}>
+                      Open Enquiry
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -202,12 +259,13 @@ export default function EnquiriesTab() {
       <Dialog open={!!selectedEnquiry} onOpenChange={(isOpen) => !isOpen && setSelectedEnquiry(null)}>
         <DialogContent className="max-w-2xl h-[90vh] flex flex-col p-0 overflow-hidden text-left rounded-3xl border-none shadow-2xl">
           <DialogHeader className="p-6 border-b bg-muted/30 flex-shrink-0 text-left">
-            <DialogTitle className="text-xl font-black uppercase italic tracking-tighter text-left">Enquiry #{selectedEnquiry?.ticketId}</DialogTitle>
-             <div className="flex justify-between items-center mt-4 text-left">
-                <div className="text-left">
-                    <p className="text-xs font-black uppercase text-left">{selectedEnquiry?.name}</p>
-                    <p className="text-[10px] text-muted-foreground lowercase text-left">{selectedEnquiry?.email}</p>
-                </div>
+          <DialogTitle className="text-xl font-black uppercase italic tracking-tighter text-left">Enquiry #{selectedEnquiry?.ticketId}</DialogTitle>
+           <div className="flex justify-between items-center mt-4 text-left">
+            <div className="text-left">
+              <p className="text-xs font-black uppercase text-left">{selectedEnquiry?.name}</p>
+              <p className="text-[10px] text-muted-foreground lowercase text-left">{selectedEnquiry?.email}</p>
+              <p className="text-[11px] text-muted-foreground mt-2">{(selectedEnquiry as any)?.selectedEventName || '—'}{selectedEnquiry?.ticketId ? ` · ${selectedEnquiry?.ticketId}` : ''}</p>
+            </div>
                  <Select
                     value={selectedEnquiry?.status}
                     onValueChange={(newStatus) => handleStatusChange(selectedEnquiry!.id, newStatus as any)}

@@ -10,9 +10,9 @@ import {
     Loader2, RefreshCw, Database, BarChart3, Trophy, Award, BookOpen, 
     Users2, Building, CheckCircle2, AlertCircle, TrendingUp, History, 
     Terminal, Zap, Package, LayoutGrid, Calendar, Info, PlayCircle, ExternalLink as ExternalLinkIcon,
-    TicketPercent, Star, Trash2
+    TicketPercent, Star, Trash2, Wand2
 } from 'lucide-react';
-import { runDataSyncAction, rebuildAllRankingsAction } from '@/lib/actions';
+import { runDataSyncAction, rebuildAllRankingsAction, cleanupGhostRegistrationsAction, syncBelSeasonFromResultsKVAction } from '@/lib/actions';
 import type { EventCalendarEntry, RaceResult } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from '@/components/ui/separator';
@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { cn, serializeValue } from '@/lib/utils';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
+import DataSyncUserTab from './DataSyncUserTab';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -57,6 +58,7 @@ export default function DataSyncTab({ events, isLoadingEvents }: { events: Event
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
   const [isFullRebuilding, setIsFullRebuilding] = useState(false);
+    const [isBelSyncing, setIsBelSyncing] = useState(false);
   const [syncLogs, setSyncLogs] = useState<string[]>([]);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
@@ -77,13 +79,21 @@ export default function DataSyncTab({ events, isLoadingEvents }: { events: Event
             setJobProgress(data);
 
             if (data.stage && data.stage !== jobProgress?.stage) {
-                addLog(`Phase: ${data.stage}`);
+                const countInfo = data.syncCount && data.totalCount 
+                    ? ` (${data.syncCount}/${data.totalCount} synced)` 
+                    : data.syncCount 
+                    ? ` (${data.syncCount} synced)` 
+                    : '';
+                addLog(`Phase: ${data.stage}${countInfo}`);
             }
 
             if (data.status === 'completed' || data.status === 'failed') {
                 clearInterval(interval);
                 if (data.status === 'completed') {
-                    addLog("✅ Task Finished Successfully.");
+                    const countInfo = data.syncCount 
+                        ? ` - Synced ${data.syncCount} items` 
+                        : '';
+                    addLog(`✅ Task Finished Successfully${countInfo}.`);
                     toast({ title: 'Sync Task Finished', description: data.message || 'Operation successful.' });
                 } else {
                     addLog(`❌ Task Failed: ${data.message}`);
@@ -116,33 +126,52 @@ export default function DataSyncTab({ events, isLoadingEvents }: { events: Event
         if (result && result.success && result.jobId) {
           setActiveJobId(result.jobId);
           addLog(`Job enqueued with ID: ${result.jobId.slice(-8)}`);
-          
-          return new Promise((resolve, reject) => {
+
+                    const completed = await new Promise<boolean>((resolve) => {
+                            const startedAt = Date.now();
+                            const maxWaitMs = 5 * 60 * 1000; // 5 minutes safety timeout
               const checkInterval = setInterval(async () => {
                   try {
+                                        if (Date.now() - startedAt > maxWaitMs) {
+                                                clearInterval(checkInterval);
+                                                resolve(false);
+                                                return;
+                                        }
+
                     const res = await fetch(`/api/admin/upload-status/${result.jobId}`);
                     if (!res.ok) return;
                     const data = await res.json();
                     if (data.status === 'completed') {
                         clearInterval(checkInterval);
-                        resolve(true);
+                                                resolve(true);
                     } else if (data.status === 'failed') {
                         clearInterval(checkInterval);
-                        reject(new Error(data.message));
+                                                resolve(false);
                     }
                   } catch (e) {
                       // Silently continue
                   }
               }, 3000);
           });
+
+                    if (!completed) {
+                        const msg = 'Sync failed or timed out. Please retry.';
+                        addLog(`❌ ${msg}`);
+                        toast({ variant: 'destructive', title: 'Task Failed', description: msg });
+                        return false;
+                    }
+
+                    return true;
         } else {
           const msg = result?.message || "Failed to start.";
           addLog(`Failed to start: ${msg}`);
           toast({ variant: 'destructive', title: 'Failed to Start', description: msg });
-          throw new Error(msg);
+                    return false;
         }
     } catch (e: any) {
         addLog(`Error: ${e.message}`);
+                toast({ variant: 'destructive', title: 'Sync Error', description: e?.message || 'Unexpected error' });
+                return false;
     }
   };
 
@@ -154,11 +183,14 @@ export default function DataSyncTab({ events, isLoadingEvents }: { events: Event
       
       addLog(`🚀 Starting SEQUENTIAL FULL SYNC for ${selectedEventId}`);
       try {
-          await handleSync('participants', selectedEventId);
+          const participantsOk = await handleSync('participants', selectedEventId);
+          if (!participantsOk) throw new Error('Participants sync failed');
           await sleep(1200);
-          await handleSync('results', selectedEventId);
+          const resultsOk = await handleSync('results', selectedEventId);
+          if (!resultsOk) throw new Error('Results sync failed');
           await sleep(1200);
-          await handleSync('leaderboard', selectedEventId);
+          const leaderboardOk = await handleSync('leaderboard', selectedEventId);
+          if (!leaderboardOk) throw new Error('Leaderboard sync failed');
           addLog("🏁 FULL SYSTEM SYNC COMPLETED SUCCESSFULLY");
       } catch (e: any) {
           addLog(`🛑 Sequence Halted: ${e.message}`);
@@ -183,6 +215,56 @@ export default function DataSyncTab({ events, isLoadingEvents }: { events: Event
           toast({ variant: 'destructive', title: "Fatal Error", description: err.message });
       } finally {
           setIsFullRebuilding(false);
+      }
+  };
+
+  const handleCleanupGhosts = async () => {
+      const scope = selectedEventId ? `Event ${selectedEventId}` : 'All Upcoming Events';
+      addLog(`🧹 Starting Ghost Registration Cleanup from KV (${scope})...`);
+      try {
+          const res = await cleanupGhostRegistrationsAction(selectedEventId || undefined);
+          if (res && res.success) {
+              addLog(`✅ Ghost Cleanup Complete`);
+              addLog(`   📊 Total Events Scanned: ${res.summary.totalEventsScanned}`);
+              addLog(`   🗑️  Ghost Registrations Removed: ${res.summary.ghostRegistrationsRemoved}`);
+              addLog(`   ⏱️  Duration: ${res.duration}ms`);
+              toast({ 
+                  title: "Ghost Cleanup Complete", 
+                  description: `Removed ${res.summary.ghostRegistrationsRemoved} ghost entries` 
+              });
+          } else {
+              const errMsg = res?.report || "Internal server error during cleanup.";
+              addLog(`❌ Cleanup Failed: ${errMsg}`);
+              toast({ variant: 'destructive', title: "Cleanup Failed", description: errMsg });
+          }
+      } catch (err: any) {
+          addLog(`❌ Fatal Error: ${err.message}`);
+          toast({ variant: 'destructive', title: "Fatal Error", description: err.message });
+      }
+  };
+
+  const handleBelSync = async () => {
+      const season = parseInt(selectedYear, 10);
+      setIsBelSyncing(true);
+      addLog(`🏆 Starting BEL sync for ${season} from Results KV to BEL KV...`);
+      try {
+          const res = await syncBelSeasonFromResultsKVAction(season);
+          if (res.success) {
+              addLog(`✅ BEL Sync Complete for ${season}`);
+              if (res.meta) {
+                  addLog(`   📊 Ranked: ${res.meta.totalRankedAthletes} | Eligible: ${res.meta.eligibleAthletes} | Provisional: ${res.meta.provisionalAthletes}`);
+                  addLog(`   🥇 ${res.meta.goldAthletes} | 🥈 ${res.meta.silverAthletes} | 🥉 ${res.meta.bronzeAthletes}`);
+              }
+              toast({ title: 'BEL Sync Complete', description: res.message });
+          } else {
+              addLog(`❌ BEL Sync Failed: ${res.message}`);
+              toast({ variant: 'destructive', title: 'BEL Sync Failed', description: res.message });
+          }
+      } catch (err: any) {
+          addLog(`❌ BEL Sync Fatal Error: ${err.message}`);
+          toast({ variant: 'destructive', title: 'BEL Sync Failed', description: err.message });
+      } finally {
+          setIsBelSyncing(false);
       }
   };
   
@@ -233,9 +315,19 @@ export default function DataSyncTab({ events, isLoadingEvents }: { events: Event
                 <div className="flex justify-between items-center text-left">
                     <div className="flex items-center gap-3 text-left">
                         {jobProgress.status === 'processing' ? <Loader2 className="h-5 w-5 animate-spin text-primary"/> : jobProgress.status === 'completed' ? <CheckCircle2 className="h-5 w-5 text-green-600"/> : <AlertCircle className="h-5 w-5 text-destructive"/>}
-                        <h4 className="font-bold text-base text-primary uppercase tracking-tight text-left">
-                            {jobProgress.stage || "Syncing..."}
-                        </h4>
+                        <div className="text-left">
+                            <h4 className="font-bold text-base text-primary uppercase tracking-tight text-left">
+                                {jobProgress.stage || "Syncing..."}
+                            </h4>
+                            {jobProgress.syncCount && (
+                                <p className="text-xs text-primary/70 mt-1">
+                                    {jobProgress.totalCount 
+                                        ? `${jobProgress.syncCount} / ${jobProgress.totalCount} synced`
+                                        : `${jobProgress.syncCount} synced`
+                                    }
+                                </p>
+                            )}
+                        </div>
                     </div>
                     <Badge variant="outline" className="bg-background text-lg font-black h-8 px-3">{Math.round(jobProgress.progress || 0)}%</Badge>
                 </div>
@@ -284,7 +376,7 @@ export default function DataSyncTab({ events, isLoadingEvents }: { events: Event
                   <LayoutGrid className="h-4 w-4" /> 2. Global Sync & Cache Flush
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-left">
-                  <SyncSection title="Athlete Rewards" description="Sync seasonal points & tiers." icon={Zap}>
+                  <SyncSection title="KV Migration" description="Throttled full migration to KV with 429 protection." icon={Database}>
                       <div className="space-y-3 text-left">
                         <Select value={selectedYear} onValueChange={setSelectedYear} disabled={!!activeJobId}>
                             <SelectTrigger className="h-9 rounded-lg text-xs font-bold bg-muted/20 border-none text-left">
@@ -292,17 +384,40 @@ export default function DataSyncTab({ events, isLoadingEvents }: { events: Event
                             </SelectTrigger>
                             <SelectContent className="text-left">{availableYears.map(y => <SelectItem key={y} value={y} className="text-left">{y} Season</SelectItem>)}</SelectContent>
                         </Select>
-                        <Button variant="secondary" size="sm" onClick={() => handleSync('athleteRankings')} disabled={!!activeJobId} className="w-full font-black text-[9px] uppercase tracking-widest h-9 text-left justify-start bg-primary text-white hover:bg-primary/90 shadow-md">
-                            <RefreshCw className={cn("mr-1.5 h-3 w-3", activeJobId === 'athleteRankings' && "animate-spin")}/>
-                            Sync Points & Tiers
+                        <Button variant="secondary" size="sm" onClick={() => handleSync('kvMigration')} disabled={!!activeJobId} className="w-full font-black text-[9px] uppercase tracking-widest h-9 text-left justify-start bg-primary text-white hover:bg-primary/90 shadow-md">
+                            <Database className={cn("mr-1.5 h-3 w-3", !!activeJobId && "animate-pulse")}/>
+                            Migrate All Data To KV
                         </Button>
+                        <p className="text-[8px] text-muted-foreground text-left">Runs a slower staged migration of users, clubs, metadata, BEL, participants, and results to reduce Cloudflare 429 errors.</p>
+                      </div>
+                  </SyncSection>
+
+                  <SyncSection title="BEL Sync" description="Sync BEL leaderboard from Results KV to BEL KV." icon={Trophy}>
+                      <div className="space-y-3 text-left">
+                        <Select value={selectedYear} onValueChange={setSelectedYear} disabled={!!activeJobId || isBelSyncing}>
+                            <SelectTrigger className="h-9 rounded-lg text-xs font-bold bg-muted/20 border-none text-left">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="text-left">{availableYears.map(y => <SelectItem key={y} value={y} className="text-left">{y} Season</SelectItem>)}</SelectContent>
+                        </Select>
+                        <Button variant="secondary" size="sm" onClick={handleBelSync} disabled={!!activeJobId || isBelSyncing} className="w-full font-black text-[9px] uppercase tracking-widest h-9 text-left justify-start bg-emerald-600 text-white hover:bg-emerald-700 shadow-md">
+                            {isBelSyncing ? <Loader2 className="mr-1.5 h-3 w-3 animate-spin" /> : <Trophy className="mr-1.5 h-3 w-3" />}
+                            Sync BEL Season
+                        </Button>
+                        <p className="text-[8px] text-muted-foreground text-left">Copies season leaderboard data from Results KV into BEL-specific KV keys.</p>
                       </div>
                   </SyncSection>
 
                   <SyncSection title="Global Rankings" description="Rebuild Standings & Legends." icon={BarChart3}>
                       <div className="space-y-3 text-left">
-                        <Button variant="outline" size="sm" onClick={() => handleSync('clubRankings')} disabled={!!activeJobId} className="w-full font-bold h-9 text-left justify-start">Sync Clubs</Button>
+                        <Button variant="outline" size="sm" onClick={() => handleSync('clubRankings')} disabled={!!activeJobId} className="w-full font-bold h-9 text-left justify-start">Rank Clubs</Button>
                         <Button variant="secondary" size="sm" onClick={() => handleSync('legacy')} disabled={!!activeJobId} className="w-full font-black text-[9px] uppercase tracking-widest h-9 text-left justify-start bg-amber-50 text-amber-700 hover:bg-amber-100"><Award className="mr-1.5 h-3 w-3"/>Sync Legacy Athletes</Button>
+                      </div>
+                  </SyncSection>
+
+                  <SyncSection title="Club Sync" description="Mirror all clubs to KV edge." icon={Building}>
+                      <div className="space-y-2 text-left">
+                        <Button variant="outline" size="sm" onClick={() => handleSync('clubs')} disabled={!!activeJobId} className="w-full font-bold h-9 text-left justify-start">Sync All Clubs</Button>
                       </div>
                   </SyncSection>
 
@@ -331,7 +446,31 @@ export default function DataSyncTab({ events, isLoadingEvents }: { events: Event
                                 </AlertDialogFooter>
                             </AlertDialogContent>
                         </AlertDialog>
-                        <p className="text-[8px] text-muted-foreground text-center uppercase">Fixes ghost entries</p>
+                        <div className="space-y-2">
+                            <div className="flex gap-2">
+                                <Select value={selectedEventId || "all"} onValueChange={(val) => setSelectedEventId(val === "all" ? null : val)}>
+                                    <SelectTrigger className="h-9 text-[9px] font-bold uppercase tracking-widest rounded-lg">
+                                        <SelectValue placeholder="Select Event" />
+                                    </SelectTrigger>
+                                    <SelectContent className="rounded-lg">
+                                        <SelectItem value="all" className="font-bold text-[9px]">All Upcoming Events</SelectItem>
+                                        {events
+                                            .filter(e => new Date(e.eventDate as string) >= new Date())
+                                            .map(e => (
+                                                <SelectItem key={e.id} value={e.id} className="text-[8px]">
+                                                    {e.eventName} - {new Date(e.eventDate as string).toLocaleDateString()} ({e.id})
+                                                </SelectItem>
+                                            ))
+                                        }
+                                    </SelectContent>
+                                </Select>
+                                <Button variant="secondary" size="sm" onClick={handleCleanupGhosts} disabled={isFullRebuilding} className="font-black text-[9px] uppercase tracking-widest h-9 px-4 bg-violet-100 text-violet-700 hover:bg-violet-200 shadow-md whitespace-nowrap">
+                                    <Wand2 className="mr-1.5 h-3 w-3"/>
+                                    Clear
+                                </Button>
+                            </div>
+                            <p className="text-[8px] text-muted-foreground text-left">Removes corrupted registrations</p>
+                        </div>
                       </div>
                   </SyncSection>
 
@@ -356,6 +495,9 @@ export default function DataSyncTab({ events, isLoadingEvents }: { events: Event
             </div>
         </CardFooter>
       </Card>
+
+      {/* User Sync Section */}
+      <DataSyncUserTab />
     </div>
   );
 }

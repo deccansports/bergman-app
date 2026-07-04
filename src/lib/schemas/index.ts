@@ -47,12 +47,23 @@ export const ContactUsSchema = z.object({
   name: z.string().min(2, 'Name is required'),
   email: z.string().email('Invalid email'),
   mobile: z.string().min(10, 'Mobile is required'),
+  about: z.enum(['Registration', 'General Enquiry', 'About Event'], { message: 'Please select a query type' }),
+  selectedEventId: z.string().optional().nullable(),
+  selectedEventName: z.string().optional().nullable(),
   message: z.string().min(10, 'Message is too short'),
+}).superRefine((data, ctx) => {
+  if ((data.about === 'Registration' || data.about === 'About Event') && !String(data.selectedEventId || '').trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['selectedEventId'],
+      message: 'Please select an upcoming event',
+    });
+  }
 });
 
 export type ContactUsFormInput = z.infer<typeof ContactUsSchema>;
 
-export const PublicEventRegistrationSchema = z.object({
+const PublicEventRegistrationSchemaBase = z.object({
   name: z.string().min(2, 'Name is required'),
   email: z.string().email('Invalid email'),
   mobile: z.string().min(10, 'Mobile is required'),
@@ -63,7 +74,7 @@ export const PublicEventRegistrationSchema = z.object({
   emergencyContactNumber: z.string().min(10, 'Emergency contact is required'),
   address: z.string().min(5, 'Address is required'),
   city: z.string().min(2, 'City is required'),
-  state: z.string().min(2, 'State is required'),
+  state: z.string().optional().nullable(),
   pincode: z.string().min(6, 'Pincode is required'),
   country: z.string().min(2, 'Country is required'),
   ticketId: z.string().min(1, 'Please select a ticket'),
@@ -85,6 +96,110 @@ export const PublicEventRegistrationSchema = z.object({
   digitalSignatureName: z.string().min(2, 'Signature required'),
   clubId: z.string().optional().nullable(),
   previousTimingCertificateUrl: z.string().optional().nullable(),
+});
+
+export const PublicEventRegistrationSchema = PublicEventRegistrationSchemaBase.superRefine((data, ctx) => {
+  const normalizedCountry = (data.country || '').trim().toLowerCase();
+  const normalizedState = (data.state || '').trim();
+  const billingType = data.billingType;
+  const gstin = String(data.gstin || '').trim().toUpperCase();
+  const businessName = String(data.businessName || '').trim();
+  const businessAddress = String(data.businessAddress || '').trim();
+  const businessPrimaryContactName = String(data.businessPrimaryContactName || '').trim();
+  const businessPrimaryContactEmail = String(data.businessPrimaryContactEmail || '').trim();
+  const businessPrimaryContactMobile = String(data.businessPrimaryContactMobile || '').trim();
+
+  if (normalizedCountry === 'india' && normalizedState.length < 2) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['state'],
+      message: 'State is required for India',
+    });
+  }
+
+  if (normalizedCountry === 'united states' && normalizedState.length < 2) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['state'],
+      message: 'State is required for the United States',
+    });
+  }
+
+  if (billingType === 'business') {
+    if (!gstin) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['gstin'],
+        message: 'GSTIN is required for business invoices',
+      });
+    } else if (!/^\d{2}[A-Z]{5}\d{4}[A-Z]\d[Z][A-Z0-9]$/i.test(gstin)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['gstin'],
+        message: 'Enter a valid 15-character GSTIN',
+      });
+    }
+
+    if (!businessName) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['businessName'],
+        message: 'Registered company name is required',
+      });
+    }
+
+    if (!businessAddress) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['businessAddress'],
+        message: 'Business registered address is required',
+      });
+    }
+
+    if (!businessPrimaryContactName) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['businessPrimaryContactName'],
+        message: 'Business primary contact name is required',
+      });
+    }
+
+    if (!businessPrimaryContactEmail) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['businessPrimaryContactEmail'],
+        message: 'Business primary contact email is required',
+      });
+    } else if (!z.string().email().safeParse(businessPrimaryContactEmail).success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['businessPrimaryContactEmail'],
+        message: 'Enter a valid business primary contact email',
+      });
+    }
+
+    if (!businessPrimaryContactMobile) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['businessPrimaryContactMobile'],
+        message: 'Business primary contact mobile is required',
+      });
+    } else if (!internationalMobileRegex.test(businessPrimaryContactMobile)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['businessPrimaryContactMobile'],
+        message: 'Enter a valid business primary contact mobile number',
+      });
+    }
+
+    if (data.confirmGstDetails !== true) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['confirmGstDetails'],
+        message: 'Please confirm your GST details before submitting',
+      });
+    }
+  }
 });
 
 export type PublicEventRegistrationFormInputClient = z.infer<typeof PublicEventRegistrationSchema>;

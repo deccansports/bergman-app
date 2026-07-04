@@ -5,7 +5,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { LiveAthlete, EventCalendarEntry } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { getLiveTimingDataAction } from '@/lib/actions';
-import { formatSecondsToHMS, normalizeStatus } from '@/lib/utils';
+import { formatSecondsToHMS, normalizeStatus, isFinalRaceStatus } from '@/lib/utils';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, Clock, Search as SearchIcon, RefreshCw, AlertTriangle } from 'lucide-react';
 import { getEventDetailsWithTicketsAction } from '@/lib/actions';
 import { Input } from '@/components/ui/input';
-import AthleteDetailModal from '@/components/live-tracking/AthleteDetailModal';
+import AthleteLiveModalPro from '@/components/live-tracking/AthleteLiveModalPro';
 
 interface TimeVolunteerTabProps {
   eventId: string;
@@ -60,9 +60,9 @@ export default function TimeVolunteerTab({ eventId }: TimeVolunteerTabProps) {
 
   const { totalParticipants, onCourseCount, finishedCount, dnfCount } = useMemo(() => {
     const total = liveData.length;
-    const onCourse = liveData.filter(p => p.status === 'On Course').length;
-    const finished = liveData.filter(p => p.status === 'Finished').length;
-    const dnf = liveData.filter(p => p.status.startsWith('DNF')).length;
+    const onCourse = liveData.filter(p => normalizeStatus(p.status) === 'On Course').length;
+    const finished = liveData.filter(p => normalizeStatus(p.status) === 'Finished').length;
+    const dnf = liveData.filter(p => normalizeStatus(p.status).startsWith('DN')).length;
     return { totalParticipants: total, onCourseCount: onCourse, finishedCount: finished, dnfCount: dnf };
   }, [liveData]);
   
@@ -71,10 +71,11 @@ export default function TimeVolunteerTab({ eventId }: TimeVolunteerTabProps) {
     const filtered = liveData.filter(athlete =>
         !term || 
         athlete.name.toLowerCase().includes(term) ||
-        athlete.bib.toLowerCase().includes(term)
+      athlete.bib.toLowerCase().includes(term) ||
+      normalizeStatus(athlete.status).toLowerCase().includes(term)
     );
-    const dnf = filtered.filter(athlete => athlete.status.startsWith('DNF')).sort((a,b) => (b.lastUpdateTime || 0) - (a.lastUpdateTime || 0));
-    const others = filtered.filter(athlete => !athlete.status.startsWith('DNF')).sort((a,b) => (a.startTime || 0) - (b.startTime || 0));
+    const dnf = filtered.filter(athlete => isFinalRaceStatus(athlete.status) && normalizeStatus(athlete.status) !== 'Finished').sort((a,b) => (b.lastUpdateTime || 0) - (a.lastUpdateTime || 0));
+    const others = filtered.filter(athlete => !isFinalRaceStatus(athlete.status) || normalizeStatus(athlete.status) === 'Finished').sort((a,b) => (a.startTime || 0) - (b.startTime || 0));
     return { dnfAthletes: dnf, otherAthletes: others };
   }, [liveData, searchTerm]);
 
@@ -84,13 +85,13 @@ export default function TimeVolunteerTab({ eventId }: TimeVolunteerTabProps) {
     const status = normalizeStatus(athlete.status);
     
     return (
-        <TableRow key={athlete.id} className={status.startsWith('DNF') ? 'bg-destructive/10' : ''}>
+        <TableRow key={athlete.id} className={status.startsWith('DN') ? 'bg-destructive/10' : ''}>
             <TableCell className="font-mono">{athlete.bib}</TableCell>
             <TableCell>{athlete.name}</TableCell>
             <TableCell><Badge variant="secondary">{athlete.leg}</Badge></TableCell>
             <TableCell className="font-mono">{elapsedTime}</TableCell>
             <TableCell>
-                <Button variant="link" className={`h-auto p-0 ${status.startsWith('DNF') ? 'text-destructive font-bold' : 'text-green-600'}`} onClick={() => setSelectedAthlete(athlete)}>
+                <Button variant="link" className={`h-auto p-0 ${status.startsWith('DN') ? 'text-destructive font-bold' : 'text-green-600'}`} onClick={() => setSelectedAthlete(athlete)}>
                   {status}
                 </Button>
             </TableCell>
@@ -110,7 +111,7 @@ export default function TimeVolunteerTab({ eventId }: TimeVolunteerTabProps) {
         <div className="flex justify-between items-start">
           <div>
             <CardTitle className="flex items-center gap-2"><Clock className="h-5 w-5 text-primary"/>Time Volunteer Dashboard</CardTitle>
-            <CardDescription>Monitor athlete progress against cutoff times in real-time.</CardDescription>
+            <CardDescription>Monitor Feibot-backed live timing data and cutoff progress in real-time.</CardDescription>
           </div>
           <Button onClick={() => fetchLiveAndEventData(true)} disabled={isLoading} variant="outline" size="sm">
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin"/> : <RefreshCw className="h-4 w-4"/>}
@@ -150,7 +151,7 @@ export default function TimeVolunteerTab({ eventId }: TimeVolunteerTabProps) {
                       <>
                         {dnfAthletes.length > 0 && (
                           <TableRow className="bg-destructive/20 hover:bg-destructive/30">
-                            <TableCell colSpan={5} className="font-semibold text-destructive flex items-center gap-2"><AlertTriangle className="h-5 w-5" />DNF Athletes ({dnfAthletes.length})</TableCell>
+                            <TableCell colSpan={5} className="font-semibold text-destructive flex items-center gap-2"><AlertTriangle className="h-5 w-5" />Final / non-finish athletes ({dnfAthletes.length})</TableCell>
                           </TableRow>
                         )}
                         {dnfAthletes.map(athlete => renderAthleteRow(athlete))}
@@ -170,11 +171,13 @@ export default function TimeVolunteerTab({ eventId }: TimeVolunteerTabProps) {
          </div>
       </CardContent>
     </Card>
-    <AthleteDetailModal 
-        isOpen={!!selectedAthlete}
+    <AthleteLiveModalPro 
+        open={!!selectedAthlete}
         onClose={() => setSelectedAthlete(null)}
         athlete={selectedAthlete}
         ticketDef={selectedAthleteTicketDef}
+        eventId=""
+        bookingId=""
     />
     </>
   );

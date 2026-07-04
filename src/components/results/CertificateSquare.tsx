@@ -50,12 +50,8 @@ function SplitRow({ split }: { split: Split }) {
       }}
     >
       <div style={{ fontWeight: 700 }}>{split.label}</div>
-      <div style={{ textAlign: "right", color: "#cbd5e1" }}>
-        {split.distance}
-      </div>
-      <div style={{ textAlign: "right", color: "#cbd5e1" }}>
-        {split.pace}
-      </div>
+      <div style={{ textAlign: "right", color: "#cbd5e1" }}>{split.distance}</div>
+      <div style={{ textAlign: "right", color: "#cbd5e1" }}>{split.pace}</div>
       <div
         style={{
           textAlign: "right",
@@ -72,14 +68,6 @@ function SplitRow({ split }: { split: Split }) {
 export function CertificateSquare({ data }: { data: any }) {
   if (!data) return null;
 
-  const isFemale =
-    data.gender?.toLowerCase() === "female" ||
-    data.gender === "F";
-
-  const headerLogo = isFemale
-    ? "/Bwwhitelogo.png"
-    : "/Bmlogowhite.png";
-
   return (
     <CertificateShell width={1080} height={1080}>
       <div
@@ -92,10 +80,9 @@ export function CertificateSquare({ data }: { data: any }) {
           textAlign: "center",
         }}
       >
-        {/* ================= HEADER ================= */}
         <div>
           <img
-            src={headerLogo}
+            src={data.logoUrl}
             alt="Bergman Logo"
             style={{
               height: 48,
@@ -141,9 +128,26 @@ export function CertificateSquare({ data }: { data: any }) {
           >
             {data.eventName}
           </p>
+
+          <p
+            style={{
+              fontSize: 15,
+              color: "#cbd5e1",
+              marginTop: 18,
+              lineHeight: 1.55,
+              maxWidth: 920,
+              marginLeft: "auto",
+              marginRight: "auto",
+            }}
+          >
+            In recognition of determination, resilience, and athletic excellence.
+            This certificate is awarded for the successful completion of the{" "}
+            <span style={{ fontWeight: 700, color: "#FFD200" }}>{data.eventName}</span>
+            {" "}held on <span style={{ fontWeight: 700, color: "#ffffff" }}>{data.date}</span>
+            {" "}in the <span style={{ fontWeight: 700, color: "#FFD200" }}>{data.category}</span>.
+          </p>
         </div>
 
-        {/* ================= FINISH TIME ================= */}
         <div
           style={{
             border: "2px solid #FFD200",
@@ -173,7 +177,6 @@ export function CertificateSquare({ data }: { data: any }) {
           </p>
         </div>
 
-        {/* ================= RANKS ================= */}
         <div
           style={{
             display: "grid",
@@ -186,11 +189,10 @@ export function CertificateSquare({ data }: { data: any }) {
           <Stat label="Category" value={data.categoryRank} />
         </div>
 
-        {/* ================= SPLITS ================= */}
         <div style={{ textAlign: "left" }}>
           <p
             style={{
-              fontSize: 14,
+              fontSize: 16,
               fontWeight: 700,
               marginBottom: 10,
               color: "#FFD200",
@@ -201,14 +203,34 @@ export function CertificateSquare({ data }: { data: any }) {
             RACE SPLITS
           </p>
 
-          <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ display: "grid", gap: 8 }}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr 1fr 1fr",
+                gap: 10,
+                padding: "10px 14px",
+                backgroundColor: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.14)",
+                borderRadius: 8,
+                fontSize: 12,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: 0.6,
+                color: "#e2e8f0",
+              }}
+            >
+              <div>Segment</div>
+              <div style={{ textAlign: "right" }}>Distance</div>
+              <div style={{ textAlign: "right" }}>Pace</div>
+              <div style={{ textAlign: "right" }}>Time</div>
+            </div>
             {data.splits?.map((split: Split, idx: number) => (
               <SplitRow key={idx} split={split} />
             ))}
           </div>
         </div>
 
-        {/* ================= FOOTER ================= */}
         <div
           style={{
             display: "flex",
@@ -218,25 +240,33 @@ export function CertificateSquare({ data }: { data: any }) {
             marginTop: "auto",
           }}
         >
-          {/* Signature */}
-          <img
-            src="/white signature.png"
-            alt="Signature"
-            style={{ height: 50 }}
-          />
+          {data.signatureUrl && (
+            <img
+              src={data.signatureUrl}
+              alt="Signature"
+              style={{ height: 88, objectFit: "contain" }}
+            />
+          )}
 
-          {/* QR */}
           {data.qrCodeUrl && (
-            <div style={{ textAlign: "right" }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+              }}
+            >
               <CertificateQR dataUrl={data.qrCodeUrl} />
               <p
                 style={{
                   fontSize: 10,
                   color: "#94a3b8",
-                  marginTop: 6,
+                  margin: 0,
+                  lineHeight: 1.3,
+                  textAlign: "center",
                 }}
               >
-                Verify
+                Scan to verify
               </p>
             </div>
           )}

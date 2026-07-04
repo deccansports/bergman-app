@@ -1,9 +1,8 @@
 // src/components/events/RacePageClient.tsx
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
-import { getHomepageSliderItemsAction } from '@/lib/actions';
+import React, { useState, useEffect, useMemo } from 'react';
+import { getHomepageSliderItemsAction, getServiceFeesAction } from '@/lib/actions';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -21,20 +20,44 @@ import Image from 'next/image';
 import { 
   Loader2, Ticket, BookOpen, ExternalLink, Waves, Bike as BikeIcon, 
   Footprints, Plane, MapPin, Map as MapIcon, Route, FileText, Download, 
-  TrendingUp, Mountain, Minus, Hourglass, Info, CalendarDays, Flag, 
-  CheckCircle2, XCircle, Clock, Ban 
+  TrendingUp, Mountain, Minus, Hourglass, Info, CalendarDays, Flag, Award,
+  CheckCircle2, XCircle, Clock, Ban, ThermometerSun, ThermometerSnowflake, Thermometer 
 } from 'lucide-react';
 import Link from 'next/link';
-import type { EventCalendarEntry, HomepageSliderItem, TicketDefinition, Sponsor, PricingTier, SwimDistanceCategory } from '@/lib/types';
+import type { EventCalendarEntry, HomepageSliderItem, TicketDefinition, Sponsor, PricingTier, SwimDistanceCategory, GlobalServiceFees } from '@/lib/types';
 import CourseMapDialog from '@/components/events/CourseMapDialog';
-import { isDuathlonEvent, formatSecondsToHMS, hmsToSeconds, getCountryFlagEmoji, getInitials, cn, isValidImageUrl } from '@/lib/utils';
-import { useToast } from '@/hooks/use-toast';
+import { isDuathlonEvent, formatSecondsToHMS, hmsToSeconds, getCountryFlagEmoji, getEventRegistrationButtonState, getInitials, cn, isValidImageUrl, isTicketHidden } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';
 
+const isSubCategoryHidden = (subCategory: any): boolean => {
+  const raw = subCategory?.isHidden ?? subCategory?.hidden ?? subCategory?.visibility ?? subCategory?.status;
+  if (typeof raw === 'boolean') return raw;
+  if (typeof raw === 'number') return raw === 1;
+  const normalized = String(raw ?? '').trim().toLowerCase();
+  return normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'hidden' || normalized === 'inactive' || normalized === 'archived';
+};
+
 const formatCurrencyLocal = (paisa: number | null | undefined) => {
-  if (paisa === null || paisa === undefined) return '₹0.00';
+  // Return empty string when price is missing so UI doesn't show misleading ₹0.00
+  if (paisa === null || paisa === undefined) return '';
   return `₹${(paisa / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+const formatTemperatureMetric = (value?: string | null) => {
+  const input = String(value || '').trim();
+  if (!input) return '';
+
+  const bareValueMatch = input.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if (bareValueMatch) return `${bareValueMatch[2]}°C / ${bareValueMatch[1]}°F`;
+
+  const cFirstMatch = input.match(/^(\d+(?:\.\d+)?)\s*°?C\s*\/\s*(\d+(?:\.\d+)?)\s*°?F$/i);
+  if (cFirstMatch) return `${cFirstMatch[1]}°C / ${cFirstMatch[2]}°F`;
+
+  const fFirstMatch = input.match(/^(\d+(?:\.\d+)?)\s*°?F\s*\/\s*(\d+(?:\.\d+)?)\s*°?C$/i);
+  if (fFirstMatch) return `${fFirstMatch[2]}°C / ${fFirstMatch[1]}°F`;
+
+  return input;
 };
 
 const PricingTiersList = ({ tiers, basePrice, participantsCount = 0 }: { tiers?: PricingTier[], basePrice: number | null | undefined, participantsCount?: number }) => {
@@ -50,15 +73,30 @@ const PricingTiersList = ({ tiers, basePrice, participantsCount = 0 }: { tiers?:
 
   const now = startOfDay(new Date());
   let activeTier: PricingTier | null = null;
+  let cumulativeSoldCap = 0;
 
   for (const tier of tiers) {
+    const tierLimit = tier.slotLimit !== null && tier.slotLimit !== undefined ? Math.max(Number(tier.slotLimit || 0), 0) : null;
+    const tierCapEnd = tierLimit !== null ? cumulativeSoldCap + tierLimit : null;
     const expiredDate = tier.endDate ? isBefore(parseISO(tier.endDate), now) : false;
-    const expiredSlots = tier.slotLimit ? participantsCount >= tier.slotLimit : false;
-    if (!expiredDate && !expiredSlots) {
+    const expiredSlots = tierCapEnd !== null ? participantsCount >= tierCapEnd : false;
+    if (!expiredDate && !expiredSlots && !activeTier) {
       activeTier = tier;
-      break;
     }
+    if (tierLimit !== null) cumulativeSoldCap += tierLimit;
   }
+
+  // Derive a sensible display price: prefer active tier, otherwise fallback to the
+  // minimum tier price when base price is 0 so we don't show misleading ₹0.00.
+  const derivedPrice = (() => {
+    const current = activeTier?.pricePaisa ?? basePrice;
+    if (current && current > 0) return current;
+    if (tiers && tiers.length > 0) {
+      const prices = tiers.map(t => t.pricePaisa).filter(p => p !== null && p !== undefined && Number(p) > 0).map(Number);
+      if (prices.length > 0) return Math.min(...prices);
+    }
+    return current;
+  })();
 
   return (
     <div className="space-y-4 text-left">
@@ -67,7 +105,7 @@ const PricingTiersList = ({ tiers, basePrice, participantsCount = 0 }: { tiers?:
           Current Active Price
         </p>
         <p className="text-3xl font-black text-primary my-1 text-left">
-          {formatCurrencyLocal(activeTier?.pricePaisa ?? basePrice)}
+          {formatCurrencyLocal(derivedPrice)}
         </p>
         <p className="text-[10px] font-bold uppercase tracking-tighter text-left text-orange-600">
           {activeTier ? `${activeTier.name} ACTIVE` : "Standard Pricing"}
@@ -79,12 +117,19 @@ const PricingTiersList = ({ tiers, basePrice, participantsCount = 0 }: { tiers?:
           Pricing Progress
         </p>
         {tiers.map((tier, idx) => {
+          const tierLimit = tier.slotLimit !== null && tier.slotLimit !== undefined ? Math.max(Number(tier.slotLimit || 0), 0) : null;
+          const previousCap = tiers.slice(0, idx).reduce((sum, t) => {
+            const limit = t.slotLimit !== null && t.slotLimit !== undefined ? Math.max(Number(t.slotLimit || 0), 0) : null;
+            return sum + (limit || 0);
+          }, 0);
+          const tierSold = tierLimit !== null ? Math.max(0, Math.min(participantsCount - previousCap, tierLimit)) : participantsCount;
+          const tierCapEnd = tierLimit !== null ? previousCap + tierLimit : null;
           const expiredDate = tier.endDate ? isBefore(parseISO(tier.endDate), now) : false;
-          const expiredSlots = tier.slotLimit ? participantsCount >= tier.slotLimit : false;
+          const expiredSlots = tierCapEnd !== null ? participantsCount >= tierCapEnd : false;
           const isClosed = expiredDate || expiredSlots;
           const isActive = activeTier?.name === tier.name;
           
-          const slotsRemaining = tier.slotLimit ? tier.slotLimit - participantsCount : Infinity;
+          const slotsRemaining = tierLimit !== null ? Math.max(0, tierLimit - tierSold) : Infinity;
           const isFillingFast = isActive && slotsRemaining > 0 && slotsRemaining <= 5;
 
           return (
@@ -116,32 +161,69 @@ const PricingTiersList = ({ tiers, basePrice, participantsCount = 0 }: { tiers?:
   );
 };
 
-const rulesAndRegulationsText = `
+const buildRulesAndRegulationsText = (
+  deferralFeeLabel: string,
+  categoryChangeFeeLabel: string,
+  triathlonMinAgeYears: number,
+  swimathonMinAgeYears: number
+) => `
 **General Rules**
-The Organisers reserve the right to limit or refuse entries at their discretion.
-Participants may be removed from the race if deemed physically incapable of continuing the race.
-The Organisers may modify rules and regulations without prior notice.
-The race route may be changed with advance notice to participants.
-It is the participant’s responsibility to be familiar with all rules and avoid any violations.
-Race entry and bib numbers are strictly non-transferable and non-refundable.
-The Organisers reserve the right to cancel any offline registration without notice. In such cases, the paid amount will be refunded.
+- The Organisers reserve the right to accept, reject, or limit participation at their sole discretion.
+- Participants may be withdrawn from the event at any stage if deemed physically unfit or unable to continue safely.
+- The Organisers reserve the right to amend rules, regulations, and event guidelines at any time without prior notice.
+- The race route is subject to change; any updates will be communicated to participants in advance.
+- All participants are responsible for understanding and adhering to the event rules and regulations.
+- All entries are non-transferable and non-refundable. Bib numbers cannot be exchanged under any circumstances.
+
+**Podium & Trophy Collection**
+- All podium finishers must collect their trophies at the official prize distribution ceremony.
+- Trophies not collected at the venue during the ceremony will not be couriered, shipped, or sent later under any circumstances.
+
+**Bib & Kit Collection Policy (OTP-Based System)**
+- Bib and kit collection will be conducted strictly through a secure OTP verification system.
+
+Collection Process:
+- Participants must visit the designated Bib Collection Counter and provide their bib number.
+- An OTP will be automatically sent to the participant's registered mobile number and email address.
+- The bib kit will be handed over only after successful OTP verification.
+- After collecting the bib kit, participants may proceed to the Goodies Counter to collect Event T-shirt, Bike stickers, Bag, Two transition bags, and Bib belt.
+
+Mandatory Participant Presence:
+- Participants are required to be physically present to collect their bib kit.
+
+No Kit Without OTP:
+- Under no circumstances will a bib or kit be issued without valid OTP verification.
+
+Goodies Collection by Representative:
+- In case the participant is unable to attend, only goodies (not the bib kit) may be collected by an authorized representative.
+- OTP verification from the registered participant is still mandatory.
+
+Mobile Number Changes:
+- Any request to update a registered mobile number must be made at the Help Desk with valid ID proof (e.g., DigiLocker or government-issued ID).
+
+No Exceptions Policy:
+- Failure to provide a valid OTP will result in denial of bib/kit or goodies collection. No exceptions will be made.
+
+Uncollected Kits:
+- Bibs, kits, or goodies not collected during the official collection window will not be couriered, shipped, or distributed later under any circumstances.
 
 **Cancellation Policy**
-6+ Months before event: 70% refund (excluding GST and processing charges).
+If cancelled within 48 hours of registration: 90% refund (excluding GST).
+6+ Months before event: 70% refund (excluding GST and processing charges and platform fees).
 4 months before the event: 50% refund (excluding GST).
 3 months before the event: 20% refund (excluding GST).
 2 months or less before the event: No refund.
 Post-registration confirmation or within 6 months of the event: Only 70% refund (excluding GST).
 
-**Deferral, Transfer & Category Change Policy**
-All deferral, transfer, or category change requests must be made at least 60 days prior to the event via the official form.
+**Deferral & Category Change Policy**
+All deferral or category change requests must be made at least 60 days prior to the event via the official form.
 Deferral to the next year’s event will require paying the entry fee difference if applicable.
-Once approved, no further deferral or transfer requests will be accepted.
+Once approved, no further deferral or category change requests will be accepted.
 Deferral is valid for 1 year from the original event date.
 Charges:
-- Deferral / Name Transfer / Category Change: ₹2,499
-- Category change (lower to higher): ₹2,499 + fee difference + GST
-- Category change (higher to lower): ₹2,499 (No refund of fee difference)
+- Deferral / Category Change: ${deferralFeeLabel}
+- Category change (lower to higher): ${categoryChangeFeeLabel} + fee difference + applicable tax
+- Category change (higher to lower): ${categoryChangeFeeLabel} (No refund of fee difference)
 
 **Weather Disclaimer**
 In case of bad weather, the Organisers may:
@@ -163,7 +245,8 @@ Participants must be familiar with the course and follow the marked route at all
 1. Registration
 By registering for Bergman Triathlon, you agree to abide by all event rules, regulations, and decisions made by the organizers.
 Registrations are accepted on a first-come, first-served basis and are only confirmed upon successful payment.
-You must be 18 years of age or older on race day to participate.
+Minimum age (Triathlon): ${triathlonMinAgeYears} years on race day.
+Minimum age (Swimathon - Sub-category Type): ${swimathonMinAgeYears} years and above on race day.
 All information submitted during registration must be accurate and truthful.
 Bib number and registration are non-transferable and non-refundable, except as per the deferral/cancellation policies outlined below.
 2. Code of Conduct
@@ -212,9 +295,6 @@ const CourseProfileIcon = ({ type, characteristic }: { type: 'swim' | 'bike' | '
   };
 
 export default function RacePageClient({ initialEvent }: { initialEvent: EventCalendarEntry }) {
-  const router = useRouter();
-  const { toast } = useToast();
-  
   const [event] = useState<EventCalendarEntry>(initialEvent);
   const [heroMedia, setHeroMedia] = useState<HomepageSliderItem | null>(null);
   const [isLoadingMedia, setIsLoadingMedia] = useState(true);
@@ -225,6 +305,9 @@ export default function RacePageClient({ initialEvent }: { initialEvent: EventCa
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
   
   const [selectedTicketIdForMap, setSelectedTicketIdForMap] = useState<string | null>(null);
+  const [rulesAndRegulationsText, setRulesAndRegulationsText] = useState<string>(
+    buildRulesAndRegulationsText('₹2,000.00 / $50.00', '₹2,000.00 / $50.00', 16, 9)
+  );
 
   useEffect(() => {
     getHomepageSliderItemsAction().then(sliderResult => {
@@ -236,6 +319,27 @@ export default function RacePageClient({ initialEvent }: { initialEvent: EventCa
   }, [event.id]);
 
   useEffect(() => {
+    getServiceFeesAction().then((res) => {
+      const globalFees = (res.fees as GlobalServiceFees) || ({} as GlobalServiceFees);
+      const categoryName = (event.eventName || '').toUpperCase();
+      const typeKey = categoryName.includes('SWIM') ? 'Swimming' : (categoryName.includes('DUATHLON') ? 'Duathlon' : 'Triathlon');
+      const cfg = (globalFees as any)?.[typeKey] || (globalFees as any)?.Triathlon || {};
+
+      const inrDeferral = Number(cfg.deferralFeePaisa ?? 200000) / 100;
+      const usdDeferral = Number(cfg.deferralFeeUsdCents ?? 5000) / 100;
+      const inrCategory = Number(cfg.categoryChangeFeePaisa ?? 200000) / 100;
+      const usdCategory = Number(cfg.categoryChangeFeeUsdCents ?? 5000) / 100;
+      const triathlonMinAgeYears = Number((globalFees as any)?.Triathlon?.minimumAgeYears ?? 16);
+      const swimathonMinAgeYears = Number((globalFees as any)?.Swimming?.minimumAgeYears ?? 9);
+
+      const deferralLabel = `₹${inrDeferral.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / $${usdDeferral.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const categoryLabel = `₹${inrCategory.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / $${usdCategory.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+      setRulesAndRegulationsText(buildRulesAndRegulationsText(deferralLabel, categoryLabel, triathlonMinAgeYears, swimathonMinAgeYears));
+    });
+  }, [event.eventName]);
+
+  useEffect(() => {
     document.title = `${event.eventName} | BERGMAN Triathlon`;
   }, [event]);
   
@@ -243,8 +347,31 @@ export default function RacePageClient({ initialEvent }: { initialEvent: EventCa
     setSelectedTicketIdForMap(ticketId);
     setIsMapModalOpen(true);
   }
-  
-  const hasTicketsDefined = event.ticketDefinitions && event.ticketDefinitions.length > 0;
+
+  const visibleTickets = useMemo(() => {
+    return (event.ticketDefinitions ?? []).filter((ticket) => {
+      if (isTicketHidden(ticket)) return false;
+      if (ticket.ticketCategory !== 'Swimming') return true;
+      if (!ticket.subCategories?.length) return true;
+      return ticket.subCategories.some((subCategory) => !isSubCategoryHidden(subCategory));
+    });
+  }, [event.ticketDefinitions]);
+
+  const influencers = useMemo(() => {
+    return [...(event.influencers ?? [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  }, [event.influencers]);
+
+  const visibleInfluencers = useMemo(() => {
+    const activeInfluencers = influencers.filter((influencer) => influencer.isActive !== false);
+    return activeInfluencers.length > 0 ? activeInfluencers : influencers;
+  }, [influencers]);
+
+  const shouldAutoScrollInfluencers = visibleInfluencers.length > 1;
+  const continuousInfluencerTrack = shouldAutoScrollInfluencers
+    ? [...visibleInfluencers, ...visibleInfluencers]
+    : visibleInfluencers;
+
+  const hasTicketsDefined = visibleTickets.length > 0;
   const hasValidExternalRegUrl = typeof event.registrationUrl === 'string' && event.registrationUrl.trim() !== '' && event.registrationUrl.startsWith('http');
   const canUseInternalForm = event.customSlug && (hasTicketsDefined || !hasValidExternalRegUrl);
 
@@ -252,7 +379,7 @@ export default function RacePageClient({ initialEvent }: { initialEvent: EventCa
   const isExternalLink = !canUseInternalForm && hasValidExternalRegUrl;
   const canRegister = registrationLink !== '#';
   
-  const hasCourseMaps = event.ticketDefinitions?.some(td => 
+  const hasCourseMaps = visibleTickets.some(td => 
     td.courseMaps?.swimGpxUrl || 
     td.courseMaps?.bikeGpxUrl || 
     td.courseMaps?.runGpxUrl ||
@@ -260,7 +387,7 @@ export default function RacePageClient({ initialEvent }: { initialEvent: EventCa
     td.courseMaps?.run2GpxUrl
   );
 
-  const hasCutoffs = event.ticketDefinitions?.some(td => {
+  const hasCutoffs = visibleTickets.some(td => {
       const basicCutoff = td.cutoffs && (td.cutoffs.overall || td.cutoffs.swim || td.cutoffs.bike || td.cutoffs.run || td.cutoffs.run1 || td.cutoffs.run2);
       const subCategoryCutoff = td.subCategories?.some(s => !!s.cutoff);
       return basicCutoff || subCategoryCutoff;
@@ -276,10 +403,13 @@ export default function RacePageClient({ initialEvent }: { initialEvent: EventCa
         .replace(/^- (.*$)/gm, '<li class="list-disc ml-6">$1</li>');
 
   const orangeBtnClass = "bg-orange-600 hover:bg-orange-700 text-white font-black uppercase tracking-widest min-w-[160px] h-14 text-left shadow-lg shadow-orange-600/20 transition-all";
-  const secondaryBtnClass = "font-bold uppercase text-xs tracking-widest min-w-[160px] h-14 border-2 border-primary/20 hover:border-primary hover:bg-primary/5 text-foreground transition-all";
+  const secondaryBtnClass = "font-bold uppercase text-xs tracking-widest min-w-[160px] h-14 border-2 border-primary/20 bg-white text-slate-900 hover:border-primary hover:bg-slate-50 hover:text-slate-900 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900 transition-all shadow-sm";
+  const registrationButtonState = getEventRegistrationButtonState(event);
 
   let registrationButton;
-  if (event.isSoldOut) {
+  if (registrationButtonState === 'hide') {
+    registrationButton = null;
+  } else if (registrationButtonState === 'sold_out') {
     registrationButton = <Button className="w-full h-12 bg-red-600/20 text-red-500 border-red-500/50" disabled><Ban className="mr-2 h-4 w-4" /> Sold Out</Button>;
   } else if (canRegister) {
     registrationButton = (
@@ -335,13 +465,23 @@ export default function RacePageClient({ initialEvent }: { initialEvent: EventCa
               <div className="flex flex-wrap gap-3 justify-center max-w-4xl text-left">
                   {registrationButton}
                   <Button variant="outline" size="lg" className={secondaryBtnClass} onClick={() => setIsRulesModalOpen(true)}><BookOpen className="mr-2 h-4 w-4 text-left"/> Rules</Button>
+                  {visibleInfluencers.length > 0 ? (
+                    <Button
+                    variant="outline"
+                    size="lg"
+                    className={secondaryBtnClass}
+                    onClick={() => document.getElementById('event-influencers-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                    >
+                      <Award className="mr-2 h-5 w-5 text-left"/> Influencers
+                    </Button>
+                  ) : null}
                   {event.athleteGuideBookUrl ? (
                       <Button variant="outline" size="lg" className={secondaryBtnClass} onClick={() => setIsGuideModalOpen(true)}>
                           <FileText className="mr-2 h-5 w-5 text-left"/> Athlete Guide
                       </Button>
                   ) : null}
                   {hasCourseMaps && (
-                      <Button variant="outline" size="lg" className={secondaryBtnClass} onClick={() => openCourseMapModalWithTicket(event.ticketDefinitions?.[0].id ?? '')}>
+                      <Button variant="outline" size="lg" className={secondaryBtnClass} onClick={() => openCourseMapModalWithTicket(visibleTickets[0]?.id ?? '')}>
                       <MapIcon className="mr-2 h-5 w-5 text-left"/> Course Maps
                       </Button>
                   )}
@@ -353,7 +493,7 @@ export default function RacePageClient({ initialEvent }: { initialEvent: EventCa
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-8 mt-8 border-t text-left">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8 pt-8 mt-8 border-t text-left">
               <Card className="shadow-xl border bg-card text-card-foreground text-left">
                 <CardHeader className="text-left">
                   <CardTitle className="flex items-center gap-2 font-black uppercase italic tracking-tighter text-left">
@@ -391,6 +531,52 @@ export default function RacePageClient({ initialEvent }: { initialEvent: EventCa
                     )}
                 </CardContent>
               </Card>
+
+              {(event.temperatureMetrics?.highAirTemp || event.temperatureMetrics?.lowAirTemp || event.temperatureMetrics?.avgWaterTemp) && (
+                <Card className="shadow-xl border bg-card text-card-foreground text-left">
+                  <CardHeader className="text-left">
+                    <CardTitle className="flex items-center gap-2 font-black uppercase italic tracking-tighter text-left">
+                      <Thermometer className="h-6 w-6 text-primary text-left"/>
+                      Conditions
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-5 text-left">
+                    {event.temperatureMetrics?.highAirTemp && (
+                      <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-muted/30 p-4 text-left">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                          <ThermometerSun className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1 text-left">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground text-left">High Air Temp</p>
+                          <p className="font-black text-xl text-foreground text-left">{formatTemperatureMetric(event.temperatureMetrics.highAirTemp)}</p>
+                        </div>
+                      </div>
+                    )}
+                    {event.temperatureMetrics?.lowAirTemp && (
+                      <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-muted/30 p-4 text-left">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                          <ThermometerSnowflake className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1 text-left">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground text-left">Low Air Temp</p>
+                          <p className="font-black text-xl text-foreground text-left">{formatTemperatureMetric(event.temperatureMetrics.lowAirTemp)}</p>
+                        </div>
+                      </div>
+                    )}
+                    {event.temperatureMetrics?.avgWaterTemp && (
+                      <div className="flex items-center gap-4 rounded-xl border border-border/60 bg-muted/30 p-4 text-left">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                          <Thermometer className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1 text-left">
+                          <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground text-left">Avg. Water Temp</p>
+                          <p className="font-black text-xl text-foreground text-left">{formatTemperatureMetric(event.temperatureMetrics.avgWaterTemp)}</p>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
               
               <Card className="shadow-xl border bg-card text-card-foreground text-left">
                  <CardHeader className="text-left">
@@ -425,7 +611,7 @@ export default function RacePageClient({ initialEvent }: { initialEvent: EventCa
                 <h2 className="text-3xl font-black uppercase italic tracking-tighter text-center mb-8 text-foreground text-left">Categories at Bergman</h2>
                 {hasTicketsDefined && (
                     <div className="grid grid-cols-1 gap-6 text-left">
-                        {event.ticketDefinitions?.map(ticket => {
+                        {visibleTickets.map(ticket => {
                             const isDua = isDuathlonEvent(ticket.ticketName);
                             const isSwim = ticket.ticketCategory === 'Swimming';
                             const ticketDate = ticket.eventDate || event.eventDate;
@@ -458,7 +644,7 @@ export default function RacePageClient({ initialEvent }: { initialEvent: EventCa
                                                         <Waves className="h-4 w-4 text-sky-500 text-left" /> Available Distances
                                                     </h4>
                                                     <div className="grid grid-cols-1 gap-4 text-left">
-                                                        {ticket.subCategories?.map(sub => {
+                                                        {ticket.subCategories?.filter(sub => !isSubCategoryHidden(sub)).map(sub => {
                                                             return (
                                                                 <div key={sub.id} className="p-4 border rounded-xl bg-sky-50/50 border-sky-100 text-left">
                                                                     <p className="font-black text-lg text-sky-800 uppercase tracking-tight text-left">{sub.name}</p>
@@ -511,14 +697,104 @@ export default function RacePageClient({ initialEvent }: { initialEvent: EventCa
                         )})}
                     </div>
                 )}
+
             </div>
             
-            {event.blocks && event.blocks.length > 0 && (
+              {event.blocks && event.blocks.length > 0 && (
                 <div className="pt-8 mt-8 text-left">
-                    {event.blocks.map(block => (
-                        <div key={block.id} dangerouslySetInnerHTML={{ __html: block.html }} className="text-left" />
-                    ))}
+                  {event.blocks.map(block => (
+                    <div key={block.id} dangerouslySetInnerHTML={{ __html: block.html }} className="text-left" />
+                  ))}
                 </div>
+              )}
+
+            {visibleInfluencers.length > 0 && (
+              <section id="event-influencers-section" className="w-full pt-12 mt-12 border-t text-left">
+                <h2 className="mb-12 text-center text-3xl font-black uppercase italic tracking-tighter text-foreground text-left">Our Influencers</h2>
+                <div className="overflow-hidden text-left">
+                  <div
+                    className={cn(
+                      'flex gap-6',
+                      shouldAutoScrollInfluencers ? 'influencer-marquee-track' : 'flex-wrap justify-center'
+                    )}
+                  >
+                    {continuousInfluencerTrack.map((influencer, index) => {
+                      const achievementLines = String(influencer.achievements || '')
+                        .split(/\n+/)
+                        .map((line) => line.trim())
+                        .filter(Boolean);
+
+                      return (
+                        <article
+                          key={`${influencer.id}-${index}`}
+                          className="w-[82vw] max-w-[340px] shrink-0 overflow-hidden rounded-3xl border bg-card shadow-sm transition-transform duration-300 hover:-translate-y-1 text-left md:w-[320px]"
+                        >
+                          <div className="relative aspect-[4/4.8] w-full overflow-hidden bg-muted">
+                            <Image
+                              src={influencer.photoUrl}
+                              alt={influencer.name}
+                              fill
+                              sizes="(max-width: 768px) 82vw, 320px"
+                              className="object-cover object-center"
+                            />
+                          </div>
+                          <div className="space-y-4 p-5 text-left">
+                            <div className="min-w-0 space-y-1 text-left">
+                              <h3 className="text-lg font-black tracking-tight text-left md:text-xl">{influencer.name}</h3>
+                              {influencer.title ? (
+                                <p className="text-xs font-black uppercase tracking-[0.22em] text-muted-foreground text-left">{influencer.title}</p>
+                              ) : null}
+                            </div>
+
+                            <div className="space-y-2 text-left">
+                              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-muted-foreground text-left">Achievements</p>
+                              <div className="flex flex-wrap gap-2 text-left">
+                                {achievementLines.length > 0 ? achievementLines.map((achievement) => (
+                                  <span key={`${influencer.id}-${achievement}`} className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+                                    {achievement}
+                                  </span>
+                                )) : (
+                                  <p className="text-sm text-muted-foreground">{influencer.achievements}</p>
+                                )}
+                              </div>
+                            </div>
+
+                            {influencer.socialUrl ? (
+                              <a
+                                href={influencer.socialUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex text-xs font-black uppercase tracking-[0.18em] text-primary underline-offset-4 hover:underline"
+                              >
+                                Know more
+                              </a>
+                            ) : null}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </div>
+                <style jsx>{`
+                  .influencer-marquee-track {
+                    width: max-content;
+                    animation: influencer-marquee 35s linear infinite;
+                  }
+
+                  .influencer-marquee-track:hover {
+                    animation-play-state: paused;
+                  }
+
+                  @keyframes influencer-marquee {
+                    0% {
+                      transform: translateX(0);
+                    }
+                    100% {
+                      transform: translateX(-50%);
+                    }
+                  }
+                `}</style>
+              </section>
             )}
 
             {event.sponsors && event.sponsors.length > 0 && (
@@ -532,13 +808,13 @@ export default function RacePageClient({ initialEvent }: { initialEvent: EventCa
                         target="_blank" 
                         rel="noopener noreferrer" 
                         aria-label={sponsor.name}
-                        className="relative h-20 w-40 block text-left"
+                        className="relative block h-24 w-52 text-left md:h-28 md:w-60"
                       >
                         <Image
                           src={sponsor.logoUrl}
                           alt={sponsor.name}
                           fill
-                          sizes="160px"
+                          sizes="(max-width: 768px) 208px, 240px"
                           className="object-contain"
                         />
                       </a>
@@ -613,7 +889,7 @@ export default function RacePageClient({ initialEvent }: { initialEvent: EventCa
                 
                 <ScrollArea className="flex-1 px-6 overflow-y-auto text-left">
                     <div className="space-y-3 pb-6 text-left">
-                        {event.ticketDefinitions?.map(ticket => {
+                        {visibleTickets.map(ticket => {
                             const isSwim = ticket.ticketCategory === 'Swimming';
                             if (!ticket.cutoffs && !ticket.subCategories) return null;
 

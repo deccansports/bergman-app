@@ -7,12 +7,12 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { revalidatePath } from 'next/cache';
 import { toIsoStringSafe } from '@/lib/utils';
 import {
-  sendRawHtmlEmail,
   sendRegistrationConfirmationEmail,
   sendMonthlyDeferralReminderEmail,
   sendIncompleteRegistrationEmail,
   sendAdminTicketSaleNotificationEmail,
 } from '../auth/brevoService';
+import { sendRawEmailViaProvider } from '../auth/emailProvider';
 import { sendIncompleteRegistrationWhatsApp, sendRegistrationConfirmationViaWhatsApp } from '../auth/aisensyService';
 import type {
   CampaignLogEntry,
@@ -26,23 +26,30 @@ import { startOfDay, isAfter, parseISO } from 'date-fns';
 ---------------------------------------------------------- */
 
 const samplePlaceholders: Record<string, string> = {
-  '{{name}}': 'Test Athlete',
-  '{{bib_number}}': '123',
-  '{{gender}}': 'Unspecified',
-  '{{ticket_name}}': 'Sample Ticket',
-  '{{club_name}}': 'Test Club',
-  '{{booking_id}}': 'BMIN-TEST',
-  '{{email}}': 'test@example.com',
-  '{{mobile}}': '+919876543210'
+  name: 'Test Athlete',
+  bib_number: '123',
+  gender: 'Unspecified',
+  ticket_name: 'Sample Ticket',
+  ticket: 'Sample Ticket',
+  club_name: 'Test Club',
+  booking_id: 'BMIN-TEST',
+  email: 'test@example.com',
+  mobile: '+919876543210',
+  eventname: 'Bergman Test Event',
+  event_name: 'Bergman Test Event',
+  event_venue: 'Kanteerava Stadium',
+  eventdate: 'Sep 06, 2026',
 };
 
 function replacePlaceholders(content: string, isTest = false): string {
   if (!isTest) return content;
   let out = content;
-  for (const key in samplePlaceholders) {
-    out = out.replace(new RegExp(key, 'gi'), samplePlaceholders[key]);
+  for (const [key, value] of Object.entries(samplePlaceholders)) {
+    // Supports: {{key}}, {{ key }}, {{params.key}}, {{ params.key }}
+    out = out.replace(new RegExp(`{{\\s*${key}\\s*}}`, 'gi'), value);
+    out = out.replace(new RegExp(`{{\\s*params\\.${key}\\s*}}`, 'gi'), value);
   }
-  return out.replace(/{{contact.EMAIL}}/gi, samplePlaceholders['{{email}}']);
+  return out.replace(/{{\s*contact\.EMAIL\s*}}/gi, samplePlaceholders.email);
 }
 
 /* ---------------------------------------------------------
@@ -53,7 +60,7 @@ export async function sendTestCampaignEmailAction(
   testEmail: string,
   subject: string,
   htmlContent: string,
-  attachment: { content: string; name: string } | null
+  attachment: { filename: string; data: string; type?: string } | null
 ): Promise<{ success: boolean; message: string }> {
   if (!testEmail || !subject || !htmlContent) {
     return { success: false, message: 'Missing required fields.' };
@@ -75,12 +82,12 @@ export async function sendTestCampaignEmailAction(
     testEmail
   );
 
-  const success = await sendRawHtmlEmail(
-    testEmail,
-    personalizedSubject,
-    finalHtml,
-    attachment
-  );
+  const success = await sendRawEmailViaProvider({
+    recipientEmail: testEmail,
+    subject: personalizedSubject,
+    htmlContent: finalHtml,
+    ...(attachment ? { attachment: [attachment] } : {}),
+  });
 
   if (success) {
     const db = getFirestoreInstance();
@@ -88,6 +95,7 @@ export async function sendTestCampaignEmailAction(
       recipientEmail: testEmail,
       recipientName: 'Test Recipient',
       subject: `[TEST] ${personalizedSubject}`,
+      hasAttachment: !!attachment,
       sentAt: FieldValue.serverTimestamp(),
       status: 'Success',
       sentBy: 'Admin'
@@ -116,7 +124,7 @@ export async function getCampaignLogsAction(): Promise<{
     const snap = await db
       .collection('campaignLogs')
       .orderBy('sentAt', 'desc')
-      .limit(500) // Fetch more to calculate stats accurately
+      .limit(120)
       .get();
 
     const logs = snap.docs.map(doc => ({
@@ -140,7 +148,7 @@ export async function getCampaignLogsAction(): Promise<{
 
     const stats = { totalSent, sentToday };
 
-    return { success: true, message: 'Logs and stats fetched.', logs: logs.slice(0, 200), stats };
+    return { success: true, message: 'Logs and stats fetched.', logs: logs.slice(0, 120), stats };
   } catch (e: any) {
     console.error("[getCampaignLogsAction] Error:", e.message);
     return { success: false, message: `Failed to fetch logs: ${e.message}` };
@@ -194,7 +202,9 @@ export async function sendIndividualConfirmationEmailAction(
       event.organizerName,
       event.organizerAddress,
       event.organizerCompanyDescription,
-      participant.country
+      participant.country,
+      String((participant as any).currency || '').toUpperCase() === 'USD' ? 'USD' : 'INR',
+      (participant as any).invoiceId || null
     );
 
     return {
@@ -259,7 +269,8 @@ export async function sendIncompleteRegistrationNoticeAction(
   email: string | null,
   eventName: string,
   redirectUrl: string | null,
-  mobile: string | null
+  mobile: string | null,
+  attemptId?: string | null
 ): Promise<{ success: boolean; message: string }> {
   let emailSuccess = false;
   let whatsappSuccess = false;
@@ -274,8 +285,29 @@ export async function sendIncompleteRegistrationNoticeAction(
     whatsappSuccess = whatsappResult.success;
     message += `WhatsApp ${whatsappSuccess ? 'sent' : 'failed'}.`;
   }
-  
+
   const overallSuccess = emailSuccess || whatsappSuccess;
+
+  // Persist reminder counts back to Firestore so the UI reflects actual sends
+  if (overallSuccess && attemptId) {
+    try {
+      const adminDb = getFirestoreInstance();
+      const attemptRef = adminDb.collection('registrationAttempts').doc(attemptId);
+      const nowIso = new Date().toISOString();
+      const updates: Record<string, any> = {};
+      if (emailSuccess) {
+        updates['remindersSent.email.count'] = FieldValue.increment(1);
+        updates['remindersSent.email.dates'] = FieldValue.arrayUnion(nowIso);
+      }
+      if (whatsappSuccess) {
+        updates['remindersSent.whatsapp.count'] = FieldValue.increment(1);
+        updates['remindersSent.whatsapp.dates'] = FieldValue.arrayUnion(nowIso);
+      }
+      await attemptRef.set(updates, { merge: true });
+    } catch (_e) {
+      // Non-fatal — reminder was still sent successfully
+    }
+  }
 
   return {
     success: overallSuccess,

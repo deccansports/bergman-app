@@ -101,11 +101,130 @@ export async function getLegacyAthletesAction(params?: { year?: number }): Promi
     const actionName = 'getLegacyAthletesAction';
     const year = params?.year || new Date().getFullYear();
     try {
-        const legacy = await getKV<LegacyAthlete[]>(`legacy:athletes:${year}`, actionName);
-        if (legacy) return { success: true, message: 'Fetched from KV.', legacyAthletes: legacy };
-        
-        const fallback = await getKV<LegacyAthlete[]>('legacy:athletes', actionName);
-        return { success: true, message: 'Fetched from global fallback.', legacyAthletes: fallback || [] };
+        const legacyFromYear = await getKV<LegacyAthlete[]>(`legacy:athletes:${year}`, actionName);
+        const sourceLabel = legacyFromYear ? 'year' : 'global';
+        const baseLegacy = legacyFromYear || await getKV<LegacyAthlete[]>('legacy:athletes', actionName) || [];
+
+        if (baseLegacy.length === 0) {
+          return { success: true, message: `Fetched from ${sourceLabel} KV.`, legacyAthletes: [] };
+        }
+
+        const needsEnrichment = baseLegacy.some(a =>
+          a.athleteUid === undefined ||
+          a.mobile === undefined ||
+          a.address === undefined ||
+          a.city === undefined ||
+          a.state === undefined ||
+          a.pincode === undefined ||
+          a.country === undefined
+        );
+        if (!needsEnrichment) {
+          return { success: true, message: `Fetched from ${sourceLabel} KV.`, legacyAthletes: baseLegacy };
+        }
+
+        const adminDb = getFirestoreInstance();
+        const profileByUid = new Map<string, {
+          uid: string;
+          mobile: string | null;
+          address: string | null;
+          city: string | null;
+          state: string | null;
+          pincode: string | null;
+          country: string | null;
+        }>();
+        const profileByEmail = new Map<string, {
+          uid: string;
+          mobile: string | null;
+          address: string | null;
+          city: string | null;
+          state: string | null;
+          pincode: string | null;
+          country: string | null;
+        }>();
+
+        const composeAddress = (u: Partial<User>): string | null => {
+          const addr = [u.address, u.city, u.state, u.pincode, u.country]
+            .map(v => typeof v === 'string' ? v.trim() : '')
+            .filter(Boolean)
+            .join(', ');
+          return addr || null;
+        };
+
+        const uidCandidates = Array.from(new Set(baseLegacy.map(a => a.athleteUid).filter(Boolean) as string[]));
+        for (let i = 0; i < uidCandidates.length; i += 30) {
+          const batch = uidCandidates.slice(i, i + 30);
+          if (batch.length === 0) continue;
+          const snap = await adminDb.collection('users').where(FieldPath.documentId(), 'in', batch).get();
+          snap.forEach(doc => {
+            const userData = doc.data() as User;
+            const profile = {
+              uid: doc.id,
+              mobile: userData.mobile || null,
+              address: composeAddress(userData),
+              city: userData.city || null,
+              state: userData.state || null,
+              pincode: userData.pincode || null,
+              country: userData.country || null,
+            };
+            profileByUid.set(doc.id, profile);
+            const emailLower = String(userData.email || '').trim().toLowerCase();
+            if (emailLower) profileByEmail.set(emailLower, profile);
+          });
+        }
+
+        const unresolvedEmails = Array.from(new Set(
+          baseLegacy
+            .filter(a => !a.athleteUid || !profileByUid.get(a.athleteUid))
+            .map(a => String(a.email || '').trim())
+            .filter(Boolean)
+        ));
+
+        for (let i = 0; i < unresolvedEmails.length; i += 30) {
+          const batch = unresolvedEmails.slice(i, i + 30);
+          if (batch.length === 0) continue;
+          const snap = await adminDb.collection('users').where('email', 'in', batch).get();
+          snap.forEach(doc => {
+            const userData = doc.data() as User;
+            const profile = {
+              uid: doc.id,
+              mobile: userData.mobile || null,
+              address: composeAddress(userData),
+              city: userData.city || null,
+              state: userData.state || null,
+              pincode: userData.pincode || null,
+              country: userData.country || null,
+            };
+            profileByUid.set(doc.id, profile);
+            const emailLower = String(userData.email || '').trim().toLowerCase();
+            if (emailLower) profileByEmail.set(emailLower, profile);
+          });
+        }
+
+        const enrichedLegacy = baseLegacy.map((athlete) => {
+          const fromUid = athlete.athleteUid ? profileByUid.get(athlete.athleteUid) : undefined;
+          const fromEmail = profileByEmail.get(String(athlete.email || '').trim().toLowerCase());
+          const profile = fromUid || fromEmail;
+
+          return {
+            ...athlete,
+            athleteUid: athlete.athleteUid || profile?.uid,
+            mobile: athlete.mobile ?? profile?.mobile ?? null,
+            address: athlete.address ?? profile?.address ?? null,
+            city: athlete.city ?? profile?.city ?? null,
+            state: athlete.state ?? profile?.state ?? null,
+            pincode: athlete.pincode ?? profile?.pincode ?? null,
+            country: athlete.country ?? profile?.country ?? null,
+          };
+        });
+
+        await putKV(`legacy:athletes:${year}`, enrichedLegacy, actionName);
+        await putKV('legacy:athletes', enrichedLegacy, actionName);
+
+        return {
+          success: true,
+          message: `Fetched from ${sourceLabel} KV and enriched from user data.`,
+          legacyAthletes: enrichedLegacy,
+        };
     } catch (e: any) {
         return { success: false, message: e.message };
     }
@@ -206,14 +325,57 @@ export async function _computeLegacyAthletes(): Promise<{
       athleteRacesMap.get(race.athleteUid)!.push(race);
     }
 
+    const athleteProfileMap = new Map<string, {
+      mobile: string | null;
+      address: string | null;
+      city: string | null;
+      state: string | null;
+      pincode: string | null;
+      country: string | null;
+    }>();
+    const legacyCandidateUids = Array.from(athleteYearMap.keys());
+
+    if (legacyCandidateUids.length > 0) {
+      const adminDb = getFirestoreInstance();
+      for (let i = 0; i < legacyCandidateUids.length; i += 30) {
+        const batchUids = legacyCandidateUids.slice(i, i + 30);
+        const usersSnapshot = await adminDb.collection('users').where(FieldPath.documentId(), 'in', batchUids).get();
+        usersSnapshot.forEach(doc => {
+          const userData = doc.data() as User;
+          const composedAddress = [userData.address, userData.city, userData.state, userData.pincode, userData.country]
+            .map(v => typeof v === 'string' ? v.trim() : '')
+            .filter(Boolean)
+            .join(', ');
+
+          athleteProfileMap.set(doc.id, {
+            mobile: userData.mobile || null,
+            address: composedAddress || null,
+            city: userData.city || null,
+            state: userData.state || null,
+            pincode: userData.pincode || null,
+            country: userData.country || null,
+          });
+        });
+      }
+    }
+
     const legacyAthletes: LegacyAthlete[] = [];
     for (const [uid, yearsSet] of Array.from(athleteYearMap.entries())) {
       const stats: AthleteStats = { yearsFinished: Array.from(yearsSet), consecutiveStreak: 0, lastFinishedYear: null, isLegacy: false, legacyValidTill: null };
       const updatedStats = await computeLegacyStatus(stats, currentYear);
       if (updatedStats.isLegacy) {
+        const userProfile = athleteProfileMap.get(uid);
+        const fallbackRace = (athleteRacesMap.get(uid) || [])[0];
         legacyAthletes.push({
+          athleteUid: uid,
           name: athleteNameMap.get(uid) || 'Athlete',
           email: athleteEmailMap.get(uid) || '',
+          mobile: userProfile?.mobile || fallbackRace?.mobile || null,
+          address: userProfile?.address || null,
+          city: userProfile?.city || fallbackRace?.cityAtRace || null,
+          state: userProfile?.state || fallbackRace?.stateAtRace || null,
+          pincode: userProfile?.pincode || null,
+          country: userProfile?.country || fallbackRace?.countryAtRace || null,
           achievementYears: `${updatedStats.yearsFinished[0]}–${updatedStats.lastFinishedYear}`,
           totalYears: updatedStats.consecutiveStreak,
           contributingRaces: (athleteRacesMap.get(uid) || []).map(r => ({
@@ -250,7 +412,7 @@ export async function sendYearlyRecapEmailAction(
     ? authOtpConfig.brevo.clubYearlyRecapTemplateId 
     : authOtpConfig.brevo.yearlyRecapTemplateId;
     
-  if (!templateId || templateId === 0) return { success: false, message: 'Template not configured in Brevo.' };
+  if (!templateId || templateId === 0) return { success: false, message: 'Template not configured for BergTechno provider.' };
 
   const params: Record<string, any> = isClubRecap ? {
       year, 
@@ -271,5 +433,5 @@ export async function sendYearlyRecapEmailAction(
   };
 
   const success = await sendDynamicTemplateEmail(templateId, recipientEmail, params, actionName);
-  return { success, message: success ? 'Recap email sent.' : 'Failed to deliver email via Brevo.' };
+  return { success, message: success ? 'Recap email sent.' : 'Failed to deliver email via BergTechno.' };
 }

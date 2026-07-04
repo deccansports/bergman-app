@@ -12,6 +12,62 @@ import { getCalendarEventsAction } from '@/lib/actions/eventActions';
 import type { EventCalendarEntry } from '@/lib/types';
 import { parseISO, isToday, isFuture, isPast, startOfDay, isAfter } from 'date-fns';
 import { useRouter } from 'next/navigation';
+import { isEventHidden } from '@/lib/utils';
+
+function buildEventCategoryDateSummary(event: EventCalendarEntry) {
+  const fallbackDate = String(event?.eventDate || '').trim();
+  const normalizeDateKey = (value: string) => {
+    const normalized = String(value || '').trim();
+    if (!normalized) return '';
+    return normalized.includes('T') ? normalized.slice(0, 10) : normalized;
+  };
+  const getOrdinal = (day: number) => {
+    const mod100 = day % 100;
+    if (mod100 >= 11 && mod100 <= 13) return `${day}th`;
+    const mod10 = day % 10;
+    if (mod10 === 1) return `${day}st`;
+    if (mod10 === 2) return `${day}nd`;
+    if (mod10 === 3) return `${day}rd`;
+    return `${day}th`;
+  };
+
+  const dateKeys = (event.ticketDefinitions || [])
+    .map((ticket) => normalizeDateKey(String(ticket?.eventDate || fallbackDate).trim()))
+    .filter(Boolean)
+    .sort((a, b) => new Date(`${a}T00:00:00Z`).getTime() - new Date(`${b}T00:00:00Z`).getTime());
+
+  const uniqueDateKeys = Array.from(new Set(dateKeys));
+  if (uniqueDateKeys.length === 0) {
+    if (!fallbackDate) return 'Date TBD';
+    const fallback = new Date(`${fallbackDate}T00:00:00Z`);
+    if (Number.isNaN(fallback.getTime())) return 'Date TBD';
+    return `${getOrdinal(fallback.getUTCDate())} ${fallback.toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' })}`;
+  }
+
+  const dates = uniqueDateKeys
+    .map((key) => ({ key, date: new Date(`${key}T00:00:00Z`) }))
+    .filter((item) => !Number.isNaN(item.date.getTime()));
+
+  if (dates.length === 0) return 'Date TBD';
+  if (dates.length === 1) {
+    const d = dates[0].date;
+    return `${getOrdinal(d.getUTCDate())} ${d.toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' })}`;
+  }
+
+  const sameMonthYear = dates.every((item) => item.date.getUTCMonth() === dates[0].date.getUTCMonth() && item.date.getUTCFullYear() === dates[0].date.getUTCFullYear());
+  if (sameMonthYear) {
+    const dayLabels = dates.map((item) => getOrdinal(item.date.getUTCDate()));
+    const joinedDays = dayLabels.length === 2
+      ? `${dayLabels[0]} & ${dayLabels[1]}`
+      : `${dayLabels.slice(0, -1).join(', ')} & ${dayLabels[dayLabels.length - 1]}`;
+    const monthYear = dates[0].date.toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    return `${joinedDays} ${monthYear}`;
+  }
+
+  return dates
+    .map((item) => `${getOrdinal(item.date.getUTCDate())} ${item.date.toLocaleDateString(undefined, { month: 'short', year: 'numeric', timeZone: 'UTC' })}`)
+    .join(' • ');
+}
 
 function RaceTrackingContent() {
   const [liveEvents, setLiveEvents] = useState<EventCalendarEntry[]>([]);
@@ -24,7 +80,7 @@ function RaceTrackingContent() {
       const { events } = await getCalendarEventsAction();
       if (events) {
         const today = startOfDay(new Date());
-        const nonHiddenEvents = events.filter(event => !event.isHidden);
+        const nonHiddenEvents = events.filter(event => !isEventHidden(event));
 
         const currentLiveEvents = nonHiddenEvents.filter(event => 
             event.eventDate && isToday(parseISO(event.eventDate)) && event.liveDataSource !== 'none'
@@ -47,6 +103,18 @@ function RaceTrackingContent() {
                 return isPast(eventStartDate) && !isToday(eventStartDate);
             } catch {
                 return false;
+            }
+        });
+
+        // Sort past events from latest to oldest
+        historicalEvents.sort((a, b) => {
+            if (!a.eventDate || !b.eventDate) return 0;
+            try {
+                const dateA = parseISO(a.eventDate);
+                const dateB = parseISO(b.eventDate);
+                return dateB.getTime() - dateA.getTime(); // Latest first
+            } catch {
+                return 0;
             }
         });
 
@@ -92,7 +160,7 @@ function RaceTrackingContent() {
                     <CardHeader className="p-0 mb-2">
                         <CardTitle className="text-xl font-semibold text-primary">{event.eventName}</CardTitle>
                         <CardDescription className="text-sm">
-                            {event.eventDate ? new Date(event.eventDate + 'T00:00:00Z').toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }) : 'Date TBD'}
+                      {buildEventCategoryDateSummary(event)}
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="flex-grow p-0">
@@ -100,7 +168,7 @@ function RaceTrackingContent() {
                     </CardContent>
                     <CardFooter className="p-0 pt-4 mt-auto">
                         <Button asChild className="w-full">
-                            <Link href={`/tracking/${event.id}`}>
+                          <Link href={`/live-tracking/${event.id}`}>
                                 {title === 'Past Events' ? 'View Results / Replay' : 'Go to Tracking'}
                                 <ArrowRight className="ml-2 h-4 w-4" />
                             </Link>

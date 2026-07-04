@@ -22,6 +22,29 @@ interface BikeCheckinTabProps {
   eventId: string;
 }
 
+const getBelStatus = (participant: EventParticipant | null): string => {
+  if (!participant) return 'Unknown';
+  const fromParticipant = String((participant as any)?.belStatus || (participant as any)?.belTier || '').trim();
+  if (fromParticipant) return fromParticipant;
+  const fromProfile = String((participant as any)?.userProfile?.belStatus || (participant as any)?.userProfile?.belTier || '').trim();
+  if (fromProfile) return fromProfile;
+  const qualified = (participant as any)?.belQualified ?? (participant as any)?.userProfile?.belQualified;
+  if (qualified === true) return 'Qualified';
+  if (qualified === false) return 'Not Qualified';
+  return 'Unknown';
+};
+
+const belBadgeClass = (status: string): string => {
+  const s = status.toLowerCase();
+  if (s.includes('gold')) return 'bg-amber-400/20 text-amber-700 border-amber-500/40';
+  if (s.includes('silver')) return 'bg-slate-300/30 text-slate-700 border-slate-400/40';
+  if (s.includes('bronze')) return 'bg-orange-300/25 text-orange-800 border-orange-500/40';
+  if (s.includes('qualified')) return 'bg-emerald-500/15 text-emerald-700 border-emerald-500/40';
+  if (s.includes('provisional')) return 'bg-sky-500/15 text-sky-700 border-sky-500/40';
+  if (s.includes('not')) return 'bg-rose-500/15 text-rose-700 border-rose-500/40';
+  return 'bg-muted text-muted-foreground border-border';
+};
+
 export default function BikeCheckinTab({ eventId }: BikeCheckinTabProps) {
   const { toast } = useToast();
   const [bikeSearchTerm, setBikeSearchTerm] = useState('');
@@ -159,6 +182,7 @@ export default function BikeCheckinTab({ eventId }: BikeCheckinTabProps) {
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                   <div><p className="text-xs font-semibold text-muted-foreground">BIB</p><p className="font-bold">{bikeSearchedParticipant.bibNumber || 'N/A'}</p></div>
                   <div><p className="text-xs font-semibold text-muted-foreground">Waiver Status</p><div><Badge variant={bikeSearchedParticipant.checkInStatus === 'CheckedIn' ? 'default' : 'destructive'}>{bikeSearchedParticipant.checkInStatus || 'Pending'}</Badge></div></div>
+                  <div><p className="text-xs font-semibold text-muted-foreground">BEL Status</p><div><Badge variant="outline" className={belBadgeClass(getBelStatus(bikeSearchedParticipant))}>{getBelStatus(bikeSearchedParticipant)}</Badge></div></div>
                   <div><p className="text-xs font-semibold text-muted-foreground">Bike Status</p><div><Badge variant={bikeSearchedParticipant.bikeCheckInStatus === 'CheckedIn' ? 'default' : 'secondary'}>{bikeSearchedParticipant.bikeCheckInStatus || 'Pending'}</Badge></div></div>
                   <div><p className="text-xs font-semibold text-muted-foreground">Assigned Rack</p><div>{isLoadingAssignments ? <Loader2 className="h-4 w-4 animate-spin"/> : <Badge variant="outline" className="text-base font-semibold border-primary text-primary">{assignedRackName ? `Rack ${assignedRackName}` : 'N/A'}</Badge>}</div></div>
                 </div>

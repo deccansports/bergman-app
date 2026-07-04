@@ -21,9 +21,11 @@ import { subDays, format } from 'date-fns';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 
-const formatCurrencyLocal = (paisa: number | null | undefined) => {
-  if (paisa === null || paisa === undefined) return '₹0.00';
-  return `₹${(paisa / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatCurrencyLocal = (paisa: number | null | undefined, currency: 'INR' | 'USD' = 'INR') => {
+  if (paisa === null || paisa === undefined) return currency === 'USD' ? '$0.00' : '₹0.00';
+  const locale = currency === 'USD' ? 'en-US' : 'en-IN';
+  const symbol = currency === 'USD' ? '$' : '₹';
+  return `${symbol}${(paisa / 100).toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 interface DeferralRequestModalProps {
@@ -40,6 +42,7 @@ export default function DeferralRequestModal({ isOpen, onClose, eventDetail, onD
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [feeBreakdown, setFeeBreakdown] = useState<PricingBreakdown | null>(null);
   const [isComputing, setIsComputing] = useState(true);
+  const eventCurrency: 'INR' | 'USD' = eventDetail?.currency === 'USD' ? 'USD' : 'INR';
 
   const deadlineDate = useMemo(() => {
     if (!eventDetail?.eventDate) return null;
@@ -54,11 +57,13 @@ export default function DeferralRequestModal({ isOpen, onClose, eventDetail, onD
     
     getServiceFeesAction().then(res => {
       const globalFees = (res.fees as GlobalServiceFees) || ({} as GlobalServiceFees);
+      const isUsd = eventDetail.currency === 'USD';
       const categoryName = (eventDetail.ticketName || '').toUpperCase();
       const typeKey = categoryName.includes('SWIM') ? 'Swimming' : (categoryName.includes('DUATHLON') ? 'Duathlon' : 'Triathlon');
-      const baseFee = (globalFees as any)[typeKey]?.deferralFeePaisa || 200000;
+      const baseFee = isUsd
+        ? ((globalFees as any)[typeKey]?.deferralFeeUsdCents ?? (globalFees as any)?.deferralFeeUsdCents ?? 5000)
+        : ((globalFees as any)[typeKey]?.deferralFeePaisa ?? (globalFees as any)?.deferralFeePaisa ?? 200000);
 
-      const isUsd = eventDetail.currency === 'USD';
       const pricingInput: PricingInput = {
         basePrice: baseFee,
         discount: 0,
@@ -84,9 +89,16 @@ export default function DeferralRequestModal({ isOpen, onClose, eventDetail, onD
         athleteEmail: currentUser.email!,
         athleteName: currentUser.name || 'Athlete',
         totalAmountToChargePaisa: feeBreakdown.totalPayable,
+        originUrl: window.location.origin,
       });
 
       if (!orderResult.success || !orderResult.orderId) throw new Error(orderResult.message);
+
+      if (orderResult.paymentGateway === 'stripe') {
+        if (!orderResult.checkoutUrl) throw new Error('Stripe checkout URL is missing.');
+        window.location.assign(orderResult.checkoutUrl);
+        return;
+      }
 
       const rzp = new (window as any).Razorpay({
         key: orderResult.keyId, amount: orderResult.amount, currency: orderResult.currency,
@@ -163,7 +175,7 @@ export default function DeferralRequestModal({ isOpen, onClose, eventDetail, onD
               <Info className="h-4 w-4" />
               <AlertTitle className="text-xs font-bold uppercase tracking-tight text-left">Future Race Credit</AlertTitle>
               <AlertDescription className="mt-0.5 text-[10px] font-medium text-left">
-                You will receive a credit of <strong>{formatCurrencyLocal(estimatedCreditPaisa)}</strong> valid for next season.
+                You will receive a credit of <strong>{formatCurrencyLocal(estimatedCreditPaisa, eventCurrency)}</strong> valid for next season.
               </AlertDescription>
             </Alert>
 
@@ -171,13 +183,13 @@ export default function DeferralRequestModal({ isOpen, onClose, eventDetail, onD
               <h4 className="text-[10px] font-black uppercase tracking-widest text-muted-foreground text-left">Service Fee Breakdown</h4>
               {isComputing ? <div className="flex justify-center py-2 text-left"><Loader2 className="animate-spin h-5 w-5 text-primary"/></div> : feeBreakdown && (
                 <div className="bg-muted/30 p-4 rounded-2xl space-y-1 text-xs border border-border/50 text-left shadow-inner">
-                  <div className="flex justify-between font-bold uppercase tracking-tight text-left"><span>Processing Base</span><span>{formatCurrencyLocal(feeBreakdown.base)}</span></div>
-                  <div className="flex justify-between text-[10px] text-muted-foreground text-left"><span>Platform & Processing</span><span>{formatCurrencyLocal(feeBreakdown.platformFeeBase + feeBreakdown.processingFeeBase)}</span></div>
-                  <div className="flex justify-between text-[10px] text-muted-foreground text-left"><span>Consolidated GST ({GST_PERCENTAGE}%)</span><span>{formatCurrencyLocal(feeBreakdown.platformGST + feeBreakdown.processingGST + feeBreakdown.eventGST)}</span></div>
+                  <div className="flex justify-between font-bold uppercase tracking-tight text-left"><span>Processing Base</span><span>{formatCurrencyLocal(feeBreakdown.base, eventCurrency)}</span></div>
+                  <div className="flex justify-between text-[10px] text-muted-foreground text-left"><span>Platform & Processing</span><span>{formatCurrencyLocal(feeBreakdown.platformFeeBase + feeBreakdown.processingFeeBase, eventCurrency)}</span></div>
+                  <div className="flex justify-between text-[10px] text-muted-foreground text-left"><span>Consolidated GST ({GST_PERCENTAGE}%)</span><span>{formatCurrencyLocal(feeBreakdown.platformGST + feeBreakdown.processingGST + feeBreakdown.eventGST, eventCurrency)}</span></div>
                   <Separator className="my-2" />
                   <div className="flex justify-between font-black text-primary text-lg italic tracking-tighter text-left">
                     <span>Total Service Fee</span>
-                    <span>{formatCurrencyLocal(feeBreakdown.totalPayable)}</span>
+                    <span>{formatCurrencyLocal(feeBreakdown.totalPayable, eventCurrency)}</span>
                   </div>
                 </div>
               )}

@@ -2,6 +2,7 @@
 import { onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { db } from './firebaseAdmin';
 import { formatSecondsToHMS } from './utils';
+import { syncFinisherToKV } from './kv-service';
 
 export const pushFinishLineEntry = onDocumentUpdated(
   "events/{eventId}/liveAthletes/{bib}", // Correct trigger path
@@ -56,6 +57,15 @@ export const pushFinishLineEntry = onDocumentUpdated(
     await feedRef.add(newEntry);
     console.log(`Added finisher ${newEntry.name} (BIB: ${newEntry.bib}) to LED feed for event ${eventId}.`);
 
+    // AUTO-SYNC: Also add to KV for instant LED display updates (zero lag)
+    try {
+      await syncFinisherToKV(eventId, newEntry);
+      console.log(`[KV SYNC] Synced finisher ${newEntry.name} to KV for instant LED display`);
+    } catch (kvError: any) {
+      console.error(`[KV SYNC ERROR] Failed to sync to KV: ${kvError.message}`);
+      // Non-blocking error - LED still works from Firestore if KV fails
+    }
+
     const MAX_FINISHERS_IN_FEED = 6;
     const snapshot = await feedRef.orderBy("timestamp", "asc").get();
     
@@ -70,3 +80,4 @@ export const pushFinishLineEntry = onDocumentUpdated(
     }
   }
 );
+

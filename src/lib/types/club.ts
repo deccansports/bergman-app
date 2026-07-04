@@ -1,6 +1,18 @@
 
 // src/lib/types/club.ts
 
+export interface ClubOwnershipHistoryEntry {
+  previousOwnerUid: string;
+  previousOwnerEmail: string;
+  previousOwnerName?: string | null;
+  newOwnerUid: string;
+  newOwnerEmail: string;
+  newOwnerName?: string | null;
+  transferredAt: string;
+  transferredBy: string; // Admin email who made the transfer
+  reason?: string | null;
+}
+
 export interface Club {
   id: string;
   name: string;
@@ -19,6 +31,7 @@ export interface Club {
   createdAt?: string | null; 
   updatedAt?: string | null; 
   encouragementEmailsSent?: { month: string; count: number };
+  ownershipHistory?: ClubOwnershipHistoryEntry[];
 }
 
 export interface ClubRankingEntry {
@@ -63,6 +76,7 @@ export interface ClubMemberPerformanceForAdmin {
   racesFinishedInSelectedYear: number;
   clubRankForSelectedYear?: number;
   clubAffiliationDate?: string | null;
+  clubLeftDate?: string | null;
 }
 
 export interface ClubDashboardData {
@@ -95,11 +109,12 @@ export interface ClubDashboardUpcomingRegistration {
 
 export interface RegisterClubExistingUserInput {
   clubName: string;
+  coachName: string;
   clubContactEmail: string;
   clubContactMobile: string;
   instagramUrl?: string | null;
   facebookUrl?: string | null;
   country: string;
   city: string;
-  state: string;
+  state?: string | null;
 }

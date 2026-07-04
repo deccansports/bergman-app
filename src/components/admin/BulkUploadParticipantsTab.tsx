@@ -88,24 +88,31 @@ export default function BulkUploadParticipantsTab({ events, isLoadingEvents, onD
         const jobId = result.jobId;
 
         const intervalId = setInterval(async () => {
-            const statusRes = await fetch(`/api/admin/upload-status/${jobId}`);
-            if (!statusRes.ok) {
+            try {
+                const statusRes = await fetch(`/api/admin/upload-status/${jobId}`);
+                if (!statusRes.ok) {
+                    clearInterval(intervalId);
+                    setBulkUploadStatus('failed');
+                    setBulkUploadFinalMessage('Failed to get job status.');
+                    return;
+                }
+
+                const jobData = await statusRes.json();
+                setBulkUploadProgress(jobData.progress || 0);
+                setBulkUploadResults(jobData.results || []);
+
+                if (jobData.status === 'completed' || jobData.status === 'failed') {
+                    clearInterval(intervalId);
+                    setBulkUploadStatus(jobData.status);
+                    setBulkUploadFinalMessage(jobData.message || 'Processing finished.');
+                    if (jobData.status === 'completed') {
+                        onDataRefresh();
+                    }
+                }
+            } catch {
                 clearInterval(intervalId);
                 setBulkUploadStatus('failed');
-                setBulkUploadFinalMessage('Failed to get job status.');
-                return;
-            }
-            const jobData = await statusRes.json();
-            setBulkUploadProgress(jobData.progress || 0);
-            setBulkUploadResults(jobData.results || []);
-
-            if (jobData.status === 'completed' || jobData.status === 'failed') {
-                clearInterval(intervalId);
-                setBulkUploadStatus(jobData.status);
-                setBulkUploadFinalMessage(jobData.message || 'Processing finished.');
-                if (jobData.status === 'completed') {
-                    onDataRefresh();
-                }
+                setBulkUploadFinalMessage('Error while checking upload status.');
             }
         }, 2000);
 

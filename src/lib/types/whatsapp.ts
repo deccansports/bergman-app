@@ -7,6 +7,7 @@ export interface CampaignLogEntry {
   recipientName: string;
   subject?: string;
   templateName?: string;
+  hasAttachment?: boolean;
   eventId: string;
   eventName: string;
   ticketNames?: string;

@@ -11,7 +11,7 @@ import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useMemo, useState } from 'react';
 import { isBefore, parseISO, startOfDay } from 'date-fns';
-import { cn } from "@/lib/utils";
+import { cn, isEventHidden } from "@/lib/utils";
 
 import { ThemeToggle } from "@/components/layout/ThemeToggle";
 import { MobileNav } from "@/components/layout/MobileNav";
@@ -54,7 +54,8 @@ import {
   Minus,
   ArrowRight,
   X,
-  History
+  History,
+  Camera
 } from 'lucide-react';
 import type { EventCalendarEntry, Page } from '@/lib/types';
 import { Separator } from "../ui/separator";
@@ -97,7 +98,7 @@ export function AppHeader({
     if (!Array.isArray(initialNavEvents)) return [];
     const now = new Date();
     return initialNavEvents.filter(event => {
-      if (event.isHidden) return false;
+      if (isEventHidden(event)) return false;
       if (!event.eventDate) return true; // Keep TBD events
       try {
         const eventDate = parseISO(event.eventDate);
@@ -354,6 +355,12 @@ export function AppHeader({
                      <Link href="/orders">
                         <History className="mr-2 h-4 w-4" />
                         <span>My Orders</span>
+                     </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild className="cursor-pointer m-1 rounded">
+                     <Link href="/race-photos">
+                        <Camera className="mr-2 h-4 w-4" />
+                        <span>Race Photos</span>
                      </Link>
                   </DropdownMenuItem>
                 {currentUser.ownedClubId && (

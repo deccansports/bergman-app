@@ -2,6 +2,14 @@
 import type { ActiveDeferralInfo } from './deferral';
 import type { ActiveCancellationInfo } from './analytics';
 
+export interface ClubHistoryEntry {
+  clubId: string;
+  clubName: string;
+  joinedAt: string; // ISO date string
+  leftAt?: string | null; // ISO date string, null if currently active
+  isActive: boolean;
+}
+
 export interface User {
   id: string; 
   uid: string; 
@@ -23,11 +31,17 @@ export interface User {
   pincode?: string | null;
   emergencyContactNumber?: string | null;
   idProofUrl?: string | null;
-  upcomingEvents?: { eventId: string; eventName: string; bookingId?: string; registeredDate?: string }[];
+  liveTrackingPrivacy?: 'PUBLIC' | 'PRIVATE' | null;
+  upcomingEvents?: { eventId: string; eventName: string; eventDate?: string; bookingId?: string; registeredDate?: string; bibNumber?: string; ticketCategory?: string; raceCategory?: string }[];
   isBlacklisted?: boolean;
   blacklistReason?: string | null;
   blacklistedAt?: string | null;
-  gstin?: string | null; 
+  gstin?: string | null;
+  businessName?: string | null;
+  businessAddress?: string | null;
+  businessCity?: string | null;
+  businessState?: string | null;
+  businessPincode?: string | null; 
 
   ownedClubId?: string | null;
   ownedClubName?: string | null;
@@ -37,7 +51,8 @@ export interface User {
 
   clubId?: string | null;
   clubName?: string | null;
-  clubAffiliationDate?: string | null; 
+  clubAffiliationDate?: string | null;
+  clubHistory?: ClubHistoryEntry[];
 
   activeDeferral?: ActiveDeferralInfo | null;
   activeCancellation?: ActiveCancellationInfo | null;
@@ -45,7 +60,9 @@ export interface User {
   createdAt?: any; 
   updatedAt?: any; 
   isAdmin?: boolean;
+  adminAccessMode?: "view" | "edit" | null;
   isVolunteer?: boolean;
+  volunteerActive?: boolean;
   assignedEventId?: string | null;
   assignedEventName?: string | null;
   assignedEventDate?: string | null;

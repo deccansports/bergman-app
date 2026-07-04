@@ -49,6 +49,7 @@ export interface ActiveDeferralInfo {
   deferralId: string;
   participantName?: string | null;
   originalEventName: string;
+  originalEventId?: string | null;
   originalEventDate: string | null;
   originalTicketId?: string | null;
   originalAmountPaidPaisa?: number | null;

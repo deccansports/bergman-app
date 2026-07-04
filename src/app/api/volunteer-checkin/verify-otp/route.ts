@@ -73,8 +73,9 @@ export async function POST(request: Request) {
     await updateInventoryStockAction(eventId, 'Bag', 'EventBag', -1, 'issued', 'increment');
     
     const eventSnap = await adminDb.collection('events').doc(eventId).get();
-    const eventName = eventSnap.data()?.eventName || 'the event';
-    const eventDate = eventSnap.data()?.eventDate || 'TBD';
+    const eventData = eventSnap.data() as Record<string, any> | undefined;
+    const eventName = eventData?.eventName || participant.eventName || 'the event';
+    const eventDate = eventData?.eventDate || participant.eventDate || 'TBD';
 
     // Pass all required params to the email function
     await sendWaiverCheckedInEmail(
@@ -85,7 +86,11 @@ export async function POST(request: Request) {
         eventDate,
         participant.address,
         participant.mobile,
-        participant.emergencyContactNumber
+      participant.emergencyContactNumber,
+      participant.organizerName || eventData?.organizerName || null,
+      participant.organizerAddress || eventData?.organizerAddress || null,
+      participant.organizerCompanyDescription || eventData?.organizerCompanyDescription || null,
+      participant.country || eventData?.country || 'India'
     );
     if (participant.mobile) {
       await sendWaiverCheckInConfirmationWhatsApp(participant.mobile, participant.name, eventName, participant.ticketName || 'N/A');

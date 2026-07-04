@@ -355,7 +355,7 @@ export default function YearlyRecapTab() {
             <CardFooter className="bg-muted/30 border-t py-4 text-left">
                 <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground flex items-center gap-2 text-left">
                     <Info className="h-3.5 w-3.5 text-primary"/>
-                    Broadcasts utilize Brevo dynamic templates. Test your layout before sending mass summaries.
+                    Broadcasts utilize BergTechno dynamic templates. Test your layout before sending mass summaries.
                 </p>
             </CardFooter>
         </Card>

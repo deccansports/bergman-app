@@ -1,11 +1,11 @@
 // src/functions/src/auth/authConfig.ts
 
-const brevoFeedbackCouponTemplateId = 250;
+const feedbackCouponTemplateId = 250;
 const aisensyFeedbackCouponCampaignName = 'feedback_coupon';
 
 export const authOtpConfig = {
   brevo: {
-    feedbackCouponTemplateId: brevoFeedbackCouponTemplateId,
+    feedbackCouponTemplateId,
   },
   aisensy: {
     feedbackCouponCampaignName: aisensyFeedbackCouponCampaignName,

@@ -4,6 +4,7 @@ import { getAuthInstance, getFirestoreInstance } from '@/lib/firebaseAdmin';
 import { findPaymentByReference } from "@/lib/zoho/fetch";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 /**
  * API Route: Search Zoho Payments by Reference
@@ -11,6 +12,14 @@ export const dynamic = "force-dynamic";
  * Secure endpoint for admins to verify if a payment exists in Zoho Books.
  */
 export async function GET(req: Request) {
+  // Safety check for Firebase configuration
+  if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+    return NextResponse.json(
+      { error: 'Firebase not configured', status: 'unavailable' },
+      { status: 503 }
+    );
+  }
+  
   try {
     // 🔐 Admin Security Check
     const authHeader = req.headers.get('Authorization');

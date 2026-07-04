@@ -136,14 +136,14 @@ export default function VolunteerDashboardPage() {
     );
   }
 
-  if (!currentUser || !currentUser.isVolunteer) {
+    if (!currentUser || !currentUser.isVolunteer || currentUser.volunteerActive === false) {
     return (
         <Card className="shadow-xl rounded-xl my-8">
             <CardHeader className="bg-destructive/10">
                 <CardTitle className="text-destructive text-center">Access Denied</CardTitle>
             </CardHeader>
             <CardContent className="text-center py-6">
-                <p>You are not authorized to view this page.</p>
+          <p>{currentUser?.volunteerActive === false ? 'Your volunteer access is currently inactive.' : 'You are not authorized to view this page.'}</p>
             </CardContent>
         </Card>
     );

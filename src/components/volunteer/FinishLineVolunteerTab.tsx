@@ -13,7 +13,8 @@ import { Badge } from '@/components/ui/badge';
 import { Loader2, Award, Search as SearchIcon, RefreshCw } from 'lucide-react';
 import { getEventDetailsWithTicketsAction } from '@/lib/actions';
 import { Input } from '@/components/ui/input';
-import AthleteDetailModal from '@/components/live-tracking/AthleteDetailModal';
+import AthleteLiveModalPro from '@/components/live-tracking/AthleteLiveModalPro';
+import { normalizeStatus, isFinalRaceStatus } from '@/lib/utils';
 
 interface FinishLineVolunteerTabProps {
   eventId: string;
@@ -59,11 +60,11 @@ export default function FinishLineVolunteerTab({ eventId }: FinishLineVolunteerT
 
   const { totalParticipants, onCourseCount, finishedCount, dnfCount, approachingAthletes } = useMemo(() => {
     const total = liveData.length;
-    const onCourse = liveData.filter(p => p.status === 'On Course').length;
-    const finished = liveData.filter(p => p.status === 'Finished').length;
-    const dnf = liveData.filter(p => p.status.startsWith('DNF')).length;
+    const onCourse = liveData.filter(p => normalizeStatus(p.status) === 'On Course').length;
+    const finished = liveData.filter(p => normalizeStatus(p.status) === 'Finished').length;
+    const dnf = liveData.filter(p => isFinalRaceStatus(p.status) && normalizeStatus(p.status) !== 'Finished').length;
     const approaching = liveData
-        .filter(p => p.status === 'On Course' && p.etaFinishUTC)
+        .filter(p => normalizeStatus(p.status) === 'On Course' && p.etaFinishUTC)
         .sort((a, b) => (a.etaFinishUTC || Infinity) - (b.etaFinishUTC || Infinity))
         .slice(0, 10);
     return { totalParticipants: total, onCourseCount: onCourse, finishedCount: finished, dnfCount: dnf, approachingAthletes: approaching };
@@ -73,7 +74,8 @@ export default function FinishLineVolunteerTab({ eventId }: FinishLineVolunteerT
       if (!searchTerm) return approachingAthletes;
       return approachingAthletes.filter(athlete =>
         athlete.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        athlete.bib.toLowerCase().includes(searchTerm.toLowerCase())
+        athlete.bib.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        normalizeStatus(athlete.status).toLowerCase().includes(searchTerm.toLowerCase())
       );
   }, [approachingAthletes, searchTerm]);
 
@@ -89,7 +91,7 @@ export default function FinishLineVolunteerTab({ eventId }: FinishLineVolunteerT
          <div className="flex justify-between items-start">
           <div>
             <CardTitle className="flex items-center gap-2"><Award className="h-5 w-5 text-primary"/>Finish Line Announcer</CardTitle>
-            <CardDescription>View athletes approaching the finish line to announce their names.</CardDescription>
+            <CardDescription>View Feibot-backed athletes approaching the finish line and confirm final statuses.</CardDescription>
           </div>
           <Button onClick={() => fetchLiveAndEventData(true)} disabled={isLoading} variant="outline" size="sm">
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin"/> : <RefreshCw className="h-4 w-4"/>}
@@ -135,7 +137,9 @@ export default function FinishLineVolunteerTab({ eventId }: FinishLineVolunteerT
                                 {athlete.etaFinishUTC && athlete.startTime ? formatSecondsToHMS(new Date(athlete.etaFinishUTC * 1000).getTime()/1000 - athlete.startTime) : 'N/A'}
                             </TableCell>
                             <TableCell>
-                                <Badge className="bg-green-600 text-white animate-pulse">Approaching</Badge>
+                              <Badge className={normalizeStatus(athlete.status) === 'Finished' ? 'bg-green-600 text-white' : 'bg-blue-600 text-white animate-pulse'}>
+                                {normalizeStatus(athlete.status) === 'Finished' ? 'Finished' : 'Approaching'}
+                              </Badge>
                             </TableCell>
                         </TableRow>
                     ))}
@@ -144,11 +148,13 @@ export default function FinishLineVolunteerTab({ eventId }: FinishLineVolunteerT
          </div>
       </CardContent>
     </Card>
-    <AthleteDetailModal 
-        isOpen={!!selectedAthlete}
+    <AthleteLiveModalPro 
+        open={!!selectedAthlete}
         onClose={() => setSelectedAthlete(null)}
         athlete={selectedAthlete}
         ticketDef={selectedAthleteTicketDef}
+        eventId=""
+        bookingId=""
     />
     </>
   );

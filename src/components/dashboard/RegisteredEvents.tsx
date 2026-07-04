@@ -10,8 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Loader2, ClipboardList, RotateCcw, XCircle, RepeatIcon, Eye, Map, CalendarSearch, Info } from 'lucide-react';
-import { format, parseISO, isBefore, startOfDay } from 'date-fns';
+import { Loader2, ClipboardList, RotateCcw, XCircle, RepeatIcon, Eye, Map, CalendarSearch, Info, Download } from 'lucide-react';
+import { format, parseISO, parse, isValid, isBefore, startOfDay } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import Link from 'next/link';
@@ -73,7 +73,7 @@ export default function RegisteredEvents() {
     setIsLoading(true);
     setError(null);
     try {
-      const result = await getAthleteRegisteredEventsAction(currentUser.uid);
+      const result = await getAthleteRegisteredEventsAction(currentUser.uid, currentUser.email || null);
       if (result.success && result.events) {
         setRegisteredEvents(result.events);
       } else {
@@ -84,7 +84,7 @@ export default function RegisteredEvents() {
     } finally {
       setIsLoading(false);
     }
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, currentUser?.email]);
 
   useEffect(() => {
     fetchRegisteredEvents();
@@ -114,21 +114,63 @@ export default function RegisteredEvents() {
   const upcomingRegistrations = useMemo(() => {
     const today = startOfDay(new Date());
     return registeredEvents.filter(event => {
-        if (event.ticketStatus !== 'Active' && event.ticketStatus !== 'Confirmed') return false;
+        const status = String(event.ticketStatus || '').trim().toLowerCase();
+        const isTerminalStatus =
+          status.includes('cancel') ||
+          status.includes('defer') ||
+          status.includes('refund') ||
+          status.includes('inactive') ||
+          status.includes('failed') ||
+          status.includes('expired');
+        if (isTerminalStatus) return false;
+
+        const isCompletedStatus =
+          status.includes('finish') ||
+          status.includes('completed') ||
+          status === 'dnf' ||
+          status === 'dns';
+        if (isCompletedStatus) return false;
+
+        // Upcoming view should not show past events.
         if (!event.eventDate || event.eventDate === 'TBD') return true;
-        return !isBefore(parseISO(event.eventDate), today);
+
+        const rawDate = String(event.eventDate || '').trim();
+        let parsedDate = parseISO(rawDate);
+        if (!isValid(parsedDate)) parsedDate = parse(rawDate, 'dd/MM/yy', new Date());
+        if (!isValid(parsedDate)) parsedDate = parse(rawDate, 'dd/MM/yyyy', new Date());
+        if (!isValid(parsedDate)) return true;
+
+        return !isBefore(startOfDay(parsedDate), today);
     });
   }, [registeredEvents]);
+
+  const displayRegistrations = useMemo(() => upcomingRegistrations, [upcomingRegistrations]);
 
   const handleOpenCancellationModal = (eventDetail: AthleteRegisteredEventDetail) => {
     setCancellationTargetEvent(eventDetail);
     setIsCancellationModalOpen(true);
   };
   const handleOpenDeferralModal = (eventDetail: AthleteRegisteredEventDetail) => {
+    if (!eventDetail.canBeDeferred) {
+      toast({
+        variant: 'destructive',
+        title: 'Deferral window closed',
+        description: 'This registration is no longer within the deferral window.',
+      });
+      return;
+    }
     setDeferralTargetEvent(eventDetail);
     setIsDeferralModalOpen(true);
   };
   const handleOpenCategoryChangeModal = (eventDetail: AthleteRegisteredEventDetail) => {
+    if (!eventDetail.canChangeCategory) {
+      toast({
+        variant: 'destructive',
+        title: 'Category change window closed',
+        description: 'This registration is no longer within the category change window.',
+      });
+      return;
+    }
     setCategoryChangeTargetEvent(eventDetail);
     setIsCategoryChangeModalOpen(true);
   };
@@ -163,8 +205,26 @@ export default function RegisteredEvents() {
   };
 
   if (isLoading) return <EventsSkeleton />;
+
+  if (error) {
+    return (
+      <Card className="shadow-lg border-destructive/20 bg-destructive/5 text-left w-full">
+        <CardHeader>
+          <CardTitle className="text-2xl font-bold tracking-tight text-destructive flex items-center gap-2">
+            <ClipboardList className="h-6 w-6" />
+            Your Upcoming Registrations
+          </CardTitle>
+          <CardDescription>Could not load registrations right now.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-destructive mb-4">{error}</p>
+          <Button onClick={() => fetchRegisteredEvents()} variant="outline">Retry</Button>
+        </CardContent>
+      </Card>
+    );
+  }
   
-  if (upcomingRegistrations.length === 0) {
+  if (displayRegistrations.length === 0) {
     return (
       <Card className="shadow-lg border-primary/20 bg-primary/5 text-left w-full">
         <CardHeader>
@@ -189,70 +249,77 @@ export default function RegisteredEvents() {
 
   return (
     <>
-      <Card className="shadow-lg border-primary/20 bg-blue-50/30 text-left w-full border-none">
-        <CardHeader>
-          <CardTitle className="text-2xl font-bold tracking-tight text-primary flex items-center gap-2">
+      <Card className="w-full overflow-hidden border border-primary/20 bg-gradient-to-br from-sky-50 via-background to-indigo-50 shadow-xl shadow-primary/10 dark:border-primary/30 dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950/40">
+        <CardHeader className="border-b border-border/40 bg-background/70 backdrop-blur-sm dark:bg-background/30">
+          <CardTitle className="flex items-center gap-2 text-2xl font-black tracking-tight text-primary">
             <ClipboardList className="h-6 w-6" />
             Your Upcoming Registrations
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-sm text-muted-foreground">
             Manage your active registrations for upcoming events. Past races can be found in your Race History and My Orders.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-            <div className="overflow-x-auto rounded-xl border bg-background shadow-sm">
+        <CardContent className="p-4 sm:p-6">
+            <div className="overflow-x-auto rounded-2xl border border-border/50 bg-background/95 shadow-sm dark:bg-slate-900/80">
               <Table>
-                <TableHeader className="bg-muted/50">
+                <TableHeader className="bg-muted/60 dark:bg-slate-800/80">
                   <TableRow className="h-12 border-b text-[10px] font-black uppercase tracking-widest">
                     <TableHead className="pl-6">Event Name</TableHead>
                     <TableHead>Event Date</TableHead>
                     <TableHead>Your Ticket</TableHead>
                     <TableHead>BIB NO</TableHead>
+                    <TableHead>Booking ID</TableHead>
                     <TableHead className="text-right pr-6">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {upcomingRegistrations.map((event) => {
+                  {displayRegistrations.map((event) => {
                     const hasCourseMaps = !!event.ticketDefinitions?.some(td => 
                       td.courseMaps?.swimGpxUrl || td.courseMaps?.bikeGpxUrl || td.courseMaps?.runGpxUrl || td.courseMaps?.run1GpxUrl || td.courseMaps?.run2GpxUrl
                     );
 
                     return (
                       <TableRow key={event.participantId} className="h-16 hover:bg-muted/30 transition-colors border-border/50 text-xs">
-                          <TableCell className="pl-6 font-black uppercase tracking-tight text-foreground">{event.eventName}</TableCell>
-                          <TableCell className="font-bold text-slate-500">
+                          <TableCell className="pl-6 font-black uppercase tracking-tight text-foreground">
+                            {event.eventName}
+                          </TableCell>
+                          <TableCell className="font-bold text-muted-foreground">
                             {event.eventDate ? format(parseISO(event.eventDate), 'dd MMM yyyy') : 'TBD'}
                           </TableCell>
                           <TableCell className="font-black uppercase text-[10px] text-primary">{event.ticketName}</TableCell>
                           <TableCell className="font-mono text-lg font-black text-primary italic">
                             {event.athleteBibNumber || 'TBD'}
                           </TableCell>
+                          <TableCell className="font-mono font-bold text-muted-foreground">
+                            {event.bookingId || '—'}
+                          </TableCell>
                           <TableCell className="text-right pr-6">
-                            <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                                <Button variant="outline" size="xs" className="h-8 rounded-lg font-black uppercase text-[9px] tracking-widest gap-1.5 border-border/50" onClick={() => handleViewRegistration(event)}>
+                            <div className="ml-auto flex max-w-[460px] flex-wrap items-center justify-end gap-2">
+                                <Button variant="outline" size="xs" className="h-8 w-[94px] justify-center rounded-lg border-border/50 text-[9px] font-black uppercase tracking-widest gap-1.5" onClick={() => handleViewRegistration(event)}>
                                     <Eye className="h-3 w-3" /> View
                                 </Button>
+                                {!!event.bookingId && (!!event.invoiceNumber || !!event.invoiceId) && (
+                                    <Button asChild variant="outline" size="xs" className="h-8 w-[94px] justify-center rounded-lg border-emerald-300 text-[9px] font-black uppercase tracking-widest gap-1.5 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/40">
+                                      <a href={`/api/invoice/${event.bookingId}${event.eventId ? `?eventId=${encodeURIComponent(event.eventId)}` : ''}`} target="_blank" rel="noopener noreferrer">
+                                        <Download className="h-3 w-3" /> Invoice
+                                      </a>
+                                    </Button>
+                                )}
                                 {hasCourseMaps && (
-                                    <Button variant="outline" size="xs" className="h-8 rounded-lg font-black uppercase text-[9px] tracking-widest gap-1.5 text-sky-600 border-sky-200 hover:bg-sky-50" onClick={() => handleOpenCourseMapModal(event)}>
+                                    <Button variant="outline" size="xs" className="h-8 w-[94px] justify-center rounded-lg border-sky-200 text-[9px] font-black uppercase tracking-widest gap-1.5 text-sky-600 hover:bg-sky-50 dark:text-sky-300 dark:border-sky-800 dark:hover:bg-sky-950/40" onClick={() => handleOpenCourseMapModal(event)}>
                                         <Map className="h-3 w-3" /> Map
                                     </Button>
                                 )}
-                                {event.canBeDeferred && (
-                                    <Button variant="outline" size="xs" className="h-8 rounded-lg font-black uppercase text-[9px] tracking-widest gap-1.5 text-orange-600 border-orange-200 hover:bg-orange-50" onClick={() => handleOpenDeferralModal(event)}>
-                                        <RotateCcw className="h-3 w-3" /> Defer
-                                    </Button>
-                                )}
-                                {event.canBeCancelled && (
-                                    <Button variant="outline" size="xs" className="h-8 rounded-lg font-black uppercase text-[9px] tracking-widest gap-1.5 text-red-600 border-red-200 hover:bg-red-50" onClick={() => handleOpenCancellationModal(event)} disabled={!!event.previousDeferralDetails || !(event.amountPaidPaisa && event.amountPaidPaisa > 0)}>
-                                        <XCircle className="h-3 w-3" /> Cancel
-                                    </Button>
-                                )}
-                                {event.canChangeCategory && (
-                                    <Button variant="outline" size="xs" className="h-8 rounded-lg font-black uppercase text-[9px] tracking-widest gap-1.5 text-purple-600 border-purple-200 hover:bg-purple-50" onClick={() => handleOpenCategoryChangeModal(event)}>
-                                        <RepeatIcon className="h-3 w-3" /> Change
-                                    </Button>
-                                )}
-                                <Button asChild variant="ghost" size="xs" className="h-8 rounded-lg font-black uppercase text-[9px] tracking-widest gap-1.5 hover:bg-muted/50">
+                                <Button variant="outline" size="xs" className="h-8 w-[94px] justify-center rounded-lg border-orange-200 text-[9px] font-black uppercase tracking-widest gap-1.5 text-orange-600 hover:bg-orange-50 dark:text-orange-300 dark:border-orange-800 dark:hover:bg-orange-950/40" onClick={() => handleOpenDeferralModal(event)}>
+                                  <RotateCcw className="h-3 w-3" /> Defer
+                                </Button>
+                                <Button variant="outline" size="xs" className="h-8 w-[94px] justify-center rounded-lg border-red-200 text-[9px] font-black uppercase tracking-widest gap-1.5 text-red-600 hover:bg-red-50 dark:text-red-300 dark:border-red-800 dark:hover:bg-red-950/40" onClick={() => handleOpenCancellationModal(event)}>
+                                  <XCircle className="h-3 w-3" /> Cancel
+                                </Button>
+                                <Button variant="outline" size="xs" className="h-8 w-[94px] justify-center rounded-lg border-purple-200 text-[9px] font-black uppercase tracking-widest gap-1.5 text-purple-600 hover:bg-purple-50 dark:text-purple-300 dark:border-purple-800 dark:hover:bg-purple-950/40" onClick={() => handleOpenCategoryChangeModal(event)}>
+                                  <RepeatIcon className="h-3 w-3" /> Change
+                                </Button>
+                                <Button asChild variant="outline" size="xs" className="h-8 w-[94px] justify-center rounded-lg border-border/60 text-[9px] font-black uppercase tracking-widest gap-1.5 hover:bg-muted/50 dark:border-border/70">
                                     <Link href={`/races/${event.customSlug || event.eventId}`}><Info className="h-3 w-3" /> Info</Link>
                                 </Button>
                             </div>

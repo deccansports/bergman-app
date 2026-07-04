@@ -51,12 +51,29 @@ export interface CancellationEntry {
   id: string;
   userId: string;
   eventId: string;
+  participantDocId?: string;
   participantEmail: string;
   participantName: string | null;
   eventName: string;
   eventDate: string;
-  originalAmountPaidPaisa: number;
-  calculatedRefundAmountPaisa: number;
+  currency?: string;                    // 'INR' | 'USD'
+  originalAmountPaidPaisa: number;      // paisa for INR, cents for USD
+  calculatedRefundAmountPaisa: number;  // paisa for INR, cents for USD
+  sourcePaymentId?: string | null;
+  sourcePaymentMethod?: string | null;
+  sourceInvoiceId?: string | null;
+  sourceInvoiceNumber?: string | null;
+  refundMode?: 'manual' | 'razorpay_calculated' | 'razorpay_custom' | 'stripe_calculated' | 'stripe_custom' | null;
+  refundedAmountPaisa?: number | null;
+  refundDestination?: string | null;
+  stripeCreditNoteId?: string | null;
+  stripeCreditNoteNumber?: string | null;
+  stripeCreditNoteStatus?: 'created' | 'failed' | 'skipped' | null;
+  stripeCreditNoteError?: string | null;
+  zohoCreditNoteId?: string | null;
+  zohoCreditNoteNumber?: string | null;
+  zohoCreditNoteStatus?: 'created' | 'failed' | 'skipped' | null;
+  zohoCreditNoteError?: string | null;
   refundPolicyApplied: string;
   requestedAt: string;
   status: 'Requested' | 'Processing' | 'Refunded' | 'Denied';
@@ -69,6 +86,7 @@ export interface CancellationEntry {
   refundInitiatedDate: string | null;
   refundProcessedAt: string | null;
   refundTransactionId: string | null;
+  refundRrn?: string | null;
 }
 
 export interface GlobalServiceFees {
@@ -83,6 +101,9 @@ export interface GlobalServiceFees {
 export interface ServiceFeeConfig {
   deferralFeePaisa: number;
   categoryChangeFeePaisa: number;
+  deferralFeeUsdCents?: number;       // USD deferral fee, e.g. 5000 = $50
+  categoryChangeFeeUsdCents?: number; // USD category-change fee, e.g. 5000 = $50
+  minimumAgeYears?: number;
 }
 
 export interface CancellationStats {
@@ -102,6 +123,11 @@ export interface ActiveCancellationInfo {
   gstOriginallyPaid?: string | null;
   refundInitiatedDate?: string | null;
   refundTransactionId?: string | null;
+  refundMode?: 'manual' | 'razorpay_calculated' | 'razorpay_custom' | 'stripe_calculated' | 'stripe_custom' | null;
+  refundDestination?: string | null;
+  refundedAmountPaisa?: number | null;
+  refundProcessedAt?: string | null;
+  refundRrn?: string | null;
 }
 
 export interface RepeatedAthleteInfo {

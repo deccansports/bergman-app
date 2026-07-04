@@ -7,6 +7,11 @@ import { revalidatePath } from 'next/cache';
 import type { RegistrationAttempt, PublicEventRegistrationFormInputClient } from '@/lib/types';
 import { serializeValue } from '@/lib/utils';
 
+function isParticipantActiveStatus(status: any): boolean {
+  const raw = String(status || '').trim().toLowerCase();
+  return !(raw === 'cancelled' || raw === 'refunded' || raw === 'inactive');
+}
+
 export async function getRegistrationAttemptsAction(eventId?: string): Promise<{
   success: boolean;
   message: string;
@@ -32,6 +37,77 @@ export async function getRegistrationAttemptsAction(eventId?: string): Promise<{
     const attempts: RegistrationAttempt[] = snapshot.docs.map(doc => {
       return serializeValue({ id: doc.id, ...doc.data() }) as RegistrationAttempt;
     });
+
+    const reconcileWrites: Promise<any>[] = [];
+
+    for (let i = 0; i < attempts.length; i++) {
+      const attempt = attempts[i];
+      const status = String(attempt.status || '').trim();
+      if (status !== 'RegistrationFailed' && status !== 'PaymentCaptured') continue;
+      if (!attempt.eventId) continue;
+
+      const participantsCol = adminDb.collection('events').doc(attempt.eventId).collection('participants');
+
+      let matchedParticipantDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+
+      const txId = String(attempt.transactionId || '').trim();
+      if (txId) {
+        const byTxSnap = await participantsCol.where('transactionId', '==', txId).limit(1).get();
+        if (!byTxSnap.empty) matchedParticipantDoc = byTxSnap.docs[0];
+      }
+
+      if (!matchedParticipantDoc) {
+        const normalizedEmail = String(attempt.email || '').trim().toLowerCase();
+        if (normalizedEmail) {
+          const byEmailSnap = await participantsCol.where('email', '==', normalizedEmail).limit(25).get();
+          const matched = byEmailSnap.docs.find((doc) => {
+            const data = doc.data() as any;
+            const sameTicket = String(data?.ticketId || '') === String(attempt.ticketId || '');
+            const sameSubCategory = String(data?.selectedSubCategory || '') === String(attempt.selectedSubCategory || '');
+            const isActive = isParticipantActiveStatus(data?.ticketStatus);
+            return sameTicket && sameSubCategory && isActive;
+          });
+          if (matched) matchedParticipantDoc = matched;
+        }
+      }
+
+      if (!matchedParticipantDoc) continue;
+
+      const participantData = matchedParticipantDoc.data() as any;
+      const participantId = matchedParticipantDoc.id;
+      const bookingId = participantData?.bookingId || null;
+      const bibNumber = participantData?.bibNumber || null;
+
+      attempts[i] = {
+        ...attempt,
+        status: 'Completed',
+        participantId,
+        bookingId,
+        bibNumber,
+        manualRegistrationExists: true,
+      };
+
+      const attemptRef = adminDb.collection('registrationAttempts').doc(attempt.id);
+      reconcileWrites.push(
+        attemptRef.set({
+          status: 'Completed',
+          participantId,
+          bookingId,
+          bibNumber,
+          manualRegistrationExists: true,
+          duplicateSuppressed: true,
+          lastError: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+          autoReconciledAt: FieldValue.serverTimestamp(),
+          autoReconciledBy: 'getRegistrationAttemptsAction',
+        }, { merge: true })
+      );
+    }
+
+    if (reconcileWrites.length > 0) {
+      await Promise.all(reconcileWrites);
+      revalidatePath('/admin/dashboard');
+    }
 
     return { success: true, message: 'Attempts fetched.', attempts };
   } catch (e: any) {

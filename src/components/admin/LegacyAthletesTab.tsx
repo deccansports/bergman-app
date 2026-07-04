@@ -64,6 +64,12 @@ export default function LegacyAthletesTab() {
     const worksheet = XLSX.utils.json_to_sheet(filteredLegacy.map(a => ({
         'Athlete': a.name,
         'Email': a.email,
+        'Mobile': a.mobile || '',
+        'Address': a.address || [a.city, a.state, a.pincode, a.country].filter(Boolean).join(', '),
+        'City': a.city || '',
+        'State': a.state || '',
+        'Pincode': a.pincode || '',
+        'Country': a.country || '',
         'Achievement': a.achievementYears,
         'Consecutive Years': a.totalYears,
         'Races': a.contributingRaces?.length || 0

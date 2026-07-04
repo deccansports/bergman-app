@@ -15,9 +15,18 @@ export {
 } from './athleteRankingActions';
 
 export {
+  getBelSeasonContentAction,
+  getBelSeasonLeaderboardAction,
+  syncBelSeasonFromResultsKVAction,
+  sendBelEmailCampaignAction,
+  sendBelWhatsAppCampaignAction,
+} from './eliteLeagueActions';
+
+export {
   createBackupAction,
   getBackupsForEventAction,
   deleteBackupAction,
+  fetchBackupDataAction,
   restoreBackupAction,
   restoreBackupToNewEventAction,
 } from './backupActions';
@@ -42,6 +51,9 @@ export {
   getAllCancellationRequestsAction,
   getCancellationStatsAction,
   initiateRefundForCancellationAction,
+  initiateRazorpayRefundForCancellationAction,
+  markCancellationAsRefundedAction,
+  syncCancellationCreditNoteAction,
   deleteCancellationRequestAction,
   cancelParticipantRegistrationByAdminAction,
 } from './cancellationActions';
@@ -66,13 +78,37 @@ export {
   updateClubSocialLinks,
   updateClubDetailsAction,
   updateClubLogoUrl,
+  transferClubOwnershipAction,
   syncClubDataForEventParticipantsAction,
+  syncAllEventsClubDataAction,
   getClubListAction,
   getClubDashboardDataAction,
   sendEncouragementEmailAction,
   syncClubUpcomingIndexAction,
   getClubRegistrationsAction,
+  _syncAllClubsToKV,
 } from './clubActions';
+
+export {
+  changeClubAction,
+  initializeClubHistoryAction,
+  getClubHistoryAction,
+  getCandidatesForHistoryMigrationAction,
+  migrateClubHistoryForAllUsersAction,
+  getClubMembersWithHistoryFilterAction,
+  backfillClubRootFieldsAction,
+} from './clubHistoryActions';
+
+export {
+  getClubMemberStatsAction,
+  getAllClubsWithStatsAction,
+  refreshClubStatsAction,
+  getClubStatsForYearAction,
+} from './clubStatsActions';
+
+export {
+  syncClubOwnerEmails,
+} from './clubSyncActions';
 
 export {
     contactUsAction,
@@ -88,8 +124,19 @@ export {
   deleteCouponAction,
   getAllCouponsAction,
   validateCouponAction,
+  unlockEventRegistrationWithAccessCodeAction,
   getAutoApplyCouponForUserAction,
 } from './couponActions';
+
+export {
+  getBirthdayCampaignDashboardStatusAction,
+  getUpcomingBirthdayCampaignStatusAction,
+  getTodayBirthdayCampaignStatusAction,
+  runBirthdayCampaignAction,
+  runBirthdayCampaignTodayAction,
+  runUpcomingBirthdayCampaignAction,
+  syncUserDobToKVAction,
+} from './birthdayCampaignActions';
 
 export {
     runDataSyncAction,
@@ -114,6 +161,7 @@ export {
   sendMonthlyDeferralReminderEmailAction,
   sendManualDeferralReminderAction,
   getDeferralDetailsByIdAction,
+  getActiveDeferralForUserAction,
 } from './deferralActions';
 
 export {
@@ -154,6 +202,10 @@ export {
 } from './ingestActions';
 
 export {
+  getLiveTrackingParticipantDirectoryAction,
+} from './liveTrackingParticipantActions';
+
+export {
   getInventoryForEventAction,
   updateInventoryStockAction,
   resetInventoryAction,
@@ -176,6 +228,8 @@ export {
   getFinancialsForEventAction,
   getDeferralAccountingAction,
   getCategoryChangeAccountingAction,
+  syncDeferralInvoiceToZohoAction,
+  syncCategoryChangeInvoiceToZohoAction,
 } from './accountingActions';
 
 export {
@@ -195,12 +249,22 @@ export {
 } from './pageActions';
 
 export {
+  searchSplitSecondPixEventsAction,
+  getMappedRacePhotoEventsAction,
+  findRacePhotoParticipantsAction,
+} from './racePhotoActions';
+
+export {
   addParticipantFromUserAction,
   addParticipantToEventAction,
   checkParticipantRegistrationByEmail,
   deleteParticipantFromEventAction,
+  findUserForParticipantRegistrationAction,
+  getParticipantForEventByEmailAction,
   getParticipantsForEventAction,
   getParticipantsPaginatedAction,
+  registerParticipantFromDatabaseAction,
+  transferParticipantToEventAction,
   updateCategoryForParticipantAction,
   updateParticipantInEventAction,
   updateParticipantStatusAction,
@@ -212,6 +276,7 @@ export {
   createDeferralFeeOrderAction,
   verifyDeferralFeePaymentAndProcessAction,
   createEventTicketOrderAction,
+  verifyEventRegistrationPaymentAndFinalizeAction,
   createCategoryChangeRazorpayOrderAction,
   verifyCategoryChangePaymentAndProcessAction,
   getPaymentRecordsAction,
@@ -238,8 +303,10 @@ export {
   testTimingPartnerApiAction,
   removeInactiveUsersAction,
   removeDuplicateUsersAction,
+  syncLoggedInUsersEmailVerificationAction,
   exportAllUsersAction,
   searchAthletesForAdminAction,
+  setAdminAccessModeAction,
   deleteRaceResultsForEventAction,
   updateRaceResultByAdminAction,
   findDuplicateAthletesAction,
@@ -268,6 +335,7 @@ export {
   cancelAndRefundPaidFoodOrderAction,
   cancelPaidFoodOrderAction,
   getPaidFoodStatsAndLogsAction,
+  repairPaidFoodOrdersAction,
 } from './paidFoodActions';
 
 export {
@@ -292,6 +360,7 @@ export {
   createAndAssignVolunteerAction,
   assignVolunteerToEventAction,
   removeVolunteerAssignmentAction,
+  toggleVolunteerActiveStatusAction,
   searchParticipantsForCheckInAction,
   manualBikeCheckOutAction,
   resetBikeCheckInAction,
@@ -353,6 +422,32 @@ export {
 } from './sponsorActions';
 
 export {
+  getInfluencersAction,
+  addInfluencerAction,
+  deleteInfluencerAction,
+  updateInfluencerOrderAction,
+  updateInfluencerAction,
+  getInfluencerFormConfigAction,
+  getInfluencerPostTemplateConfigAction,
+  saveInfluencerFormConfigAction,
+  saveInfluencerPostTemplateConfigAction,
+  previewInfluencerFormResponsesAction,
+  importInfluencerFormResponsesAction,
+  refundInfluencerDiscountPaymentAction,
+  sendInfluencerCampaignAction,
+  sendInfluencerCampaignTestAction,
+  sendInfluencerCustomCampaignAction,
+  generateInfluencerDiscountCouponsAction,
+  sendInfluencerTemplateTestAction,
+  sendInfluencerPostCardsAction,
+  extendInfluencerRegistrationWindowAction,
+  getInfluencerPostEmailLogsAction,
+  getInfluencerPublicCouponLogsAction,
+  updateInfluencerFormResponseReviewAction,
+  getInfluencersForEventAction,
+} from './influencerActions';
+
+export {
   getTicketDefinitionsForEventAction,
   addTicketDefinitionAction,
   updateTicketDefinitionAction,
@@ -376,11 +471,51 @@ export {
 } from './userActions';
 
 export {
-  getAdminAthleteAnalyticsAction,
+  syncParticipantIdsToUsersAction,
+  syncUserIdFromParticipantsAction,
+  getIdSyncStatusAction,
+} from './idSyncActions';
+
+export {  getAdminAthleteAnalyticsAction,
   compareEventParticipantsAction,
   getGlobalParticipantStatsAction,
   getEventRegistrationOverviewMetricsAction,
+  computeCountryRegistrationMetricsAction,
+  computeEventRegistrationMetricsAction,
   _computeRetentionStats,
   _computeAdminAthleteAnalytics,
   _computeGlobalParticipantStats,
 } from './analyticsActions';
+
+export {
+  masterSyncCacheAction,
+  manualClearCacheAction,
+  autoClearCacheAction,
+  getCacheStatsAction,
+  getCacheClearanceReportAction,
+  generateCacheHealthReportAction,
+  cleanupGhostRegistrationsAction,
+} from './cacheManagementActions';
+
+export {
+  getCancellationCategoryDeferralPolicyAction,
+} from './policyActions';
+
+export {
+  upsertWaitlistFormAction,
+  getWaitlistFormByEventAction,
+  getWaitlistFormBySlugAction,
+  listWaitlistFormsAction,
+  submitWaitlistEntryAction,
+  listWaitlistEntriesAction,
+  updateWaitlistEntryStatusAction,
+  updateWaitlistEntryTicketAction,
+  deleteWaitlistEntryAction,
+  generateWaitlistCodeAction,
+  updateWaitlistCodeStatusAction,
+  validateWaitlistCodeForRegistrationAction,
+  validateWaitlistCodeAction,
+  consumeWaitlistCodeForRegistrationAction,
+  sendWaitlistInvitationAction,
+  bulkSendWaitlistInvitationsAction,
+} from './waitlistActions';
