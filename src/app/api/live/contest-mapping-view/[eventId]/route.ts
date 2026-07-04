@@ -434,19 +434,24 @@ export async function GET(_req: NextRequest, { params }: { params: { eventId: st
     const importedCount = importedContests.length;
     const mappedCount = mappedRows.filter((row: any) => row.status === 'mapped').length;
     const unmappedCount = importedCount - mappedCount;
+    const splitMappedCount = mappedRows.filter((row: any) => row.status === 'mapped' && Number(row?.splitCount || 0) > 0 && Number(row?.timingPointCount || 0) > 0).length;
+    const splitUnmappedCount = Math.max(0, importedCount - splitMappedCount);
     const lastImported = normalize((existing as any)?.lastImportedAt || (liveIndex as any)?.updatedAt || (eventIndex as any)?.updatedAt || null) || null;
-    const eventTimingPointCount = Array.isArray(timingConfiguration?.timingPoints)
-      ? timingConfiguration.timingPoints.length
-      : Array.isArray((timingConfiguration as any)?.course?.timingPoints)
-        ? (timingConfiguration as any).course.timingPoints.length
+    const timingSnapshotPayload = timingSnapshot?.timingConfiguration || timingSnapshot?.timings || timingSnapshot || {};
+    const eventTimingPointCount = Array.isArray(timingSnapshotPayload?.timingPoints)
+      ? timingSnapshotPayload.timingPoints.length
+      : Array.isArray((timingSnapshotPayload as any)?.course?.timingPoints)
+        ? (timingSnapshotPayload as any).course.timingPoints.length
         : 0;
-    const totalMappedTimingPoints = importedContests.reduce((sum: number, row: any) => sum + Number(row?.timingPointCount || 0), 0);
+    const totalMappedTimingPoints = mappedRows.reduce((sum: number, row: any) => row.status === 'mapped' ? sum + Number(row?.timingPointCount || 0) : sum, 0);
 
     console.log('[contest-mapping-view] response summary', {
       eventId,
       importedCount,
       mappedCount,
       unmappedCount,
+      splitMappedCount,
+      splitUnmappedCount,
       bergmanContestOptionsCount: bergman.bergmanOptions.length,
       ticketDefinitionsCount: bergman.ticketDefinitionsCount,
       subCategoryCount: bergman.subCategoryCount,
@@ -480,6 +485,9 @@ export async function GET(_req: NextRequest, { params }: { params: { eventId: st
         importedCount,
         mappedCount,
         unmappedCount,
+        splitMappedCount,
+        splitUnmappedCount,
+        splitMappingComplete: importedCount > 0 && splitMappedCount === importedCount,
         lastImported,
         source: 'live:event:contest:index',
         eventTimingPointCount,

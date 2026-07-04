@@ -65,7 +65,7 @@ function scoreSimilarity(a: string, b: string) {
   return Math.round((overlap / union) * 100);
 }
 
-export function ContestMappingPanel({ eventId }: { eventId: string; connectionId?: string; availableContests?: Array<{ uuid: string; name: string }>; onRefresh?: () => void }) {
+export function ContestMappingPanel({ eventId, onRefresh }: { eventId: string; connectionId?: string; availableContests?: Array<{ uuid: string; name: string }>; onRefresh?: () => void }) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -270,6 +270,7 @@ export function ContestMappingPanel({ eventId }: { eventId: string; connectionId
       }
       toast({ title: 'Saved', description: `Stored ${String(data.count || 0)} contest mappings.` });
       await loadView();
+      onRefresh?.();
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save contest mappings';
       setError(message);
@@ -282,6 +283,7 @@ export function ContestMappingPanel({ eventId }: { eventId: string; connectionId
       mapped: rows.filter((row) => !!getRowOptionId(row) && !invalidRowIds.has(row.feibotContestUuid)).length,
       unmapped: rows.filter((row) => !getRowOptionId(row)).length,
       invalid: rows.filter((row) => invalidRowIds.has(row.feibotContestUuid)).length,
+      splitReady: rows.filter((row) => !!getRowOptionId(row) && !invalidRowIds.has(row.feibotContestUuid) && Number(row.splitCount || 0) > 0 && Number(row.timingPointCount || 0) > 0).length,
     };
 
 
@@ -325,10 +327,11 @@ export function ContestMappingPanel({ eventId }: { eventId: string; connectionId
             Save Mapping
           </Button>
         </div>
-        <div className="grid gap-3 md:grid-cols-3">
+        <div className="grid gap-3 md:grid-cols-4">
           <div className="rounded border p-3 text-sm">Imported contests: {rows.length}</div>
           <div className="rounded border p-3 text-sm">Mapped: {counts.mapped}</div>
           <div className="rounded border p-3 text-sm">Not Mapped: {counts.unmapped} · Invalid: {counts.invalid}</div>
+          <div className="rounded border p-3 text-sm">Split Mapping: {counts.splitReady}/{rows.length} ready</div>
         </div>
         <div className="overflow-x-auto rounded border">
           <table className="w-full min-w-[900px] text-sm">

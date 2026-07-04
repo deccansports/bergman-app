@@ -10,6 +10,10 @@ function normalize(value: unknown) {
   return String(value ?? '').trim();
 }
 
+function normalizeKey(value: unknown) {
+  return normalize(value).toLowerCase();
+}
+
 function asObject(value: any) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
@@ -128,6 +132,58 @@ function extractContestRelatedRows(contestUuid: string | null, courseIndex: any)
     ageGroups: asObject(contest)?.ageGroups || [],
     devices: asObject(contest)?.devices || Object.values(asObject(contest)?.lookup?.deviceByUuid || {}),
     legs: asObject(contest)?.legs || [],
+  };
+}
+
+async function loadContestMapping(eventId: string) {
+  return getKV<any>(`live:event:${eventId}:contest:mapping`, 'api-live-athlete-modal').catch(() => null);
+}
+
+function resolveContestMappingEntry(savedMapping: any, contestUuid: string | null) {
+  const target = normalize(contestUuid);
+  if (!target || !savedMapping || typeof savedMapping !== 'object') return null;
+
+  const targetLower = target.toLowerCase();
+  const mappingObject = savedMapping?.mapping && typeof savedMapping.mapping === 'object'
+    ? savedMapping.mapping
+    : savedMapping?.ticketsById && typeof savedMapping.ticketsById === 'object'
+      ? savedMapping.ticketsById
+      : savedMapping;
+
+  const direct = mappingObject?.[target] || mappingObject?.[targetLower] || null;
+  if (direct) return direct;
+
+  if (savedMapping?.contestToTicket && typeof savedMapping.contestToTicket === 'object' && savedMapping?.ticketsById && typeof savedMapping.ticketsById === 'object') {
+    const mappingId = savedMapping.contestToTicket[target] || savedMapping.contestToTicket[targetLower] || null;
+    if (mappingId && savedMapping.ticketsById[mappingId]) return savedMapping.ticketsById[mappingId];
+  }
+
+  for (const [key, value] of Object.entries(mappingObject as Record<string, any>)) {
+    if (normalizeKey(key) === targetLower) return value;
+    if (normalizeKey((value as any)?.feibotContestUuid || (value as any)?.contestUuid || (value as any)?.uuid) === targetLower) return value;
+  }
+
+  return null;
+}
+
+function isMappedContestEntry(entry: any) {
+  if (!entry || typeof entry !== 'object') return false;
+  const status = normalize(entry?.status || (entry?.bergmanContestId || entry?.ticketId ? 'mapped' : '')).toLowerCase();
+  if (status === 'unmapped' || status === 'invalid') return false;
+  return Boolean(entry?.bergmanContestId || entry?.ticketId || entry?.bergmanCategoryId || entry?.mappingId || status === 'mapped');
+}
+
+function sanitizeContestForAthlete(contest: any) {
+  if (!contest || typeof contest !== 'object') return contest;
+  return {
+    ...contest,
+    splits: [],
+    timingPoints: [],
+    lookup: {
+      ...(contest.lookup || {}),
+      splitByUuid: {},
+      timingPointByUuid: {},
+    },
   };
 }
 
@@ -278,8 +334,24 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
       return NextResponse.json({ success: false, eventId, message: 'Course configuration missing' }, { status: 500 });
     }
 
-    const timingConfiguration = buildTimingConfigurationFromCourseIndex(courseIndex);
+    const savedContestMapping = await loadContestMapping(eventId);
+    const contestMappingEntry = resolveContestMappingEntry(savedContestMapping, resolved.contestUuid);
     const courseSummary = summarizeContestCourse(contestContext.contest);
+    const splitMappingReady = Boolean(
+      isMappedContestEntry(contestMappingEntry)
+      && courseSummary.splitCount > 0
+      && courseSummary.timingPointCount > 0,
+    );
+    const timingConfiguration = splitMappingReady ? buildTimingConfigurationFromCourseIndex(courseIndex) : null;
+    const athleteContestContext = splitMappingReady
+      ? contestContext
+      : {
+          ...contestContext,
+          contest: sanitizeContestForAthlete(contestContext.contest),
+          splits: [],
+          timingPoints: [],
+          legs: [],
+        };
     const timingStarted = Boolean(
       resolved?.participantLive?.startTime
       || resolved?.participantLive?.start_time
@@ -315,6 +387,8 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
       legCount: courseSummary.legCount,
       splitCount: courseSummary.splitCount,
       timingPointCount: courseSummary.timingPointCount,
+      splitMappingReady,
+      contestMappingSaved: Boolean(contestMappingEntry),
       currentLeg: currentLegName,
       currentSplit: timingStarted ? currentSplitName : 'Waiting for Start',
       currentCheckpoint: currentCheckpoint || '—',
@@ -330,10 +404,20 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
         registration: resolved.participant,
         participantLive: resolved.participantLive,
       },
-      contestContext,
-      contestDefinition: contestContext.contest,
+      contestContext: athleteContestContext,
+      contestDefinition: athleteContestContext.contest,
       timingConfiguration,
-      courseIndex,
+      courseIndex: splitMappingReady ? courseIndex : null,
+      splitMapping: {
+        ready: splitMappingReady,
+        status: splitMappingReady ? 'mapped' : contestMappingEntry ? 'incomplete' : 'pending',
+        contestMapped: Boolean(contestMappingEntry && isMappedContestEntry(contestMappingEntry)),
+        splitCount: splitMappingReady ? courseSummary.splitCount : 0,
+        timingPointCount: splitMappingReady ? courseSummary.timingPointCount : 0,
+        message: splitMappingReady
+          ? 'Split mapping is ready.'
+          : 'Split mapping is not available for this athlete yet.',
+      },
     });
   } catch (error) {
     return NextResponse.json({ success: false, message: error instanceof Error ? error.message : 'Failed to resolve athlete modal context' }, { status: 500 });

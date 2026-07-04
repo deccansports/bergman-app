@@ -492,6 +492,7 @@ export default function AthleteLiveModalPro({
   const [now, setNow] = useState(new Date());
   const [hydratedDetailAthlete, setHydratedDetailAthlete] = useState<LiveAthlete | null>(null);
   const [timingConfiguration, setTimingConfiguration] = useState<ResolvedTimingConfiguration | null>(null);
+  const [splitMapping, setSplitMapping] = useState<{ ready?: boolean; status?: string; message?: string | null } | null>(null);
   const [isTimingConfigurationLoading, setIsTimingConfigurationLoading] = useState(false);
   const [isDetailHydrating, setIsDetailHydrating] = useState(false);
   const [participantsByBib, setParticipantsByBib] = useState<Record<string, any>>({});
@@ -620,8 +621,10 @@ export default function AthleteLiveModalPro({
     }) || null;
   }, [activeDetailAthlete, detailAthlete, ticketDef, ticketDefinitions]);
 
+  const splitMappingReady = splitMapping?.ready === true;
+
   const splitModel = useMemo(() => {
-    if (!isDetailMode) return null;
+    if (!isDetailMode || !splitMappingReady) return null;
     const modelAthlete = (hydratedDetailAthlete || detailAthlete || null) as LiveAthlete | null;
     if (!modelAthlete) return null;
 
@@ -635,7 +638,7 @@ export default function AthleteLiveModalPro({
       participantsByBib,
       ticketDef: resolvedTicketDef,
     });
-  }, [isDetailMode, hydratedDetailAthlete, detailAthlete, timingConfiguration, participantsByBib, resolvedTicketDef]);
+  }, [isDetailMode, splitMappingReady, hydratedDetailAthlete, detailAthlete, timingConfiguration, participantsByBib, resolvedTicketDef]);
 
   const resolvedContest = useMemo(() => {
     const contestUuid = String(
@@ -672,6 +675,7 @@ export default function AthleteLiveModalPro({
 
     if (!open || !isDetailMode || !detailAthlete) {
       setHydratedDetailAthlete(null);
+      setSplitMapping(null);
       setIsDetailHydrating(false);
       detailHydratedRef.current = null;
       hasHydratedDetailRef.current = false;
@@ -684,6 +688,8 @@ export default function AthleteLiveModalPro({
     if (detailAthleteKeyRef.current !== currentDetailKey) {
       detailAthleteKeyRef.current = currentDetailKey;
       setHydratedDetailAthlete(null);
+      setSplitMapping(null);
+      setTimingConfiguration(timingConfigurationProp || timingConfigurationContext?.timingConfiguration || null);
       setIsDetailHydrating(true);
       detailHydratedRef.current = null;
       hasHydratedDetailRef.current = false;
@@ -691,7 +697,7 @@ export default function AthleteLiveModalPro({
       detailScrollRestoreTokenRef.current += 1;
       return;
     }
-  }, [open, isDetailMode, detailAthlete, eventId, bookingId]);
+  }, [open, isDetailMode, detailAthlete, eventId, bookingId, timingConfigurationProp, timingConfigurationContext?.timingConfiguration]);
 
   useEffect(() => {
     if (!open || !isDetailMode) return;
@@ -760,6 +766,12 @@ export default function AthleteLiveModalPro({
         const contextContestLegs = Array.isArray(contextPayload?.contestContext?.legs) ? contextPayload.contestContext.legs : [];
         const contextContestSplits = Array.isArray(contextPayload?.contestContext?.splits) ? contextPayload.contestContext.splits : [];
         const contextContestTimingPoints = Array.isArray(contextPayload?.contestContext?.timingPoints) ? contextPayload.contestContext.timingPoints : [];
+        const contextSplitMapping = contextPayload?.splitMapping && typeof contextPayload.splitMapping === 'object'
+          ? contextPayload.splitMapping
+          : null;
+        if (!cancelled) {
+          setSplitMapping(contextSplitMapping);
+        }
 
         const contextTiming = contextPayload?.timingConfiguration || null;
         if (contextTiming && !cancelled) {
@@ -820,6 +832,8 @@ export default function AthleteLiveModalPro({
             lastSynced: contextTiming?.lastSynced || contextTiming?.updatedAt || contextTiming?.importedAt || null,
             contestContext: contextPayload?.contestContext || null,
           } as any);
+        } else if (!cancelled) {
+          setTimingConfiguration(null);
         }
 
         const matchedSplits = Array.isArray(matched?.splits) ? matched.splits : [];
@@ -1031,6 +1045,9 @@ export default function AthleteLiveModalPro({
           if (!response.ok || !payload?.success) {
             throw new Error(payload?.message || `Request failed with HTTP ${response.status}`);
           }
+          if (!cancelled) {
+            setSplitMapping(payload?.splitMapping && typeof payload.splitMapping === 'object' ? payload.splitMapping : null);
+          }
           const timingPayload = payload?.timingConfiguration || payload?.courseIndex || payload?.timings || payload;
           const contestIndex = timingPayload?.contestIndex && typeof timingPayload.contestIndex === 'object' ? timingPayload.contestIndex : {};
           return {
@@ -1233,7 +1250,7 @@ export default function AthleteLiveModalPro({
   }, [activeDetailAthlete, isDetailMode, effectiveStatus]);
 
   const nextSplitPrediction = useMemo(() => {
-    if (!isDetailMode || !activeDetailAthlete || effectiveStatus === 'Finished') return null;
+    if (!isDetailMode || !splitMappingReady || !activeDetailAthlete || effectiveStatus === 'Finished') return null;
 
     type Point = { id: string; label: string; cumulativeKm: number; segment: Leg | 'START' | 'FINISH' };
     const cm: any = resolvedTicketDef?.courseMaps || ticketDef?.courseMaps || {};
@@ -1321,7 +1338,7 @@ export default function AthleteLiveModalPro({
       confidence,
       basedOn: paceSamples.length > 0 ? `${Math.min(5, paceSamples.length)} split deltas (median)` : (activeDetailAthlete.predictedPaceSecPerKm ? 'predicted pace model' : 'overall observed average'),
     };
-  }, [isDetailMode, activeDetailAthlete, effectiveStatus, ticketDef]);
+  }, [isDetailMode, splitMappingReady, activeDetailAthlete, effectiveStatus, ticketDef, resolvedTicketDef]);
 
   const raceStartAt = useMemo(() => {
     if (!isDetailMode || !activeDetailAthlete) return null;
@@ -1372,7 +1389,7 @@ export default function AthleteLiveModalPro({
   }, [isDetailMode, activeDetailAthlete, effectiveStatus]);
 
   const splitTimeline = useMemo(() => {
-    if (!activeDetailAthlete) return [] as Array<{ id: string; name: string; reached: boolean; elapsedSec: number | null }>;
+    if (!splitMappingReady || !activeDetailAthlete) return [] as Array<{ id: string; name: string; reached: boolean; elapsedSec: number | null }>;
 
     const normalizeKey = (value: any) => String(value || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     const splitKeyCandidates = (split: any) => [
@@ -1447,7 +1464,7 @@ export default function AthleteLiveModalPro({
         };
       })
       .filter((row) => Boolean(row.name));
-  }, [timingConfiguration, activeDetailAthlete]);
+  }, [timingConfiguration, activeDetailAthlete, splitMappingReady]);
 
   if (!open) return null;
 
@@ -1491,11 +1508,12 @@ export default function AthleteLiveModalPro({
     const renderAthlete = detailReadyAthlete || activeDetailAthlete;
     const detailParticipant = renderAthlete || activeDetailAthlete;
     const participantLive = (renderAthlete as any)?.participantLive || null;
-    const currentSection = splitModel?.currentSection || null;
-    const currentPoint = splitModel?.currentPoint || null;
-    const currentRank = splitModel?.rankSummary || { overall: null, gender: null, category: null };
-    const contestSplits = Array.isArray((resolvedContest as any)?.splits) ? (resolvedContest as any).splits : [];
-    const contestTimingPoints = Array.isArray((resolvedContest as any)?.timingPoints) ? (resolvedContest as any).timingPoints : [];
+    const canShowSplitDetails = splitMappingReady;
+    const currentSection = canShowSplitDetails ? splitModel?.currentSection || null : null;
+    const currentPoint = canShowSplitDetails ? splitModel?.currentPoint || null : null;
+    const currentRank = canShowSplitDetails ? splitModel?.rankSummary || { overall: null, gender: null, category: null } : { overall: null, gender: null, category: null };
+    const contestSplits = canShowSplitDetails && Array.isArray((resolvedContest as any)?.splits) ? (resolvedContest as any).splits : [];
+    const contestTimingPoints = canShowSplitDetails && Array.isArray((resolvedContest as any)?.timingPoints) ? (resolvedContest as any).timingPoints : [];
     const courseMaps = (resolvedTicketDef as any)?.courseMaps || (ticketDef as any)?.courseMaps || {};
     const splitNameByUuid = (contestSplits as any[]).reduce((acc: Record<string, string>, row: any) => {
       const key = String(row?.splitUuid || row?.uuid || row?.UUID || row?.id || '').trim().toLowerCase();
@@ -1539,10 +1557,10 @@ export default function AthleteLiveModalPro({
     const isRegisteredWaiting = raceNotStarted || !hasTimingReads;
     const currentSplitUuid = String(participantLive?.currentSplitUuid || participantLive?.current_split_uuid || '').trim().toLowerCase();
     const lastTimingPointUuid = String(participantLive?.lastTimingPointUuid || participantLive?.last_timing_point_uuid || '').trim().toLowerCase();
-    const resolvedCurrentSplitName = currentSplitUuid
+    const resolvedCurrentSplitName = canShowSplitDetails && currentSplitUuid
       ? (splitNameByUuid[currentSplitUuid] || null)
       : null;
-    const resolvedLastTimingPointName = lastTimingPointUuid
+    const resolvedLastTimingPointName = canShowSplitDetails && lastTimingPointUuid
       ? (timingPointNameByUuid[lastTimingPointUuid] || null)
       : null;
     const liveDistanceCovered = isRegisteredWaiting
@@ -1553,13 +1571,19 @@ export default function AthleteLiveModalPro({
       : (Number(participantLive?.distanceRemaining ?? participantLive?.distance_remaining ?? Math.max(0, courseTotalDistanceKm - liveDistanceCovered)) || 0);
     const liveCurrentLeg = isRegisteredWaiting
       ? 'Not Started'
-      : (String(currentSection?.label || participantLive?.currentLeg || participantLive?.lastLegName || '').trim() || null);
+      : canShowSplitDetails
+        ? (String(currentSection?.label || participantLive?.currentLeg || participantLive?.lastLegName || '').trim() || null)
+        : 'Not Available';
     const liveCurrentSplit = isRegisteredWaiting
       ? 'Waiting for Start'
-      : (String(currentSection?.label || resolvedCurrentSplitName || participantLive?.currentSplit || participantLive?.expectedNextSplit || currentPoint?.point?.displayName || currentPoint?.point?.shortName || '').trim() || null);
+      : canShowSplitDetails
+        ? (String(currentSection?.label || resolvedCurrentSplitName || participantLive?.currentSplit || participantLive?.expectedNextSplit || currentPoint?.point?.displayName || currentPoint?.point?.shortName || '').trim() || null)
+        : 'Not Available';
     const liveLastTimingPoint = isRegisteredWaiting
       ? '—'
-      : (resolvedLastTimingPointName || String(participantLive?.lastTimingPointName || participantLive?.lastTimingPoint || '').trim() || '—');
+      : canShowSplitDetails
+        ? (resolvedLastTimingPointName || String(participantLive?.lastTimingPointName || participantLive?.lastTimingPoint || '').trim() || '—')
+        : '—';
     const liveAverageSpeed = Number(participantLive?.averageSpeed ?? participantLive?.speed ?? splitModel?.overallAverageSpeed ?? NaN);
     const liveAveragePace = Number(participantLive?.averagePace ?? participantLive?.pace ?? splitModel?.overallAveragePace ?? NaN);
     const liveOverallRank = isRegisteredWaiting ? null : (participantLive?.overallRank ?? currentRank.overall ?? null);
@@ -1703,14 +1727,18 @@ export default function AthleteLiveModalPro({
                         <div className="text-slate-400">Current Leg</div>
                         <div className="font-semibold text-white">{liveCurrentLeg || waitingText}</div>
                       </div>
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Current Split</div>
-                        <div className="font-semibold text-white">{liveCurrentSplit || waitingText}</div>
-                      </div>
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Last Timing Point</div>
-                        <div className="font-semibold text-white">{liveLastTimingPoint || waitingText}</div>
-                      </div>
+                      {canShowSplitDetails ? (
+                        <>
+                          <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                            <div className="text-slate-400">Current Split</div>
+                            <div className="font-semibold text-white">{liveCurrentSplit || waitingText}</div>
+                          </div>
+                          <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                            <div className="text-slate-400">Last Timing Point</div>
+                            <div className="font-semibold text-white">{liveLastTimingPoint || waitingText}</div>
+                          </div>
+                        </>
+                      ) : null}
                       <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
                         <div className="text-slate-400">Current GPS</div>
                         <div className="font-semibold text-white">{currentGpsText}</div>
@@ -1779,7 +1807,7 @@ export default function AthleteLiveModalPro({
                   </Card>
                 ) : null}
 
-                {nextSplitPrediction && (
+                {canShowSplitDetails && nextSplitPrediction && (
                   <Card className="bg-slate-800/50 border-slate-700">
                     <CardHeader className="p-3">
                       <CardTitle className="text-sm font-semibold text-yellow-300">Next Split Prediction (Robust)</CardTitle>
@@ -1811,7 +1839,7 @@ export default function AthleteLiveModalPro({
                   </Card>
                 )}
 
-                {(effectiveStatus === 'On Course' || effectiveStatus === 'Finished') && (
+                {canShowSplitDetails && (effectiveStatus === 'On Course' || effectiveStatus === 'Finished') && (
                   <Card className="bg-slate-800/50 border-slate-700">
                     <CardHeader className="p-3">
                       <CardTitle className="text-lg font-semibold text-yellow-300">Race Progress</CardTitle>
@@ -1828,17 +1856,25 @@ export default function AthleteLiveModalPro({
                   </Card>
                 )}
 
-                <div className="w-full max-w-full min-w-0 space-y-3 pt-2">
-                  <h3 className="font-semibold text-base sm:text-lg text-yellow-300">Splits Summary</h3>
-                  <DynamicSplitSummaryTable
-                    athlete={detailParticipant}
-                    timingConfiguration={timingConfiguration}
-                    participant={participantsByBib[String(detailParticipant?.bib || '').trim()] || detailParticipant || null}
-                    participantsByBib={participantsByBib}
-                    ticketDef={resolvedTicketDef}
-                    isLoading={!detailReady}
-                  />
-                </div>
+                {canShowSplitDetails ? (
+                  <div className="w-full max-w-full min-w-0 space-y-3 pt-2">
+                    <h3 className="font-semibold text-base sm:text-lg text-yellow-300">Splits Summary</h3>
+                    <DynamicSplitSummaryTable
+                      athlete={detailParticipant}
+                      timingConfiguration={timingConfiguration}
+                      participant={participantsByBib[String(detailParticipant?.bib || '').trim()] || detailParticipant || null}
+                      participantsByBib={participantsByBib}
+                      ticketDef={resolvedTicketDef}
+                      isLoading={!detailReady}
+                    />
+                  </div>
+                ) : (
+                  <Card className="border-slate-700 bg-slate-800/50">
+                    <CardContent className="p-3 text-sm text-slate-300">
+                      Split tracking is not available for this athlete yet.
+                    </CardContent>
+                  </Card>
+                )}
                 </>
                 )}
                 </div>

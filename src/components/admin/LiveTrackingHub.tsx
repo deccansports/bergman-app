@@ -421,6 +421,7 @@ export default function LiveTrackingHub() {
   const [fdbImportSummary, setFdbImportSummary] = useState<any>(null);
   const [fdbMetadata, setFdbMetadata] = useState<any>(null);
   const [fdbImportLogs, setFdbImportLogs] = useState<any[]>([]);
+  const [contestMappingDiagnostics, setContestMappingDiagnostics] = useState<any>(null);
   const [eventUuidTestLoading, setEventUuidTestLoading] = useState(false);
   const [eventUuidTestResult, setEventUuidTestResult] = useState<any>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -441,14 +442,31 @@ export default function LiveTrackingHub() {
     const hasSelectedEvent = Boolean(selectedEventUuid);
     const hasBergmanEvent = Boolean(bergmanEventId.trim());
     const authOk = credentials?.lastAuthResult === 'success' || credentials?.lastAuthResult === 'verified';
+    const databaseImported = String(fdbMetadata?.database?.status || '').toUpperCase() === 'IMPORTED';
+    const eventLinkExtracted = Boolean(fdbMetadata?.database?.localEventUuid || fdbImportSummary?.detected?.eventUuid);
+    const kvBuilt = Boolean(fdbImportSummary?.validation?.complete);
+    const participantsImported = Number(fdbImportSummary?.counts?.participants || fdbMetadata?.database?.participants || 0) > 0;
+    const importedContestCount = Number(contestMappingDiagnostics?.importedCount || 0);
+    const contestMappingComplete = importedContestCount > 0
+      && Number(contestMappingDiagnostics?.mappedCount || 0) === importedContestCount
+      && Number(contestMappingDiagnostics?.unmappedCount || 0) === 0;
+    const splitMappingComplete = importedContestCount > 0
+      && Number(contestMappingDiagnostics?.splitMappedCount || 0) === importedContestCount
+      && Number(contestMappingDiagnostics?.splitUnmappedCount || 0) === 0;
     return {
-      ready: hasCreds && hasSelectedEvent && hasBergmanEvent && authOk,
+      ready: hasCreds && hasSelectedEvent && hasBergmanEvent && authOk && databaseImported && eventLinkExtracted && kvBuilt && participantsImported && contestMappingComplete && splitMappingComplete,
       hasCreds,
       hasSelectedEvent,
       hasBergmanEvent,
       authOk,
+      databaseImported,
+      eventLinkExtracted,
+      kvBuilt,
+      participantsImported,
+      contestMappingComplete,
+      splitMappingComplete,
     };
-  }, [bergmanEventId, credentials?.configured, credentials?.lastAuthResult, selectedEventUuid]);
+  }, [bergmanEventId, contestMappingDiagnostics?.importedCount, contestMappingDiagnostics?.mappedCount, contestMappingDiagnostics?.splitMappedCount, contestMappingDiagnostics?.splitUnmappedCount, contestMappingDiagnostics?.unmappedCount, credentials?.configured, credentials?.lastAuthResult, fdbImportSummary?.counts?.participants, fdbImportSummary?.detected?.eventUuid, fdbImportSummary?.validation?.complete, fdbMetadata?.database?.localEventUuid, fdbMetadata?.database?.participants, fdbMetadata?.database?.status, selectedEventUuid]);
 
   const isBergmanEventLinked = Boolean(credentials?.configured && bergmanEventId.trim() && selectedEventUuid && credentials?.lastAuthResult === 'success');
 
@@ -578,6 +596,27 @@ export default function LiveTrackingHub() {
       setLoadingCounts(false);
     }
   }, [bergmanEventId]);
+
+  const loadContestMappingDiagnostics = useCallback(async (eventId: string) => {
+    if (!eventId) {
+      setContestMappingDiagnostics(null);
+      return;
+    }
+
+    try {
+      const data = await fetchJsonCached<any>(`contestMappingView:${eventId}`, async () => {
+        const response = await fetch(`/api/live/contest-mapping-view/${encodeURIComponent(eventId)}`, { cache: 'no-store' });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.success) {
+          throw new Error(payload?.message || `Request failed with HTTP ${response.status}`);
+        }
+        return payload;
+      }, { force: true });
+      setContestMappingDiagnostics(data?.diagnostics || null);
+    } catch {
+      setContestMappingDiagnostics(null);
+    }
+  }, []);
 
   const loadFdbMetadata = useCallback(async (eventId: string) => {
     if (!eventId) {
@@ -772,13 +811,15 @@ export default function LiveTrackingHub() {
     if (bergmanEventId) {
       void loadProviderConfig(bergmanEventId);
       void loadCourseConfig(bergmanEventId);
+      void loadContestMappingDiagnostics(bergmanEventId);
       void loadFdbMetadata(bergmanEventId);
     } else {
       setProviderConfig(null);
       setCourseConfig(null);
+      setContestMappingDiagnostics(null);
       setFdbMetadata(null);
     }
-  }, [bergmanEventId, loadCourseConfig, loadFdbMetadata, loadProviderConfig]);
+  }, [bergmanEventId, loadContestMappingDiagnostics, loadCourseConfig, loadFdbMetadata, loadProviderConfig]);
 
   useEffect(() => {
     void loadTimingRules(selectedEventUuid);
@@ -816,6 +857,7 @@ export default function LiveTrackingHub() {
               loadStatus(),
               loadSelectedEventCounts(),
               loadCourseConfig(bergmanEventId.trim()),
+              loadContestMappingDiagnostics(bergmanEventId.trim()),
               loadFdbMetadata(bergmanEventId.trim()),
             ]);
           }
@@ -828,7 +870,7 @@ export default function LiveTrackingHub() {
     }, 2000);
 
     return () => clearInterval(interval);
-  }, [bergmanEventId, fdbImportJobId, loadCourseConfig, loadFdbMetadata, loadSelectedEventCounts, loadStatus]);
+  }, [bergmanEventId, fdbImportJobId, loadContestMappingDiagnostics, loadCourseConfig, loadFdbMetadata, loadSelectedEventCounts, loadStatus]);
 
   useEffect(() => {
     if (fdbImportJobId || fdbImportStatus !== 'processing' || !bergmanEventId.trim()) return;
@@ -1948,10 +1990,12 @@ export default function LiveTrackingHub() {
                   { label: 'Feibot event selected', ok: readiness.hasSelectedEvent },
                   { label: 'Bergman event ID set', ok: readiness.hasBergmanEvent },
                   { label: 'Connection verified', ok: readiness.authOk },
-                  { label: 'Database imported', ok: String(fdbMetadata?.database?.status || '').toUpperCase() === 'IMPORTED' },
-                  { label: 'Event link extracted', ok: Boolean(fdbMetadata?.database?.localEventUuid || fdbImportSummary?.detected?.eventUuid) },
-                  { label: 'KV built', ok: Boolean(fdbImportSummary?.validation?.complete) },
-                  { label: 'Participants imported', ok: Number(fdbImportSummary?.counts?.participants || fdbMetadata?.database?.participants || 0) > 0 },
+                  { label: 'Database imported', ok: readiness.databaseImported },
+                  { label: 'Event link extracted', ok: readiness.eventLinkExtracted },
+                  { label: 'KV built', ok: readiness.kvBuilt },
+                  { label: 'Contest mapping', ok: readiness.contestMappingComplete },
+                  { label: 'Split mapping', ok: readiness.splitMappingComplete },
+                  { label: 'Participants imported', ok: readiness.participantsImported },
                 ].map((item) => (
                   <div key={item.label} className="flex items-center justify-between gap-3 rounded-lg border p-3">
                     <span className="font-medium">{item.label}</span>
@@ -1980,7 +2024,7 @@ export default function LiveTrackingHub() {
 
                 {!readiness.ready ? (
                   <p className="text-xs text-muted-foreground">
-                    The enable action stays locked until credentials are saved, an event is selected, the Bergman event ID is entered, and the connection is verified.
+                    The enable action stays locked until credentials, event binding, database import, KV build, contest mapping, split mapping, and participants are ready.
                   </p>
                 ) : null}
               </CardContent>
@@ -2169,7 +2213,7 @@ export default function LiveTrackingHub() {
           </Card>
 
           {bergmanEventId.trim() ? (
-            <ContestMappingPanel eventId={bergmanEventId.trim()} />
+            <ContestMappingPanel eventId={bergmanEventId.trim()} onRefresh={() => void loadContestMappingDiagnostics(bergmanEventId.trim())} />
           ) : (
             <Card>
               <CardHeader className="py-3">
