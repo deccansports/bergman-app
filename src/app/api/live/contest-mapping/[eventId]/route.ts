@@ -1264,25 +1264,10 @@ async function syncContestsFromFeibot(
     splitCount: resolvedTimingConfiguration.splits.length,
     timingPointCount: resolvedTimingConfiguration.timingPoints.length,
     contestNames: resolvedTimingConfiguration.contests.map((contest: any) => contest?.contestName || contest?.name || contest?.Name).filter(Boolean),
-    destination: `event:${eventId}:timingConfiguration`,
+    destination: `live:event:${eventId}:timingConfiguration`,
     note: 'delegated to canonical sync writer',
   });
 
-  await putKV(`event:${eventId}:timingConfiguration`, {
-    eventId,
-    eventUuid: normalizeText(eventUuid),
-    updatedAt: timingUpdatedAt,
-    contests: resolvedTimingConfiguration.contests,
-    splits: resolvedTimingConfiguration.splits,
-    timingPoints: resolvedTimingConfiguration.timingPoints,
-    legs: resolvedTimingConfiguration.legs,
-    ageGroups: resolvedTimingConfiguration.ageGroups,
-    devices: resolvedTimingConfiguration.devices,
-    course: resolvedTimingConfiguration.course,
-    timingConfiguration: resolvedTimingConfiguration,
-    importedAt: new Date().toISOString(),
-    source: 'feibot',
-  }, 'api-contest-mapping');
   await putKV(`live:event:${eventId}:timingConfiguration`, {
     eventId,
     eventUuid: normalizeText(eventUuid),
@@ -1624,7 +1609,7 @@ export async function POST(_req: NextRequest, { params }: { params: { eventId: s
       }
     }
     try {
-      const latestTimingConfiguration = await getKV<Record<string, any>>(`event:${eventId}:timingConfiguration`, 'api-contest-mapping');
+      const latestTimingConfiguration = await getKV<Record<string, any>>(`live:event:${eventId}:timingConfiguration`, 'api-contest-mapping');
       const timingPayload = latestTimingConfiguration?.timingConfiguration || latestTimingConfiguration;
       if (timingPayload) {
         await rebuildSplitIndexInKv({

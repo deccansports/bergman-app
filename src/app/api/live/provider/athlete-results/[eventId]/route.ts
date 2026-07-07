@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { callFeibotAPI } from '@/lib/feibot-integration/api-client';
 import { getKV } from '@/lib/cloudflare/kv';
+import { loadParticipantPublicView } from '@/lib/liveTrackingParticipantStore';
+import { liveResultIndexKvKey, liveResultKvKey, liveResultsKvKey } from '@/lib/live-tracking/storageKeys';
 import type { Split } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -208,6 +210,69 @@ function buildEmptyTimingResponse(params: {
     source: params.source,
     cacheHit: false,
     eventId: params.eventId,
+  };
+}
+
+async function loadCachedLiveResult(eventId: string, params: { bib?: string | null; participantUuid?: string | null; contestUuid?: string | null }) {
+  const index = await getKV<any>(liveResultIndexKvKey(eventId), 'api-athlete-results').catch(() => null);
+  const results = await getKV<any>(liveResultsKvKey(eventId), 'api-athlete-results').catch(() => null);
+
+  const lookupKeys = [
+    normalize(params.participantUuid),
+    normalize(params.bib).replace(/^0+/, ''),
+  ].filter(Boolean) as string[];
+
+  let resolvedId = '';
+  for (const key of lookupKeys) {
+    resolvedId = normalize(
+      index?.byProviderAthleteId?.[key]
+      || index?.byAthleteUid?.[key]
+      || index?.byBookingId?.[key]
+      || index?.byBib?.[key]
+      || '',
+    );
+    if (resolvedId) break;
+  }
+
+  let cachedRow = null;
+  if (resolvedId) {
+    cachedRow = await getKV<any>(liveResultKvKey(eventId, resolvedId), 'api-athlete-results').catch(() => null);
+  }
+
+  if (!cachedRow && Array.isArray(results)) {
+    const bibKey = normalize(params.bib).replace(/^0+/, '');
+    const participantKey = normalize(params.participantUuid);
+    const contestKey = normalize(params.contestUuid);
+    cachedRow = results.find((row: any) => {
+      const rowBib = normalize(getRowBib(row)).replace(/^0+/, '');
+      const rowParticipant = normalize(getRowParticipantUuid(row));
+      const rowContest = normalize(getRowContestUuid(row));
+      return (
+        (!bibKey || rowBib === bibKey)
+        && (!participantKey || rowParticipant === participantKey)
+        && (!contestKey || !rowContest || rowContest === contestKey)
+      );
+    }) || null;
+  }
+
+  if (!cachedRow) return null;
+
+  const splits = buildStructuredSplits(cachedRow);
+  const fallbackSplits = splits.length > 0 ? splits : buildFallbackSplits(cachedRow);
+  return {
+    success: true,
+    providerAvailable: true,
+    liveAvailable: true,
+    splitsAvailable: fallbackSplits.length > 0,
+    timing: {
+      status: normalizeStatus(cachedRow?.status ?? cachedRow?.result_status ?? cachedRow?.race_status),
+      splits: fallbackSplits,
+      rawResult: cachedRow,
+      source: 'kv',
+    },
+    message: 'Live timing loaded from KV.',
+    source: 'kv',
+    cacheHit: true,
   };
 }
 
@@ -457,18 +522,12 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
       return NextResponse.json({ success: false, message: 'bib or participantUuid is required' }, { status: 400 });
     }
 
-    const [participantsIndex, liveResultsCache, resultsIndex, providerState] = await Promise.all([
-      getKV<Record<string, any>>(`live:event:${eventId}:participants`, 'api-athlete-results').catch(() => null),
-      Promise.all(LIVE_RESULTS_KV_KEYS(eventId).map((key) => getKV<Record<string, any>>(key, 'api-athlete-results').catch(() => null))),
-      getKV<Record<string, any>>(`event:${eventId}:results`, 'api-athlete-results').catch(() => null),
-      getKV<Record<string, any>>(`event:${eventId}:providerState`, 'api-athlete-results').catch(() => null),
-    ]);
     const normalizedAthlete = await resolveNormalizedAthleteRecord({
       eventId,
       bib,
       contestUuid: contestUuid || null,
       participantUuid: participantUuid || null,
-      participantsIndex,
+      participantsIndex: await getKV<Record<string, any>>(`live:event:${eventId}:participant:index`, 'api-athlete-results').catch(() => null),
     });
 
     const cacheKey = `${eventId}:${contestUuid || normalizedAthlete.contestUuid || 'none'}:${bib || 'none'}:${normalizedAthlete.resolvedParticipantUuid || 'none'}`;
@@ -478,156 +537,67 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
       return NextResponse.json({ ...cached.payload, cacheHit: true });
     }
 
-    const cachedLive = [...liveResultsCache, resultsIndex].find(Boolean);
-    const cachedTiming = cachedLive
-      ? extractTimingFromCachedLiveResults(cachedLive, normalizedAthlete.resolvedParticipantUuid, contestUuid || normalizedAthlete.contestUuid || null, bib)
-      : null;
-    if (cachedTiming?.success) {
-      const payload = {
-        ...cachedTiming,
-        athlete: normalizedAthlete.athlete,
-        participantUuid: normalizedAthlete.resolvedParticipantUuid || null,
-        contestUuid: contestUuid || normalizedAthlete.contestUuid || null,
-        mappingSource: normalizedAthlete.mappingSource,
-        cacheHit: true,
-      };
-      athleteResultsCache.set(cacheKey, { expiresAt: Date.now() + ATHLETE_RESULTS_CACHE_TTL_MS, payload });
-      return NextResponse.json(payload);
-    }
-
-    const provider = await loadPhase1ProviderConfig(eventId);
-    if (!provider.accessKey || !provider.secretKey || !provider.eventUuid) {
-      const payload = buildEmptyTimingResponse({
-        eventId,
-        athlete: normalizedAthlete.athlete,
-        providerMessage: 'Provider credentials are incomplete for this event.',
-        source: 'credentials-missing',
-      });
-      athleteResultsCache.set(cacheKey, { expiresAt: Date.now() + ATHLETE_RESULTS_CACHE_TTL_MS, payload });
-      return NextResponse.json(payload);
-    }
-
-    const providerTimingSupported = providerState?.athleteResultsSupported !== false;
-    if (!providerTimingSupported) {
-      const payload = buildEmptyTimingResponse({
-        eventId,
-        athlete: normalizedAthlete.athlete,
-        providerMessage: 'Live timing is currently unavailable.',
-        source: 'provider-disabled',
-      });
-      athleteResultsCache.set(cacheKey, { expiresAt: Date.now() + ATHLETE_RESULTS_CACHE_TTL_MS, payload });
-      return NextResponse.json(payload);
-    }
-
-    let upstream: Awaited<ReturnType<typeof fetchResults>> = { ok: false, path: null, url: null, rows: [], raw: null, status: 0 } as any;
-    try {
-      upstream = await fetchResults(provider.eventUuid, provider.accessKey, provider.secretKey, provider.apiBaseUrl);
-    } catch (error) {
-      upstream = { ok: false, path: null, url: null, rows: [], raw: null, status: 0 } as any;
-    }
-    if (!upstream.ok) {
-      const upstreamStatus = Number(upstream.status || 0);
-      const providerUnavailableMessage = 'Live timing is currently unavailable.';
-      console.warn('ProviderUnavailable', {
-        eventId,
-        participantUuid: normalizedAthlete.resolvedParticipantUuid || null,
-        contestUuid: contestUuid || normalizedAthlete.contestUuid || null,
-        endpoint: upstream.path,
-        status: upstreamStatus || 500,
-        message: providerUnavailableMessage,
-        providerMessage: upstream.raw || null,
-      });
-
-      if (upstreamStatus === 401 || upstreamStatus === 403 || upstreamStatus === 404 || upstreamStatus === 405) {
-        await updateProviderState(eventId, {
-          provider: 'feibot',
-          authenticationFailed: true,
-          lastFailure: new Date().toISOString(),
-          lastStatusCode: upstreamStatus,
-          athleteResultsSupported: false,
-          athleteResultsSupportedAt: new Date().toISOString(),
-          lastAthleteResultsEndpoint: upstream.path || null,
-        });
-      }
-
-      const payload = buildEmptyTimingResponse({
-        eventId,
-        athlete: normalizedAthlete.athlete,
-        providerMessage: providerUnavailableMessage,
-        source: upstreamStatus === 404 ? 'unsupported-endpoint' : 'provider-unavailable',
-      });
-      athleteResultsCache.set(cacheKey, { expiresAt: Date.now() + ATHLETE_RESULTS_CACHE_TTL_MS, payload });
-      return NextResponse.json(payload);
-    }
-
-    const bibKey = normalizeLower(bib);
-    const participantKey = normalizeLower(normalizedAthlete.resolvedParticipantUuid);
-    const contestKey = normalizeLower(contestUuid);
-
-    const scoped = upstream.rows.filter((row: any) => {
-      const rowBib = normalizeLower(getRowBib(row));
-      const rowParticipant = normalizeLower(getRowParticipantUuid(row));
-      const rowContest = normalizeLower(getRowContestUuid(row));
-      const bibOk = !bibKey || (rowBib && rowBib === bibKey);
-      const participantOk = rowParticipant && rowParticipant === participantKey;
-      const contestOk = !contestKey || !rowContest || rowContest === contestKey;
-      return participantOk && contestOk && bibOk;
+    const participantView = await loadParticipantPublicView(eventId, {
+      bookingId: null,
+      bib: bib || null,
+      athleteUid: participantUuid || null,
+      providerParticipantUuid: participantUuid || null,
+      email: null,
     });
 
-    const best = scoped.sort((a: any, b: any) => {
-      const rank = (row: any) => {
-        let score = 0;
-        if (bibKey && normalizeLower(getRowBib(row)) === bibKey) score += 3;
-        if (participantKey && normalizeLower(getRowParticipantUuid(row)) === participantKey) score += 6;
-        if (contestKey && normalizeLower(getRowContestUuid(row)) === contestKey) score += 2;
-        if (parseSeconds(row?.finish_time ?? row?.official_time ?? row?.total_time)) score += 1;
-        return score;
-      };
-      return rank(b) - rank(a);
-    })[0] || null;
+    const cachedLiveResult = await loadCachedLiveResult(eventId, {
+      bib: bib || null,
+      participantUuid: participantUuid || normalizedAthlete.resolvedParticipantUuid || null,
+      contestUuid: contestUuid || normalizedAthlete.contestUuid || null,
+    });
 
-    const splits = best ? buildStructuredSplits(best) : [];
-    const fallbackSplits = best && splits.length === 0 ? buildFallbackSplits(best) : [];
-    const normalizedSplits = splits.length > 0 ? splits : fallbackSplits;
+    const athleteRecord = participantView?.merged || participantView?.participantLive || normalizedAthlete.athlete;
+    const liveTiming = participantView?.participantLive || cachedLiveResult?.timing || null;
+    const timingSource = liveTiming || athleteRecord;
+    const splits = Array.isArray(timingSource?.splits) && timingSource.splits.length > 0
+      ? timingSource.splits
+      : buildStructuredSplits(timingSource?.rawResult || timingSource).length > 0
+        ? buildStructuredSplits(timingSource?.rawResult || timingSource)
+        : buildFallbackSplits(timingSource?.rawResult || timingSource);
 
     const responsePayload = {
       success: true,
       providerAvailable: true,
       liveAvailable: true,
-      splitsAvailable: normalizedSplits.length > 0,
+      splitsAvailable: splits.length > 0,
       eventId,
-      athlete: normalizedAthlete.athlete,
+      athlete: athleteRecord,
       bib: bib || null,
-      participantUuid: normalizedAthlete.resolvedParticipantUuid || null,
-      contestUuid: contestUuid || null,
-      mappingSource: normalizedAthlete.mappingSource,
-      mappedProviderParticipantUuid: normalizedAthlete.resolvedParticipantUuid || null,
-      endpoint: upstream.path,
-      endpointUrl: upstream.url,
-      providerCount: upstream.rows.length,
-      matchedCount: scoped.length,
-      found: Boolean(best),
-      status: normalizeStatus(best?.status ?? best?.result_status ?? best?.race_status),
-      resolvedBib: best ? getRowBib(best) : null,
-      resolvedParticipantUuid: best ? getRowParticipantUuid(best) : null,
-      resolvedContestUuid: best ? getRowContestUuid(best) : null,
-      splits: normalizedSplits,
-      rawResult: best,
-      rawPayloadSample: upstream.raw,
+      participantUuid: participantView?.merged?.participantUuid || participantView?.merged?.providerParticipantUuid || participantView?.bookingId || participantUuid || null,
+      contestUuid: participantView?.contestUuid || contestUuid || null,
+      mappingSource: participantView ? 'kv' : normalizedAthlete.mappingSource,
+      mappedProviderParticipantUuid: participantView?.merged?.participantUuid || participantView?.merged?.providerParticipantUuid || participantUuid || null,
+      endpoint: null,
+      endpointUrl: null,
+      providerCount: splits.length,
+      matchedCount: splits.length,
+      found: Boolean(liveTiming),
+      status: normalizeStatus(timingSource?.status ?? timingSource?.result_status ?? timingSource?.race_status),
+      resolvedBib: normalize(timingSource?.bib || bib || null) || null,
+      resolvedParticipantUuid: normalize(timingSource?.participantUuid || timingSource?.participant_uuid || participantUuid || null) || null,
+      resolvedContestUuid: normalize(timingSource?.contestUuid || timingSource?.contest_uuid || contestUuid || null) || null,
+      splits,
+      rawResult: timingSource || null,
+      rawPayloadSample: timingSource || null,
       cacheHit: false,
-      message: normalizedSplits.length > 0 ? 'Live timing loaded.' : 'Waiting for live timing.',
+      message: splits.length > 0 ? 'Live timing loaded from KV.' : 'Waiting for live timing.',
     };
 
     console.log('[athlete-results]', {
       eventId,
       bib: bib || null,
       contestUuid: contestUuid || null,
-      providerParticipantUuid: normalizedAthlete.resolvedParticipantUuid || null,
-      requestUrl: upstream.url,
+      providerParticipantUuid: participantUuid || null,
+      requestUrl: null,
       httpStatus: 200,
       providerResponse: {
-        matchedCount: scoped.length,
-        found: Boolean(best),
+        matchedCount: splits.length,
+        found: Boolean(liveTiming),
         status: responsePayload.status,
       },
     });

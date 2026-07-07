@@ -112,6 +112,50 @@ function lookupIndexValue(index: any, mapName: string, keys: string[]) {
   return null;
 }
 
+function getParticipantDedupKey(row: any) {
+  const participantUuid = normalize(row?.participantUuid || row?.participant_uuid || row?.providerParticipantUuid || row?.providerTimingUuid || row?.providerTimingId || row?.providerUuid || row?.provider?.providerUuid || row?.id);
+  if (participantUuid) return `participant:${participantUuid.toLowerCase()}`;
+
+  const providerTimingUuid = normalize(row?.providerTimingUuid || row?.provider_timing_uuid || row?.timingUuid || row?.timing_uuid);
+  if (providerTimingUuid) return `timing:${providerTimingUuid.toLowerCase()}`;
+
+  const bib = normalize(row?.bib || row?.bibNumber).replace(/^0+/, '');
+  if (bib) return `bib:${bib.toLowerCase()}`;
+
+  const athleteUid = normalize(row?.athleteUid || row?.userId || row?.bergmanAthleteId);
+  if (athleteUid) return `athlete:${athleteUid.toLowerCase()}`;
+
+  return '';
+}
+
+async function loadLiveParticipant(eventId: string, params: { bookingId?: string | null; participantUuid?: string | null; providerAthleteId?: string | null; bib?: string | null; athleteUid?: string | null }) {
+  const bookingId = normalize(params.bookingId);
+  const participantUuid = normalize(params.participantUuid);
+  const providerAthleteId = normalize(params.providerAthleteId);
+  const bib = normalize(params.bib).replace(/^0+/, '');
+  const athleteUid = normalize(params.athleteUid);
+
+  const candidateKeys = [
+    providerAthleteId ? `live:event:${eventId}:result:${providerAthleteId}` : null,
+    participantUuid ? `live:event:${eventId}:result:${participantUuid}` : null,
+    bookingId ? `live:event:${eventId}:result:${bookingId}` : null,
+    athleteUid ? `live:event:${eventId}:result:${athleteUid}` : null,
+    bib ? `live:event:${eventId}:result:${bib}` : null,
+    providerAthleteId ? `live:event:${eventId}:participantLive:${providerAthleteId}` : null,
+    participantUuid ? `live:event:${eventId}:participantLive:${participantUuid}` : null,
+    bookingId ? `live:event:${eventId}:participantLive:${bookingId}` : null,
+    athleteUid ? `live:event:${eventId}:participantLive:${athleteUid}` : null,
+    bib ? `live:event:${eventId}:participantLive:${bib}` : null,
+  ].filter(Boolean) as string[];
+
+  for (const key of candidateKeys) {
+    const value = await getKV<any>(key, 'liveTrackingParticipantStore');
+    if (value && typeof value === 'object') return value;
+  }
+
+  return null;
+}
+
 export async function loadParticipantIndex(eventId: string) {
   const primary =
     (await getKV<any>(`live:event:${eventId}:participant:index`, 'liveTrackingParticipantStore')) || null;
@@ -268,13 +312,35 @@ export async function loadParticipantIndex(eventId: string) {
 
 export function getParticipantRowsFromIndex(index: any): any[] {
   if (!index) return [];
-  if (Array.isArray(index)) return index;
-  if (Array.isArray(index?.participants)) return index.participants;
-  if (Array.isArray(index?.rows)) return index.rows;
-  if (Array.isArray(index?.data)) return index.data;
-  if (index?.byUuid && typeof index.byUuid === 'object') return Object.values(index.byUuid);
-  if (index?.byBib && typeof index.byBib === 'object') return Object.values(index.byBib);
-  return [];
+  const sourceRows = Array.isArray(index)
+    ? index
+    : Array.isArray(index?.participants)
+      ? index.participants
+      : Array.isArray(index?.rows)
+        ? index.rows
+        : Array.isArray(index?.data)
+          ? index.data
+          : index?.byUuid && typeof index.byUuid === 'object'
+            ? Object.values(index.byUuid)
+            : index?.byBib && typeof index.byBib === 'object'
+              ? Object.values(index.byBib)
+              : [];
+
+  const deduped = new Map<string, any>();
+  for (const row of sourceRows) {
+    if (!row || typeof row !== 'object') continue;
+    const key = getParticipantDedupKey(row);
+    if (!key) continue;
+    if (!deduped.has(key)) {
+      deduped.set(key, row);
+      continue;
+    }
+    // Merge: prefer new row but keep existing values if new row doesn't have them
+    const existing = deduped.get(key);
+    deduped.set(key, { ...existing, ...row });
+  }
+
+  return Array.from(deduped.values());
 }
 
 export function resolveBookingIdFromIndex(index: any, query: { bookingId?: string | null; bib?: string | null; athleteUid?: string | null; providerParticipantUuid?: string | null; email?: string | null }) {
@@ -343,10 +409,6 @@ async function loadStaticParticipant(eventId: string, bookingId: string | null, 
   return (await getKV<any>(`live:event:${eventId}:timingParticipant:${bookingId}`, 'liveTrackingParticipantStore')) || null;
 }
 
-async function loadLiveParticipant(eventId: string, bookingId: string | null) {
-  if (!bookingId) return null;
-  return (await getKV<any>(`live:event:${eventId}:participantLive:${bookingId}`, 'liveTrackingParticipantStore')) || null;
-}
 
 export async function loadParticipantPublicView(eventId: string, query: { bookingId?: string | null; bib?: string | null; athleteUid?: string | null; providerParticipantUuid?: string | null; email?: string | null }) {
   const [index, ticketMappings] = await Promise.all([
@@ -360,7 +422,7 @@ export async function loadParticipantPublicView(eventId: string, query: { bookin
 
   const [participantDoc, participantLive, courseIndex] = await Promise.all([
     loadStaticParticipant(eventId, resolvedBookingId, indexRow?.participantUuid || indexRow?.participant_uuid || null),
-    loadLiveParticipant(eventId, resolvedBookingId),
+    loadLiveParticipant(eventId, { bookingId: resolvedBookingId }),
     loadCourseIndex(eventId),
   ]);
 

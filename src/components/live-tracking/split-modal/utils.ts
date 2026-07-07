@@ -160,6 +160,19 @@ const normalizeDistanceFromPoint = (point: Record<string, any>) => {
   return null;
 };
 
+const extractDistanceFromText = (text: unknown) => {
+  const value = String(text ?? '').trim();
+  if (!value) return null;
+
+  const match = value.match(/(\d+(?:\.\d+)?)(?=\s*(?:km|kilometer|kilometre)?\b)/i)
+    || value.match(/(\d+(?:\.\d+)?)(?!.*\d)/i);
+  if (!match) return null;
+
+  const numeric = Number(match[1]);
+  if (!Number.isFinite(numeric) || numeric < 0) return null;
+  return numeric;
+};
+
 const getContestKey = (value: unknown) => normalize(value);
 
 const getDateKey = (value: unknown) => {
@@ -883,6 +896,22 @@ export const getTimingPointDistanceKm = (point: ResolvedTimingPoint) => {
     if (normalized !== null) return normalized;
   }
 
+  const labelCandidates = [
+    point.displayName,
+    point.shortName,
+    point.providerCode,
+    point.providerId,
+    raw?.split?.name,
+    raw?.split?.label,
+    raw?.split?.Name,
+    raw?.split?.Label,
+  ];
+
+  for (const candidate of labelCandidates) {
+    const parsed = extractDistanceFromText(candidate);
+    if (parsed !== null) return parsed;
+  }
+
   return null;
 };
 
@@ -920,7 +949,16 @@ const findSplitForPoint = (point: ResolvedTimingPoint, splits: Split[]) => {
     point.providerCode,
     point.displayName,
     point.shortName,
-  ].map((value) => String(value || '').trim()).filter(Boolean);
+    (point.raw as any)?.split?.TimingPointUUID,
+    (point.raw as any)?.split?.timingPointUUID,
+    (point.raw as any)?.split?.timing_point_uuid,
+    (point.raw as any)?.split?.timing_point_id,
+    (point.raw as any)?.split?.UUID,
+    (point.raw as any)?.split?.uuid,
+    (point.raw as any)?.split?.id,
+  ]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
   for (const split of splits) {
     const splitKeys = [
       split.id,
@@ -932,7 +970,17 @@ const findSplitForPoint = (point: ResolvedTimingPoint, splits: Split[]) => {
       split.segment,
       split.name,
       split.label,
-    ].map((value) => String(value || '').trim()).filter(Boolean);
+      (split as any)?.timingPointId,
+      (split as any)?.timing_point_id,
+      (split as any)?.timingPointUUID,
+      (split as any)?.timing_point_uuid,
+      (split as any)?.raw?.timing_point_id,
+      (split as any)?.raw?.timingPointId,
+      (split as any)?.raw?.timing_point_uuid,
+      (split as any)?.raw?.timingPointUUID,
+    ]
+      .map((value) => String(value || '').trim().toLowerCase())
+      .filter(Boolean);
     const matched = pointKeys.some((pointKey) => splitKeys.some((splitKey) => splitKey === pointKey));
     if (matched) return split;
   }
@@ -1004,6 +1052,38 @@ type ResolvedLegBoundary = {
   order: number;
   configuration: Record<string, any> | null;
   raw: Record<string, any>;
+};
+
+type SavedLegMapping = {
+  leg_index: number;
+  leg_name: string;
+  display_order: number;
+  enabled: boolean;
+  metadata?: Record<string, any>;
+};
+
+type SavedSplitMapping = {
+  split_index: number;
+  split_name: string;
+  timing_point_id: string;
+  timing_point_name: string;
+  leg_index: number;
+  display_order: number;
+  distance?: number | null;
+  split_type?: string | null;
+  visibility?: 'visible' | 'hidden';
+  metadata?: Record<string, any>;
+};
+
+type SavedLegSplitMapping = {
+  event_id?: string;
+  contest_id?: string;
+  contest_name?: string;
+  legs?: SavedLegMapping[];
+  splits?: SavedSplitMapping[];
+  updated_at?: string;
+  updated_by?: string;
+  version?: string;
 };
 
 const normalizeLookup = (value: unknown) => String(value ?? '').trim().toLowerCase();
@@ -1125,6 +1205,84 @@ const resolveContestLegs = (timingConfiguration: ResolvedTimingConfiguration | n
     .filter(Boolean) as ResolvedLegBoundary[];
 
   return resolved.sort((a, b) => a.order - b.order);
+};
+
+const resolveSavedLegSplitMapping = (
+  timingConfiguration: ResolvedTimingConfiguration | null | undefined,
+  contestUuid: string | null,
+  contestName: string | null,
+): SavedLegSplitMapping | null => {
+  const source = timingConfiguration as any;
+  const target = String(contestUuid || '').trim();
+  const targetName = String(contestName || '').trim();
+  if (!source) return null;
+  const mappingSources: Array<Record<string, any> | null> = [
+    source?.raceFlowByContest && typeof source.raceFlowByContest === 'object' ? source.raceFlowByContest : null,
+    source?.raceFlowTimelineByContest && typeof source.raceFlowTimelineByContest === 'object' ? source.raceFlowTimelineByContest : null,
+    source?.legSplitMappingsByContest && typeof source.legSplitMappingsByContest === 'object' ? source.legSplitMappingsByContest : null,
+  ];
+
+  const normalizeMappingEntry = (entry: any): SavedLegSplitMapping | null => {
+    if (!entry || typeof entry !== 'object') return null;
+    if (Array.isArray(entry?.legs) && Array.isArray(entry?.splits)) {
+      return entry as SavedLegSplitMapping;
+    }
+    if (entry?.mapping && typeof entry.mapping === 'object' && Array.isArray(entry.mapping?.legs) && Array.isArray(entry.mapping?.splits)) {
+      return entry.mapping as SavedLegSplitMapping;
+    }
+    return null;
+  };
+
+  const lookupFromSource = (mappings: Record<string, any>): SavedLegSplitMapping | null => {
+    if (!mappings || typeof mappings !== 'object') return null;
+
+    if (target) {
+      const direct = normalizeMappingEntry(mappings[target]) || normalizeMappingEntry(mappings[target.toLowerCase()]) || null;
+      if (direct) return direct;
+    }
+
+    if (target) {
+      const normalizedTarget = normalizeLookup(target);
+      const matchedKey = Object.keys(mappings).find((key) => normalizeLookup(key) === normalizedTarget);
+      if (matchedKey) {
+        const matched = normalizeMappingEntry(mappings[matchedKey]);
+        if (matched) return matched;
+      }
+    }
+
+    const lookupByName = (name: string) => {
+      const normalizedName = normalizeLookup(name);
+      if (!normalizedName) return null;
+      const contestIndex = source?.contestIndex && typeof source.contestIndex === 'object' ? source.contestIndex : null;
+      if (contestIndex) {
+        const match = (Object.values(contestIndex) as any[]).find((contest: any) => normalizeLookup(contest?.contestName || contest?.name || contest?.label || '') === normalizedName);
+        const contestUuidMatch = String(match?.contestUuid || match?.uuid || match?.id || '').trim();
+        if (contestUuidMatch) {
+          const directByContest = normalizeMappingEntry(mappings[contestUuidMatch]) || normalizeMappingEntry(mappings[contestUuidMatch.toLowerCase()]);
+          if (directByContest) return directByContest;
+        }
+      }
+
+      const byContestEntries = Object.values(mappings)
+        .map((entry: any) => normalizeMappingEntry(entry))
+        .filter(Boolean) as SavedLegSplitMapping[];
+      return byContestEntries.find((entry) => normalizeLookup(entry?.contest_name || '') === normalizedName) || null;
+    };
+
+    if (targetName) {
+      const byName = lookupByName(targetName);
+      if (byName) return byName;
+    }
+
+    return null;
+  };
+  for (const mappings of mappingSources) {
+    if (!mappings) continue;
+    const resolved = lookupFromSource(mappings);
+    if (resolved) return resolved;
+  }
+
+  return null;
 };
 
 export const getSplitAverage = (theme: SectionThemeKey, splitSeconds: number | null, distanceKm: number | null, sectionDistanceKm: number | null) => {
@@ -1285,7 +1443,280 @@ export const buildSplitModalModel = ({ athlete, timingConfiguration, participant
   const bib = String((athlete as any)?.bib ?? '').trim();
   const participantRecord = participant ?? participantsByBib?.[bib] ?? participantsByBib?.[bib.replace(/^0+/, '')] ?? null;
   const participantProfile = resolveParticipantProfile(participantRecord, athlete);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+
+  const parseEpochSeconds = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      return value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      const numeric = Number(trimmed);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        return numeric > 1_000_000_000_000 ? Math.floor(numeric / 1000) : Math.floor(numeric);
+      }
+      const parsed = Date.parse(trimmed);
+      if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed / 1000);
+    }
+    return null;
+  };
+
+  const parseDateTimeSeconds = (dateValue: unknown, timeValue: unknown): number | null => {
+    const dateText = String(dateValue || '').trim();
+    const timeText = String(timeValue || '').trim();
+    if (!dateText || !timeText) return null;
+    if (!/^\d{1,2}:\d{2}(:\d{2})?$/.test(timeText)) return null;
+    const normalizedDate = /^\d{4}-\d{2}-\d{2}$/.test(dateText) ? dateText : dateText.slice(0, 10);
+    const parsed = Date.parse(`${normalizedDate}T${timeText}`);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return Math.floor(parsed / 1000);
+  };
+
+  const sourceAny = timingConfiguration as any;
+  const contestUuidForStart = String(participantProfile.contestUuid || '').trim();
+  const contestKeyForStart = contestUuidForStart.toLowerCase();
+  const contestSource = contestUuidForStart
+    ? (
+      sourceAny?.contestIndex?.[contestUuidForStart]?.contest
+      || sourceAny?.contestIndex?.[contestUuidForStart]
+      || sourceAny?.contestIndex?.[contestKeyForStart]?.contest
+      || sourceAny?.contestIndex?.[contestKeyForStart]
+      || sourceAny?.contestByUuid?.[contestUuidForStart]
+      || sourceAny?.contestByUuid?.[contestKeyForStart]
+      || sourceAny?.splitIndex?.contestsByUuid?.[contestUuidForStart]
+      || sourceAny?.splitIndex?.contestsByUuid?.[contestKeyForStart]
+      || null
+    )
+    : null;
+
+  const firstTimestamp = (candidates: unknown[]): number | null => {
+    for (const candidate of candidates) {
+      const parsed = parseEpochSeconds(candidate);
+      if (parsed && parsed > 0) return parsed;
+    }
+    return null;
+  };
+
+  const officialStartTimeSeconds = firstTimestamp([
+    parseDateTimeSeconds(ticketDef?.eventDate, ticketDef?.raceStartTime || ticketDef?.startTime),
+    (participantRecord as any)?.official_start_time,
+    (participantRecord as any)?.officialStartTime,
+    (participantRecord as any)?.gun_start_time,
+    (participantRecord as any)?.gunStartTime,
+    (participantRecord as any)?.raceStartTime,
+    (participantRecord as any)?.eventStartTime,
+    (athlete as any)?.officialStartTime,
+    (athlete as any)?.gunStartTime,
+    (athlete as any)?.raceStartTime,
+    contestSource?.official_start_time,
+    contestSource?.officialStartTime,
+    contestSource?.gun_start_time,
+    contestSource?.gunStartTime,
+    contestSource?.startTime,
+    contestSource?.start_time,
+    contestSource?.eventStartTime,
+    contestSource?.eventStartAt,
+    contestSource?.ETD,
+    contestSource?.etd,
+    participantProfile.contestEtd,
+    participantProfile.contestDate,
+  ]);
+
+  const chipStartTimeSeconds = firstTimestamp([
+    (participantRecord as any)?.chip_start_time,
+    (participantRecord as any)?.chipStartTime,
+    (participantRecord as any)?.start_time,
+    (participantRecord as any)?.startTime,
+    (participantRecord as any)?.start_unix,
+    (participantRecord as any)?.startUnix,
+    (participantRecord as any)?.startTimestamp,
+    (participantRecord as any)?.result_start_timestamp,
+    (participantRecord as any)?.resultStartTimestamp,
+    (athlete as any)?.chipStartTime,
+    (athlete as any)?.start_time,
+    (athlete as any)?.startTime,
+    (athlete as any)?.startTimestamp,
+    participantProfile.startTime,
+  ]);
   const timingPointsRaw = dedupeResolvedTimingPoints([...resolution.points]).sort(compareTimingPointsInRaceOrder);
+  const savedLegSplitMapping = resolveSavedLegSplitMapping(timingConfiguration, participantProfile.contestUuid, participantProfile.contestName);
+  const mappingLegs = Array.isArray(savedLegSplitMapping?.legs)
+    ? [...(savedLegSplitMapping?.legs || [])]
+        .filter((leg) => leg?.enabled !== false)
+        .sort((a, b) => Number(a?.display_order ?? 0) - Number(b?.display_order ?? 0))
+    : [];
+  const mappingSplits = Array.isArray(savedLegSplitMapping?.splits)
+    ? [...(savedLegSplitMapping?.splits || [])]
+        .filter((split) => split?.visibility !== 'hidden')
+        .sort((a, b) => Number(a?.display_order ?? 0) - Number(b?.display_order ?? 0) || Number(a?.split_index ?? 0) - Number(b?.split_index ?? 0))
+    : [];
+
+  const mappingLegByIndex = mappingLegs.reduce<Record<number, SavedLegMapping>>((acc, leg) => {
+    acc[Number(leg?.leg_index ?? 0)] = leg;
+    return acc;
+  }, {});
+
+  const mappingLegOrderByIndex = mappingLegs.reduce<Record<number, number>>((acc, leg) => {
+    acc[Number(leg?.leg_index ?? 0)] = Number(leg?.display_order ?? 0);
+    return acc;
+  }, {});
+
+  const timingPointBySplitIndex = timingPointsRaw.reduce<Record<number, ResolvedTimingPoint[]>>((acc, point, index) => {
+    const rawSplit = (point.raw as any)?.split || {};
+    const splitIndex = Number(rawSplit?.split_index ?? rawSplit?.index ?? rawSplit?.Index ?? rawSplit?.order ?? rawSplit?.Order ?? index + 1);
+    if (!acc[splitIndex]) acc[splitIndex] = [];
+    acc[splitIndex].push(point);
+    return acc;
+  }, {});
+
+  const timingPointByTimingPointId = timingPointsRaw.reduce<Record<string, ResolvedTimingPoint>>((acc, point) => {
+    const key = normalizeLookup(point?.providerId || point?.canonicalUuid || (point.raw as any)?.split?.timingPointUuid || (point.raw as any)?.split?.TimingPointUUID || '');
+    if (key && !acc[key]) acc[key] = point;
+    return acc;
+  }, {});
+
+  const timingPointByName = timingPointsRaw.reduce<Record<string, ResolvedTimingPoint>>((acc, point) => {
+    const key = normalizeLookup(point?.displayName || point?.shortName || '');
+    if (key && !acc[key]) acc[key] = point;
+    return acc;
+  }, {});
+
+  const hasSavedLegSplitMapping = mappingLegs.length > 0 && mappingSplits.length > 0;
+
+  const mappedTimingPoints = mappingSplits.length > 0
+    ? mappingSplits.reduce<ResolvedTimingPoint[]>((acc, mappedSplit, mappedIndex) => {
+        const mappedSplitIndex = Number(mappedSplit?.split_index ?? mappedIndex + 1);
+        const mappedTimingPointId = normalizeLookup(mappedSplit?.timing_point_id || '');
+        const importedSplitName = normalizeLookup(mappedSplit?.metadata?.imported_split_name || mappedSplit?.timing_point_name || '');
+        const customSplitName = String(mappedSplit?.split_name || '').trim();
+        const mappedDistanceKm = normalizeDistanceFromPoint({
+          distanceKm: mappedSplit?.distance,
+          distance: mappedSplit?.distance,
+          cumulativeDistance: mappedSplit?.distance,
+          km: mappedSplit?.distance,
+          meters: mappedSplit?.distance,
+          distanceUnit: 'km',
+        }) ?? null;
+
+        let matchedPoint: ResolvedTimingPoint | null = null;
+
+        const indexedCandidates = timingPointBySplitIndex[mappedSplitIndex] || [];
+        if (indexedCandidates.length > 0) {
+          matchedPoint = indexedCandidates[0];
+        }
+
+        if (!matchedPoint && mappedTimingPointId) {
+          matchedPoint = timingPointByTimingPointId[mappedTimingPointId] || null;
+        }
+
+        if (!matchedPoint && importedSplitName) {
+          matchedPoint = timingPointByName[importedSplitName] || null;
+        }
+
+        if (!matchedPoint && customSplitName) {
+          matchedPoint = timingPointByName[normalizeLookup(customSplitName)] || null;
+        }
+
+        const mappedLeg = mappingLegByIndex[Number(mappedSplit?.leg_index ?? 0)] || null;
+
+        if (!matchedPoint) {
+          const syntheticLabel = customSplitName || mappedSplit?.timing_point_name || importedSplitName || `Split ${mappedSplitIndex}`;
+          const syntheticPoint: ResolvedTimingPoint = {
+            id: String(mappedSplit?.timing_point_id || mappedSplitIndex),
+            canonicalUuid: String(mappedSplit?.timing_point_id || mappedSplitIndex),
+            providerId: String(mappedSplit?.timing_point_id || mappedSplitIndex),
+            providerCode: String(mappedSplit?.timing_point_id || mappedSplitIndex),
+            displayName: syntheticLabel,
+            shortName: syntheticLabel,
+            eventId: null,
+            distance: mappedDistanceKm,
+            distanceKm: mappedDistanceKm,
+            leg: null,
+            order: Number(mappedSplit?.display_order ?? mappedSplitIndex),
+            latitude: 0,
+            longitude: 0,
+            markerType: 'checkpoint',
+            icon: 'checkpoint',
+            leaderboard: false,
+            transition: false,
+            finish: false,
+            visible: mappedSplit?.visibility !== 'hidden',
+            isLeaderboard: false,
+            isTransition: false,
+            isFinish: false,
+            raw: {
+              split: {
+                UUID: String(mappedSplit?.timing_point_id || mappedSplitIndex),
+                uuid: String(mappedSplit?.timing_point_id || mappedSplitIndex),
+                id: String(mappedSplit?.timing_point_id || mappedSplitIndex),
+                splitUuid: String(mappedSplit?.timing_point_id || mappedSplitIndex),
+                split_uuid: String(mappedSplit?.timing_point_id || mappedSplitIndex),
+                name: syntheticLabel,
+                label: syntheticLabel,
+                distance: mappedDistanceKm,
+                distanceKm: mappedDistanceKm,
+                cumulativeDistance: mappedDistanceKm,
+              },
+              legSplitMapping: {
+                ...mappedSplit,
+                leg_name: mappedLeg?.leg_name || null,
+              },
+            },
+          };
+          acc.push(syntheticPoint);
+          return acc;
+        }
+        acc.push({
+          ...matchedPoint,
+          displayName: customSplitName || matchedPoint.displayName,
+          shortName: customSplitName || matchedPoint.shortName,
+          distance: mappedDistanceKm ?? matchedPoint.distance,
+          distanceKm: mappedDistanceKm ?? matchedPoint.distanceKm,
+          leg: mappedLeg?.leg_name || matchedPoint.leg,
+          raw: {
+            ...(matchedPoint.raw || {}),
+            legSplitMapping: {
+              ...mappedSplit,
+              leg_name: mappedLeg?.leg_name || null,
+            },
+            split: {
+              ...((matchedPoint.raw as any)?.split || {}),
+              UUID: String(mappedSplit?.timing_point_id || mappedSplitIndex),
+              uuid: String(mappedSplit?.timing_point_id || mappedSplitIndex),
+              id: String(mappedSplit?.timing_point_id || mappedSplitIndex),
+              splitUuid: String(mappedSplit?.timing_point_id || mappedSplitIndex),
+              split_uuid: String(mappedSplit?.timing_point_id || mappedSplitIndex),
+              name: customSplitName || matchedPoint.displayName,
+              label: customSplitName || matchedPoint.shortName,
+              distance: mappedDistanceKm ?? (matchedPoint.raw as any)?.split?.distance,
+              distanceKm: mappedDistanceKm ?? (matchedPoint.raw as any)?.split?.distanceKm,
+              cumulativeDistance: mappedDistanceKm ?? (matchedPoint.raw as any)?.split?.cumulativeDistance,
+            },
+          },
+        });
+        return acc;
+      }, [])
+      .sort((a, b) => {
+        const aSplit = (a.raw as any)?.legSplitMapping || {};
+        const bSplit = (b.raw as any)?.legSplitMapping || {};
+        const aLegIndex = Number(aSplit?.leg_index ?? 0);
+        const bLegIndex = Number(bSplit?.leg_index ?? 0);
+        const aLegOrder = mappingLegOrderByIndex[aLegIndex] ?? Number.MAX_SAFE_INTEGER;
+        const bLegOrder = mappingLegOrderByIndex[bLegIndex] ?? Number.MAX_SAFE_INTEGER;
+        if (aLegOrder !== bLegOrder) return aLegOrder - bLegOrder;
+
+        const aSplitOrder = Number(aSplit?.display_order ?? 0) || Number(aSplit?.split_index ?? 0);
+        const bSplitOrder = Number(bSplit?.display_order ?? 0) || Number(bSplit?.split_index ?? 0);
+        if (aSplitOrder !== bSplitOrder) return aSplitOrder - bSplitOrder;
+
+        const aIndex = Number(aSplit?.split_index ?? 0) || 0;
+        const bIndex = Number(bSplit?.split_index ?? 0) || 0;
+        return aIndex - bIndex;
+      })
+    : [];
+
   const athleteSplits = (Array.isArray(athlete.splits) ? [...athlete.splits] : []).filter((split) => typeof split?.time === 'number' && split.time >= 0).sort((a, b) => (a.time || 0) - (b.time || 0));
   const athleteStatusRaw = String(participantProfile.startTime ? athlete.status || '' : athlete.status || '').trim().toLowerCase();
   const courseMaps: any = ticketDef?.courseMaps || {};
@@ -1303,7 +1734,9 @@ export const buildSplitModalModel = ({ athlete, timingConfiguration, participant
     ? (ticketDef as any).subCategories.find((sub: any) => String(sub?.id || '').trim() === athleteSubCategoryId)
     : null;
 
-  const timingPoints = timingPointsRaw;
+  const timingPoints = hasSavedLegSplitMapping
+    ? mappedTimingPoints
+    : timingPointsRaw;
   const noContestAssigned = resolution.noContestAssigned && timingPoints.length === 0;
 
   const normalizeCourseDistanceKm = (value: unknown) => {
@@ -1481,79 +1914,66 @@ export const buildSplitModalModel = ({ athlete, timingConfiguration, participant
     });
 
   const sections: SectionGroup[] = [];
-  const resolvedContestLegs = resolveContestLegs(timingConfiguration, participantProfile.contestUuid);
   const legErrors: string[] = [];
 
-  if (resolvedContestLegs.length > 0) {
-    const rowSplitLookup = rows.reduce<Map<string, number[]>>((map, row, index) => {
-      const key = normalizeLookup(row.splitUuid);
-      if (!key) return map;
-      const current = map.get(key) || [];
-      current.push(index);
-      map.set(key, current);
-      return map;
-    }, new Map<string, number[]>());
+  if (hasSavedLegSplitMapping) {
+    const rowBySplitIndex = new Map<number, TimingRow>();
+    const rowByTimingPointId = new Map<string, TimingRow>();
 
-    const rowLegLookup = rows.reduce<Map<string, number[]>>((map, row, index) => {
-      const splitUuidKey = normalizeLookup(row.splitUuid);
-      const splitSource = splitUuidKey ? scopedSplitByUuid[splitUuidKey] : null;
-      const legUuid = extractLegUuidFromSplit(splitSource || ((row.point.raw as any)?.split || null));
-      const legKey = normalizeLookup(legUuid);
-      if (!legKey) return map;
-      const current = map.get(legKey) || [];
-      current.push(index);
-      map.set(legKey, current);
-      return map;
-    }, new Map<string, number[]>());
+    for (const row of rows) {
+      const mappedSplit = (row.point.raw as any)?.legSplitMapping || {};
+      const splitIndex = Number(mappedSplit?.split_index ?? NaN);
+      if (Number.isFinite(splitIndex) && !rowBySplitIndex.has(splitIndex)) {
+        rowBySplitIndex.set(splitIndex, row);
+      }
 
-    const assignedRowIndexes = new Set<number>();
+      const timingPointId = normalizeLookup(mappedSplit?.timing_point_id || row.splitUuid || row.point.providerId || row.point.canonicalUuid || '');
+      if (timingPointId && !rowByTimingPointId.has(timingPointId)) {
+        rowByTimingPointId.set(timingPointId, row);
+      }
+    }
 
     let previousSectionEnd: number | null = null;
-    for (const leg of resolvedContestLegs) {
-      const theme = resolveLegTheme(leg);
-      const legKey = normalizeLookup(leg.uuid);
-      let sectionRows = (rowLegLookup.get(legKey) || [])
-        .filter((index) => !assignedRowIndexes.has(index))
-        .sort((a, b) => a - b)
-        .map((index) => rows[index]);
+    for (const leg of mappingLegs) {
+      const theme = resolveLegTheme({
+        id: `mapped-leg-${leg.leg_index}`,
+        uuid: `mapped-leg-${leg.leg_index}`,
+        contestUuid: participantProfile.contestUuid,
+        name: leg.leg_name,
+        label: leg.leg_name,
+        color: null,
+        firstSplitUuid: null,
+        lastSplitUuid: null,
+        order: Number(leg.display_order ?? leg.leg_index),
+        configuration: null,
+        raw: leg as any,
+      });
+
+      const legSplits = mappingSplits
+        .filter((split) => Number(split?.leg_index ?? 0) === Number(leg.leg_index))
+        .sort((a, b) => Number(a.display_order ?? 0) - Number(b.display_order ?? 0) || Number(a.split_index ?? 0) - Number(b.split_index ?? 0));
+
+      const sectionRows = legSplits
+        .map((split) => {
+          const splitIndex = Number(split?.split_index ?? NaN);
+          const timingPointId = normalizeLookup(split?.timing_point_id || '');
+          return (Number.isFinite(splitIndex) && rowBySplitIndex.get(splitIndex))
+            || (timingPointId ? rowByTimingPointId.get(timingPointId) : null)
+            || null;
+        })
+        .filter((row): row is TimingRow => Boolean(row));
 
       if (sectionRows.length === 0) {
-        const firstCandidates = rowSplitLookup.get(normalizeLookup(leg.firstSplitUuid)) || [];
-        const lastCandidates = rowSplitLookup.get(normalizeLookup(leg.lastSplitUuid)) || [];
-        const startIndex = firstCandidates.length > 0 ? firstCandidates[0] : -1;
-        const endIndex = lastCandidates.length > 0 ? lastCandidates[lastCandidates.length - 1] : -1;
-
-        if (startIndex >= 0 && endIndex >= 0) {
-          const from = Math.min(startIndex, endIndex);
-          const to = Math.max(startIndex, endIndex);
-          sectionRows = rows.slice(from, to + 1).filter((row) => !assignedRowIndexes.has(row.index));
-        }
-      }
-
-      if (theme === 'transition') {
-        sectionRows = sectionRows.filter((row) => getTheme(row.point) === 'transition');
-      }
-
-      if (theme === 'swim' || theme === 'bike' || theme === 'run') {
-        const filteredRows = sectionRows.filter((row) => {
-          const rowTheme = getTheme(row.point);
-          return rowTheme === theme || rowTheme === 'finish';
-        });
-        if (filteredRows.length > 0) sectionRows = filteredRows;
-      }
-
-      if (sectionRows.length === 0) {
-        legErrors.push(`[LEG ERROR] Leg resolved zero splits leg=${leg.name} uuid=${leg.uuid}`);
+        legErrors.push(`[LEG ERROR] Leg resolved zero splits leg=${leg.leg_name} index=${leg.leg_index}`);
         continue;
       }
 
-      sectionRows.forEach((row) => assignedRowIndexes.add(row.index));
       const from = Math.min(...sectionRows.map((row) => row.index));
       const to = Math.max(...sectionRows.map((row) => row.index));
       const section: SectionGroup = {
-        key: leg.uuid,
+        key: `mapped-leg-${leg.leg_index}`,
         theme,
-        label: leg.name || leg.label || 'LEG',
+        label: leg.leg_name || 'LEG',
         iconKey: theme,
         rows: sectionRows,
         startIndex: from,
@@ -1568,37 +1988,139 @@ export const buildSplitModalModel = ({ athlete, timingConfiguration, participant
       previousSectionEnd = summarizeSection(section, athlete, previousSectionEnd) ?? previousSectionEnd;
       sections.push(section);
     }
-  }
+  } else {
+    const resolvedContestLegs = resolveContestLegs(timingConfiguration, participantProfile.contestUuid);
 
-  if (sections.length === 0) {
-    let currentSection: SectionGroup | null = null;
-    let previousSectionEnd: number | null = null;
-    rows.forEach((row, index) => {
-      const sectionTheme = getMajorSectionTheme(row.point, currentSection?.theme || null);
-      const key = sectionTheme;
-      if (!currentSection || currentSection.key !== key) {
-        if (currentSection) {
-          previousSectionEnd = summarizeSection(currentSection, athlete, previousSectionEnd) ?? previousSectionEnd;
-          sections.push(currentSection);
+    if (resolvedContestLegs.length > 0) {
+      const rowSplitLookup = rows.reduce<Map<string, number[]>>((map, row, index) => {
+        const key = normalizeLookup(row.splitUuid);
+        if (!key) return map;
+        const current = map.get(key) || [];
+        current.push(index);
+        map.set(key, current);
+        return map;
+      }, new Map<string, number[]>());
+
+      const rowLegLookup = rows.reduce<Map<string, number[]>>((map, row, index) => {
+        const splitUuidKey = normalizeLookup(row.splitUuid);
+        const splitSource = splitUuidKey ? scopedSplitByUuid[splitUuidKey] : null;
+        const legUuid = extractLegUuidFromSplit(splitSource || ((row.point.raw as any)?.split || null));
+        const legKey = normalizeLookup(legUuid);
+        if (!legKey) return map;
+        const current = map.get(legKey) || [];
+        current.push(index);
+        map.set(legKey, current);
+        return map;
+      }, new Map<string, number[]>());
+
+      const assignedRowIndexes = new Set<number>();
+
+      let previousSectionEnd: number | null = null;
+      for (const leg of resolvedContestLegs) {
+        const theme = resolveLegTheme(leg);
+        const legKey = normalizeLookup(leg.uuid);
+        let sectionRows = (rowLegLookup.get(legKey) || [])
+          .filter((index) => !assignedRowIndexes.has(index))
+          .sort((a, b) => a - b)
+          .map((index) => rows[index]);
+
+        if (sectionRows.length === 0) {
+          const firstCandidates = rowSplitLookup.get(normalizeLookup(leg.firstSplitUuid)) || [];
+          const lastCandidates = rowSplitLookup.get(normalizeLookup(leg.lastSplitUuid)) || [];
+          const startIndex = firstCandidates.length > 0 ? firstCandidates[0] : -1;
+          const endIndex = lastCandidates.length > 0 ? lastCandidates[lastCandidates.length - 1] : -1;
+
+          if (startIndex >= 0 && endIndex >= 0) {
+            const from = Math.min(startIndex, endIndex);
+            const to = Math.max(startIndex, endIndex);
+            sectionRows = rows.slice(from, to + 1).filter((row) => !assignedRowIndexes.has(row.index));
+          }
         }
-        currentSection = { key, theme: sectionTheme, label: sectionTheme.toUpperCase(), iconKey: sectionTheme, rows: [], startIndex: index, endIndex: index, reachedCount: 0, durationSeconds: null, paceText: '—', primaryMetricLabel: '', primaryMetricValue: '—', summaryChips: [] };
+
+        if (theme === 'swim' || theme === 'bike' || theme === 'run') {
+          const filteredRows = sectionRows.filter((row) => {
+            const rowTheme = getTheme(row.point);
+            return rowTheme === theme || rowTheme === 'finish';
+          });
+          if (filteredRows.length > 0) sectionRows = filteredRows;
+        }
+
+        if (sectionRows.length === 0) {
+          legErrors.push(`[LEG ERROR] Leg resolved zero splits leg=${leg.name} uuid=${leg.uuid}`);
+          continue;
+        }
+
+        sectionRows.forEach((row) => assignedRowIndexes.add(row.index));
+        const from = Math.min(...sectionRows.map((row) => row.index));
+        const to = Math.max(...sectionRows.map((row) => row.index));
+        const section: SectionGroup = {
+          key: leg.uuid,
+          theme,
+          label: leg.name || leg.label || 'LEG',
+          iconKey: theme,
+          rows: sectionRows,
+          startIndex: from,
+          endIndex: to,
+          reachedCount: sectionRows.filter((row) => row.reached).length,
+          durationSeconds: null,
+          paceText: '—',
+          primaryMetricLabel: '',
+          primaryMetricValue: '—',
+          summaryChips: [],
+        };
+        previousSectionEnd = summarizeSection(section, athlete, previousSectionEnd) ?? previousSectionEnd;
+        sections.push(section);
       }
-      currentSection.rows.push(row);
-      currentSection.endIndex = index;
-      if (row.reached) currentSection.reachedCount += 1;
-    });
-    if (currentSection) {
-      summarizeSection(currentSection, athlete, previousSectionEnd);
-      sections.push(currentSection);
+    }
+
+    if (sections.length === 0) {
+      let currentSection: SectionGroup | null = null;
+      let previousSectionEnd: number | null = null;
+      rows.forEach((row, index) => {
+        const sectionTheme = getMajorSectionTheme(row.point, currentSection?.theme || null);
+        const key = sectionTheme;
+        if (!currentSection || currentSection.key !== key) {
+          if (currentSection) {
+            previousSectionEnd = summarizeSection(currentSection, athlete, previousSectionEnd) ?? previousSectionEnd;
+            sections.push(currentSection);
+          }
+          currentSection = { key, theme: sectionTheme, label: sectionTheme.toUpperCase(), iconKey: sectionTheme, rows: [], startIndex: index, endIndex: index, reachedCount: 0, durationSeconds: null, paceText: '—', primaryMetricLabel: '', primaryMetricValue: '—', summaryChips: [] };
+        }
+        currentSection.rows.push(row);
+        currentSection.endIndex = index;
+        if (row.reached) currentSection.reachedCount += 1;
+      });
+      if (currentSection) {
+        summarizeSection(currentSection, athlete, previousSectionEnd);
+        sections.push(currentSection);
+      }
     }
   }
+
+  const filteredSections = mappingSplits.length > 0
+    ? sections.filter((section) => section.rows.length > 0)
+    : sections.filter((section) => {
+        const theme = section.theme;
+        if (theme === 'transition' || theme === 'generic') return true;
+
+        const hasSwimSplits = Array.isArray(courseMaps.swimSplits) && courseMaps.swimSplits.length > 0;
+        const hasBikeSplits = Array.isArray(courseMaps.bikeSplits) && courseMaps.bikeSplits.length > 0;
+        const hasRunSplits = (Array.isArray(courseMaps.run2Splits) && courseMaps.run2Splits.length > 0)
+                          || (Array.isArray(courseMaps.runSplits) && courseMaps.runSplits.length > 0);
+
+        if (theme === 'swim') return hasSwimSplits;
+        if (theme === 'bike') return hasBikeSplits;
+        if (theme === 'run') return hasRunSplits;
+
+        return true;
+      });
 
   const completedRows = rows.filter((row) => row.reached).length;
   const lastReachedRow = [...rows].reverse().find((row) => row.reached) || null;
   const nextExpectedRow = rows.find((row) => !row.reached) || rows[rows.length - 1] || null;
   const currentPoint = rows.find((row) => row.state === 'current') || null;
   const selectedSection = currentPoint
-    ? sections.find((section) => section.rows.some((row) => row.point.id === currentPoint.point.id && row.index === currentPoint.index)) || sections[0] || null
+    ? filteredSections.find((section) => section.rows.some((row) => row.point.id === currentPoint.point.id && row.index === currentPoint.index)) || filteredSections[0] || null
     : null;
   const totalDistanceKm: number = (() => {
     const finishPoint = timingPoints.find((point: ResolvedTimingPoint) => isFinishPoint(point));
@@ -1615,7 +2137,7 @@ export const buildSplitModalModel = ({ athlete, timingConfiguration, participant
   const rankSummary = shouldShowRanks
     ? { overall: getRank(athlete, 'overall'), gender: getRank(athlete, 'gender'), category: getRank(athlete, 'category') }
     : { overall: null, gender: null, category: null };
-  sections.forEach((section) => {
+  filteredSections.forEach((section) => {
     section.summaryChips = [
       { label: 'Overall', value: getRankChip(rankSummary.overall) },
       { label: 'Gender', value: getRankChip(rankSummary.gender) },
@@ -1633,10 +2155,62 @@ export const buildSplitModalModel = ({ athlete, timingConfiguration, participant
           : completedRows === 0
             ? 'Not Yet Started'
             : 'On Course';
+  const hasOfficialStart = Boolean(officialStartTimeSeconds && officialStartTimeSeconds > 0);
+  const officialStarted = hasOfficialStart ? nowSeconds >= Number(officialStartTimeSeconds) : completedRows > 0;
+  const hasChipStart = Boolean((chipStartTimeSeconds && chipStartTimeSeconds > 0) || completedRows > 0);
+  const hasAnyLiveProgress = completedRows > 0;
+
+  const chipRaceTimeSeconds = (() => {
+    if (typeof totalRaceTimeSeconds === 'number' && Number.isFinite(totalRaceTimeSeconds) && totalRaceTimeSeconds >= 0) {
+      return Math.floor(totalRaceTimeSeconds);
+    }
+    if (hasChipStart && chipStartTimeSeconds && chipStartTimeSeconds > 0) {
+      return Math.max(0, nowSeconds - chipStartTimeSeconds);
+    }
+    return null;
+  })();
+
+  const officialRaceTimeSeconds = (() => {
+    if (!hasOfficialStart || !officialStarted || !officialStartTimeSeconds) return null;
+    if (athleteStatus === 'Finished') {
+      if (chipRaceTimeSeconds !== null && chipStartTimeSeconds && chipStartTimeSeconds > 0) {
+        return Math.max(0, Math.floor(chipRaceTimeSeconds + (chipStartTimeSeconds - officialStartTimeSeconds)));
+      }
+      if (chipRaceTimeSeconds !== null) return Math.max(0, Math.floor(chipRaceTimeSeconds));
+    }
+    return Math.max(0, nowSeconds - officialStartTimeSeconds);
+  })();
+
+  const lifecycleState: SplitModalModel['lifecycleState'] = (() => {
+    if (athleteStatus === 'Finished') return 'FINISHED';
+    if (hasOfficialStart && !officialStarted) return 'UPCOMING';
+    if (officialStarted && !hasChipStart && !hasAnyLiveProgress) return 'OFFICIAL_STARTED_WAITING_CHIP';
+    if (hasChipStart && !hasAnyLiveProgress) return 'CHIP_STARTED';
+    if (hasAnyLiveProgress) return 'LIVE_RACING';
+    return hasOfficialStart ? 'UPCOMING' : 'OFFICIAL_STARTED_WAITING_CHIP';
+  })();
+
+  const lifecycleLabel = lifecycleState === 'UPCOMING'
+    ? 'Upcoming'
+    : lifecycleState === 'OFFICIAL_STARTED_WAITING_CHIP'
+      ? 'Waiting for Chip Start'
+      : lifecycleState === 'CHIP_STARTED'
+        ? 'Chip Started · Waiting for First Checkpoint'
+        : lifecycleState === 'LIVE_RACING'
+          ? 'Live Racing'
+          : 'Finished';
   const currentSpeedText = selectedSection ? selectedSection.paceText : '—';
   const estimatedFinishText = athlete.etaFinishUTC ? formatTimeOfDay(athlete.etaFinishUTC) : '—';
   const gapToLeaderText = !shouldShowRanks || rankSummary.overall === null || rankSummary.overall === undefined ? '—' : rankSummary.overall <= 1 ? 'Leader' : `+${rankSummary.overall - 1}`;
-  const currentStatusLabel = completedRows === 0 ? 'Registered · Waiting for Start' : (athleteStatus || 'On Course');
+  const currentStatusLabel = lifecycleState === 'UPCOMING'
+    ? 'Registered · Waiting for Official Start'
+    : lifecycleState === 'OFFICIAL_STARTED_WAITING_CHIP'
+      ? 'Waiting for Chip Start'
+      : lifecycleState === 'CHIP_STARTED'
+        ? 'Chip Started · Waiting for First Timing Read'
+        : lifecycleState === 'FINISHED'
+          ? 'Finished'
+          : (athleteStatus || 'On Course');
 
   const resolvedSplitDebug = resolution.debug
     ? {
@@ -1674,12 +2248,18 @@ export const buildSplitModalModel = ({ athlete, timingConfiguration, participant
     participantProfile,
     athleteStatus,
     noContestAssigned,
-    isNotStarted: athleteStatus === 'Not Yet Started',
+    isNotStarted: lifecycleState === 'UPCOMING' || lifecycleState === 'OFFICIAL_STARTED_WAITING_CHIP',
     isFinished: athleteStatus === 'Finished',
     isDnfLike,
+    lifecycleState,
+    lifecycleLabel,
+    officialStartTimeSeconds,
+    chipStartTimeSeconds,
+    officialRaceTimeSeconds,
+    chipRaceTimeSeconds,
     timingPoints,
     rows,
-    sections,
+    sections: filteredSections,
     currentIndex,
     currentPoint,
     currentSection: selectedSection,
@@ -1693,7 +2273,7 @@ export const buildSplitModalModel = ({ athlete, timingConfiguration, participant
     gapToLeaderText,
     currentStatusLabel,
     lastUpdatedSeconds: Math.max(1, Math.round((Date.now() - Number(athlete.lastUpdateTime || Date.now())) / 1000)),
-    sectionTimeline: sections.map((section) => ({ section, state: section.rows.some((row) => row.state === 'current') ? 'current' : section.rows.every((row) => row.reached) ? 'completed' : section.rows.some((row) => row.state === 'missed') ? 'missed' : 'future' })),
+    sectionTimeline: filteredSections.map((section) => ({ section, state: section.rows.some((row) => row.state === 'current') ? 'current' : section.rows.every((row) => row.reached) ? 'completed' : section.rows.some((row) => row.state === 'missed') ? 'missed' : 'future' })),
     rankSummary,
     splitDebug: resolvedSplitDebug,
   };

@@ -16,6 +16,8 @@ import { serializeParticipantData } from '@/lib/utils';
 import { _syncCalendarToKV } from '@/lib/actions/eventActions';
 import { getKV, putKV } from '@/lib/cloudflare/kv';
 import { consumeWaitlistCodeForRegistrationAction } from '@/lib/actions/waitlistActions';
+import { getRegistrationsCollectionRef } from '@/lib/eventDataPaths';
+import { resolveCanonicalParticipantRef } from '@/lib/actions/participantActions';
 
 /**
  * FINAL REGISTRATION ENGINE
@@ -201,7 +203,7 @@ export async function finalizeRegistration(
       
       const finalEventDate = ticketData.eventDate || eventData.eventDate || null;
 
-      const participantsCol = eventRef.collection('participants');
+      const participantsCol = getRegistrationsCollectionRef(db, freshAttempt.eventId);
       const isTerminalStatus = (participant: any) => {
         const combined = [
           participant?.ticketStatus,
@@ -331,7 +333,13 @@ export async function finalizeRegistration(
         }
       }
 
-      const participantRef = participantsCol.doc();
+      const participantRef = await resolveCanonicalParticipantRef(db, freshAttempt.eventId, {
+        ...freshAttempt,
+        registrationAttemptId: orderId,
+        bookingId,
+        athleteUid: freshAttempt.userId ?? (freshAttempt as any).athleteUid ?? null,
+        email: (freshAttempt.email || '').toLowerCase(),
+      }, orderId);
       const participantPayload: Omit<EventParticipant, 'id'> = {
         ...freshAttempt,
         name: (freshAttempt.name || '').trim(),
@@ -358,7 +366,7 @@ export async function finalizeRegistration(
         zohoSynced: false,
       };
 
-      transaction.set(participantRef, participantPayload);
+      transaction.set(participantRef, participantPayload, { merge: true });
       transaction.update(attemptRef, { status: 'Completed', participantId: participantRef.id, bookingId, bibNumber, updatedAt: FieldValue.serverTimestamp() });
 
       if ((freshAttempt as any).deferralId) {
@@ -417,10 +425,7 @@ export async function finalizeRegistration(
         let participantClubId: string | null = null;
         let finalizedParticipantData: EventParticipant | null = null;
         try {
-          const participantSnap = await db
-            .collection('events')
-            .doc(attempt.eventId)
-            .collection('participants')
+          const participantSnap = await getRegistrationsCollectionRef(db, attempt.eventId)
             .doc(finalResult.participantId)
             .get();
           if (participantSnap.exists) {
@@ -489,16 +494,31 @@ export async function finalizeRegistration(
         // Everything else is deferred to a background task so the user gets
         // a response as soon as the payment/registration is committed.
 
-        const participantAfterCommitSnap = await db
-          .collection('events')
-          .doc(attempt.eventId)
-          .collection('participants')
+        const participantAfterCommitSnap = await getRegistrationsCollectionRef(db, attempt.eventId)
           .doc(finalResult.participantId)
           .get();
 
         if (participantAfterCommitSnap.exists) {
           const participantAfterCommit = participantAfterCommitSnap.data() as any;
           const participantClubIdFinal = participantClubId || String((attempt as any)?.clubId || '').trim() || null;
+
+          try {
+            await db
+              .collection('events')
+              .doc(attempt.eventId)
+              .collection('participants')
+              .doc(finalResult.participantId)
+              .set(
+                {
+                  ...participantAfterCommit,
+                  mirroredFromRegistrations: true,
+                  mirroredAt: FieldValue.serverTimestamp(),
+                },
+                { merge: true }
+              );
+          } catch (e) {
+            console.warn(`[${actionName}] Legacy participant mirror failed for ${attempt.eventId}/${finalResult.participantId}:`, e);
+          }
 
           try {
             await _mirrorParticipantToKV(serializeParticipantData(participantAfterCommitSnap) as EventParticipant);
@@ -528,10 +548,7 @@ export async function finalizeRegistration(
                 await sendRegistrationNotifications(orderId);
 
                 try {
-                  const participantAfterNotificationsSnap = await db
-                    .collection('events')
-                    .doc(attempt.eventId!)
-                    .collection('participants')
+                  const participantAfterNotificationsSnap = await getRegistrationsCollectionRef(db, attempt.eventId!)
                     .doc(finalResult.participantId!)
                     .get();
 

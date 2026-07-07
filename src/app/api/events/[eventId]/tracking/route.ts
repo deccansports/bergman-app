@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getKV } from '@/lib/cloudflare/kv';
 import { getParticipantRowsFromIndex } from '@/lib/liveTrackingParticipantStore';
-import { canAccessPrivateLiveTracking, getParticipantLiveTrackingPrivacy, maskPrivateAthlete, resolveLiveTrackingAccess } from '@/lib/liveTrackingPrivacy';
+import { canAccessPrivateLiveTracking, getParticipantLiveTrackingPrivacy, maskAnonymousAthlete } from '@/lib/liveTrackingPrivacy';
+import { resolveLiveTrackingAccess } from '@/lib/liveTrackingAccess';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,6 +72,21 @@ function normalizeTrackingAthlete(row: any) {
   return normalized;
 }
 
+function getTrackingAthleteDedupKey(row: any) {
+  const bib = String(row?.bib || row?.bibNumber || '').trim();
+  const contestKey = String(row?.contestUuid || row?.contest_uuid || row?.providerContestUuid || row?.ticketId || row?.liveTracking?.contestUuid || '').trim();
+  if (bib) return `bib:${bib.toLowerCase()}${contestKey ? `:${contestKey.toLowerCase()}` : ''}`;
+
+  const participantUuid = String(row?.participantUuid || row?.participant_uuid || row?.providerParticipantUuid || row?.providerUuid || row?.id || '').trim();
+  if (participantUuid) return `participant:${participantUuid.toLowerCase()}`;
+
+  const athleteUid = String(row?.athleteUid || row?.bergmanAthleteId || '').trim();
+  if (athleteUid) return `athlete:${athleteUid.toLowerCase()}`;
+
+  const name = String(row?.fullName || row?.name || '').trim();
+  return name ? `name:${name.toLowerCase()}` : '';
+}
+
 export async function GET(_req: NextRequest, { params }: { params: { eventId: string } }) {
   try {
     const eventId = String(params.eventId || '').trim();
@@ -122,7 +138,7 @@ export async function GET(_req: NextRequest, { params }: { params: { eventId: st
           merged.contest_uuid = merged.contest_uuid || merged.contestUuid || null;
           merged.publicEligible = true;
         }
-        for (const key of ['category', 'contestName', 'contestUuid', 'registrationStatus', 'bib', 'email', 'athleteUid', 'participantUuid', 'participant_uuid']) {
+        for (const key of ['category', 'contestName', 'contestUuid', 'registrationStatus', 'bib', 'email', 'athleteUid', 'participantUuid', 'participant_uuid', 'country', 'countryCode', 'country_code', 'countryName', 'countryAtRace', 'nationality']) {
           const current = merged?.[key];
           const fallback = row?.[key];
           if ((current === null || current === undefined || current === '') && fallback !== null && fallback !== undefined && fallback !== '') {
@@ -141,19 +157,36 @@ export async function GET(_req: NextRequest, { params }: { params: { eventId: st
         if (!normalized) return null;
 
         if (privacy === 'PRIVATE' && !canAccessPrivateLiveTracking(merged, access)) {
-          return maskPrivateAthlete({ ...normalized, mapVisible: false, searchVisible: false, modalVisible: false });
+          return null;
+        }
+
+        if (privacy === 'ANONYMOUS' && access.isPublic) {
+          return maskAnonymousAthlete({ ...normalized, mapVisible: true, searchVisible: false, modalVisible: true });
         }
 
         return normalized;
       })
       .filter((row: any) => Boolean(row));
-    const source = participants.length > 0 ? (indexRows.length > 0 ? 'eligible_master_index' : 'live_kv_fallback') : 'empty';
+
+    const dedupedParticipants = new Map<string, any>();
+    for (const row of participants) {
+      const key = getTrackingAthleteDedupKey(row);
+      if (!key) continue;
+      if (!dedupedParticipants.has(key)) {
+        dedupedParticipants.set(key, row);
+        continue;
+      }
+      dedupedParticipants.set(key, { ...dedupedParticipants.get(key), ...row });
+    }
+
+    const finalParticipants = Array.from(dedupedParticipants.values());
+    const source = finalParticipants.length > 0 ? (indexRows.length > 0 ? 'eligible_master_index' : 'live_kv_fallback') : 'empty';
 
     return NextResponse.json({
       success: true,
       eventId,
-      participants,
-      count: participants.length,
+      participants: finalParticipants,
+      count: finalParticipants.length,
       source,
       updatedAt: monitoring?.lastSync || new Date().toISOString(),
     });

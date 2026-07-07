@@ -67,6 +67,7 @@ export default function VideoLibraryTab() {
   const [cloudflareSelectedUid, setCloudflareSelectedUid] = useState<string | null>(null);
   const [cloudflareSearch, setCloudflareSearch] = useState('');
   const [isLoadingCloudflare, setIsLoadingCloudflare] = useState(false);
+  const [attachEventId, setAttachEventId] = useState('');
 
   const [newVideoUrl, setNewVideoUrl] = useState('');
   const [newVideoTitle, setNewVideoTitle] = useState('');
@@ -234,6 +235,58 @@ export default function VideoLibraryTab() {
         await loadVideos();
       } catch (error: any) {
         toast({ variant: 'destructive', title: 'Cloudflare delete failed', description: error?.message || 'Unknown error' });
+      }
+    });
+  };
+
+  const handleAttachCloudflareVideoToEvent = () => {
+    startTransition(async () => {
+      if (!firebaseUserFromAuth) {
+        toast({ variant: 'destructive', title: 'Sign in required', description: 'You must be signed in to attach replay videos.' });
+        return;
+      }
+
+      const eventId = attachEventId.trim();
+      if (!eventId) {
+        toast({ variant: 'destructive', title: 'Event ID required', description: 'Enter the event ID to attach this video to.' });
+        return;
+      }
+
+      const selected = cloudflareVideos.find((video) => video.uid === cloudflareSelectedUid) || null;
+      if (!selected) {
+        toast({ variant: 'destructive', title: 'Select a Cloudflare video', description: 'Choose the recording you want to attach first.' });
+        return;
+      }
+
+      try {
+        const res = await authenticatedFetch(`/api/live/replay/${encodeURIComponent(eventId)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'attach',
+            video: {
+              uid: selected.uid,
+              title: selected.title,
+              status: selected.status,
+              duration: selected.duration,
+              thumbnail: selected.thumbnail,
+              hlsUrl: selected.hlsUrl,
+              liveInputId: selected.liveInputId,
+              created: selected.created,
+              uploaded: selected.uploaded,
+              modified: selected.modified,
+            },
+          }),
+        }, firebaseUserFromAuth);
+
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.success) {
+          throw new Error(data?.error?.message || 'Unable to attach replay video');
+        }
+
+        toast({ title: 'Replay attached', description: `${selected.title} linked to event ${eventId}.` });
+      } catch (error: any) {
+        toast({ variant: 'destructive', title: 'Attach failed', description: error?.message || 'Unknown error' });
       }
     });
   };
@@ -625,6 +678,12 @@ export default function VideoLibraryTab() {
                         <ExternalLink className="mr-2 h-4 w-4" />Open source
                       </a>
                     </Button>
+                    <div className="flex w-full flex-col gap-2 rounded-xl border bg-muted/20 p-3 sm:flex-row sm:items-center">
+                      <Input value={attachEventId} onChange={(e) => setAttachEventId(e.target.value)} placeholder="Event ID to attach replay to" className="sm:max-w-[240px]" />
+                      <Button size="sm" onClick={handleAttachCloudflareVideoToEvent} disabled={!cloudflareSelectedUid || !attachEventId.trim() || isPending}>
+                        Attach To Event
+                      </Button>
+                    </div>
                     <Button size="sm" variant="destructive" onClick={() => handleDeleteCloudflareVideo(selected)}>
                       <Trash2 className="mr-2 h-4 w-4" />Delete from Cloudflare
                     </Button>

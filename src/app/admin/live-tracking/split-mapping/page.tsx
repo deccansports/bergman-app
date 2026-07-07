@@ -1,8 +1,14 @@
-import LiveTrackingHub from '@/components/admin/LiveTrackingHub';
+'use client';
+
+import { useSearchParams } from 'next/navigation';
+import { SplitMappingPanel } from '@/components/admin/SplitMappingPanel';
 
 export const dynamic = 'force-dynamic';
 
 export default function AdminLiveTrackingSplitMappingPage() {
+  const searchParams = useSearchParams();
+  const eventId = searchParams.get('eventId') || '';
+
   return (
     <div className="container mx-auto py-6 space-y-6">
       <div className="rounded-2xl border border-border/60 bg-background/80 backdrop-blur p-5">
@@ -14,7 +20,15 @@ export default function AdminLiveTrackingSplitMappingPage() {
         </div>
       </div>
 
-      <LiveTrackingHub />
+      {eventId ? (
+        <SplitMappingPanel eventId={eventId} />
+      ) : (
+        <div className="rounded-2xl border border-border/60 bg-background/80 backdrop-blur p-5">
+          <div className="text-muted-foreground">
+            Please select a Bergman event first from the <a href="/admin/live-tracking" className="underline font-medium">Live Tracking Hub</a>.
+          </div>
+        </div>
+      )}
     </div>
   );
 }

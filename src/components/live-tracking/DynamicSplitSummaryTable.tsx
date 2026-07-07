@@ -1,12 +1,19 @@
 "use client";
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { formatSecondsToHMS } from '@/lib/utils';
 import type { DynamicSplitSummaryTableProps } from './split-modal/types';
 import { buildSplitModalModel, formatDistance, formatPace, formatSpeed, formatTimeOfDay, getPointDisplayLabel } from './split-modal/utils';
 
 const FALLBACK = 'Waiting...';
 const rankText = (value: number | null | undefined) => (Number.isFinite(Number(value)) && Number(value) > 0 ? String(value) : FALLBACK);
+
+const getLegAccentClasses = (theme?: string) => {
+  if (theme === 'swim') return 'border-blue-500/40 bg-blue-500/10 text-blue-300';
+  if (theme === 'bike') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300';
+  if (theme === 'run') return 'border-red-500/40 bg-red-500/10 text-red-300';
+  return 'border-white/10 bg-slate-950/70 text-white';
+};
 
 const splitStateClass = (state: string) => {
   if (state === 'completed') return 'text-emerald-200';
@@ -65,91 +72,101 @@ function SplitSectionCard({
   reachedCount: number;
   waitingLabel: string;
 }) {
+  const metricHeading = sectionTheme === 'transition' ? 'Elapsed Time' : sectionTheme === 'bike' ? 'Avg Speed' : 'Avg Pace';
+
+  const renderMetric = (row: any) => {
+    if (!row.reached || row.splitSeconds === null) return waitingLabel;
+    if (metricLabel === 'Speed') return formatSpeed(row.avgSpeedKph || null);
+    if (metricLabel === 'Elapsed Time') return formatSecondsToHMS(row.splitSeconds);
+    return formatPace(row.splitSeconds && row.distanceKm ? row.splitSeconds / row.distanceKm : null);
+  };
+
   return (
-    <section className="rounded-lg border border-white/10 bg-slate-950/70 overflow-hidden">
-      <div className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950 px-4 py-3">
-        <div className="flex items-start justify-between gap-3">
+    <section className={`overflow-hidden rounded-2xl border ${getLegAccentClasses(sectionTheme)}`}>
+      <div className="border-b border-white/10 bg-slate-950 px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <div className="text-base font-bold uppercase tracking-wide text-white">{title}</div>
-            <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-5">
-              <SummaryCard label={sectionTheme === 'transition' ? 'Elapsed Time' : 'Section Time'} value={primaryMetricValue || FALLBACK} />
-              {sectionTheme !== 'transition' ? <SummaryCard label={sectionTheme === 'bike' ? 'Average Speed' : 'Average Pace'} value={secondaryMetricValue || FALLBACK} /> : null}
-              <SummaryCard label="Overall Rank" value={rankText((rows[0] as any)?.overallRank)} />
-              <SummaryCard label="Category Rank" value={rankText((rows[0] as any)?.categoryRank)} />
-              <SummaryCard label="Gender Rank" value={rankText((rows[0] as any)?.genderRank)} />
+            <div className={`text-sm font-bold uppercase tracking-wide ${sectionTheme === 'swim' ? 'text-blue-300' : sectionTheme === 'bike' ? 'text-emerald-300' : sectionTheme === 'run' ? 'text-red-300' : 'text-white'}`}>
+              {title}
             </div>
-          </div>
-          <div className="flex-none rounded-md border border-white/10 bg-white/[0.03] px-2 py-1 text-right">
-            <div className="text-[10px] uppercase tracking-wide text-slate-400">Points</div>
-            <div className="font-mono text-xs text-white">{reachedCount}/{rows.length}</div>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+              <SummaryCard label={sectionTheme === 'transition' ? 'Elapsed Time' : 'Section Time'} value={primaryMetricValue || FALLBACK} />
+              {sectionTheme !== 'transition' ? <SummaryCard label={metricHeading} value={secondaryMetricValue || FALLBACK} /> : null}
+              <SummaryCard label="Points" value={`${reachedCount}/${rows.length}`} />
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="px-4">
+      {/* Desktop table */}
+      <div className="hidden overflow-x-auto md:block">
+        <table className="min-w-full border-separate border-spacing-0 text-left">
+          <thead className="sticky top-0 z-10 bg-slate-950/95 text-[10px] uppercase tracking-[0.18em] text-slate-400">
+            <tr>
+              {['Split', 'Distance', 'Split Time', 'Elapsed Time', 'Pace / Speed', 'Position', 'Gap'].map((header) => (
+                <th key={header} className="border-b border-white/10 px-3 py-2 font-semibold">{header}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const isCurrent = row.state === 'current';
+              const isCompleted = row.state === 'completed';
+              const rowBg = isCurrent ? 'bg-sky-500/10' : isCompleted ? 'bg-emerald-500/5' : 'bg-transparent';
+              const gapText = row.rankDelta !== null ? `${row.rankDelta > 0 ? '+' : ''}${row.rankDelta}` : waitingLabel;
+              const positionText = row.pointRank !== null && row.pointRank !== undefined ? `#${row.pointRank}` : (isCurrent ? '▶' : isCompleted ? '✓' : '○');
+
+              return (
+                <tr key={`${title}-${row.point.id}-${row.index}`} className={`border-b border-white/5 ${rowBg}`}>
+                  <td className="px-3 py-3 align-top">
+                    <div className="flex items-center gap-2">
+                      <div className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold ${isCurrent ? 'bg-sky-500 text-white' : isCompleted ? 'bg-emerald-500 text-white' : 'bg-white/10 text-slate-300'}`}>
+                        {positionText}
+                      </div>
+                      <div className="min-w-0">
+                        <div className={`truncate text-sm font-semibold ${isCurrent ? 'text-sky-100' : isCompleted ? 'text-emerald-100' : 'text-slate-200'}`}>
+                          {getPointDisplayLabel(row.point, row.index)}
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 align-top font-mono text-xs text-slate-200">{formatDistance(row.distanceKm ?? null)}</td>
+                  <td className="px-3 py-3 align-top font-mono text-xs text-slate-200">{row.reached && row.splitSeconds !== null ? formatSecondsToHMS(row.splitSeconds) : waitingLabel}</td>
+                  <td className="px-3 py-3 align-top font-mono text-xs text-slate-200">{row.cumulativeSeconds !== null ? formatSecondsToHMS(row.cumulativeSeconds) : waitingLabel}</td>
+                  <td className="px-3 py-3 align-top font-mono text-xs text-slate-200">{renderMetric(row)}</td>
+                  <td className="px-3 py-3 align-top font-mono text-xs text-slate-200">{positionText}</td>
+                  <td className="px-3 py-3 align-top font-mono text-xs text-slate-200">{gapText}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Mobile stacked rows */}
+      <div className="space-y-2 p-3 md:hidden">
         {rows.map((row) => {
           const isCurrent = row.state === 'current';
           const isCompleted = row.state === 'completed';
-          const elapsedText = row.cumulativeSeconds !== null ? formatSecondsToHMS(row.cumulativeSeconds) : waitingLabel;
-          const timeText = row.reached && row.cumulativeSeconds !== null && athlete.startTime
-            ? formatTimeOfDay((athlete.startTime || 0) + row.cumulativeSeconds)
-            : waitingLabel;
-          const metricText = row.reached && row.splitSeconds !== null
-            ? (metricLabel === 'Speed'
-              ? formatSpeed(row.avgSpeedKph || null)
-              : metricLabel === 'Elapsed Time'
-                ? formatSecondsToHMS(row.splitSeconds)
-                : formatPace(row.splitSeconds && row.distanceKm ? row.splitSeconds / row.distanceKm : null))
-            : waitingLabel;
-
+          const metricText = renderMetric(row);
+          const positionText = row.pointRank !== null && row.pointRank !== undefined ? `#${row.pointRank}` : (isCurrent ? '▶' : isCompleted ? '✓' : '○');
           return (
-            <div key={`${title}-${row.point.id}-${row.index}`} className={`border-b border-white/5 py-3 ${splitStateClass(row.state)}`}>
-              <div className="flex items-start gap-2">
-                <div className="mt-0.5 flex-none">{splitIndicator(row.state)}</div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <div className={`text-sm font-semibold ${isCurrent ? 'text-sky-200' : isCompleted ? 'text-emerald-200' : 'text-slate-300'}`}>
-                      {getPointDisplayLabel(row.point, row.index)}
-                    </div>
-                    {isCurrent ? <span className="rounded-full border border-sky-400/30 bg-sky-400/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-200">Current Checkpoint</span> : null}
+            <div key={`${title}-${row.point.id}-${row.index}`} className={`rounded-xl border px-3 py-3 ${isCurrent ? 'border-sky-400/40 bg-sky-500/10' : isCompleted ? 'border-emerald-400/30 bg-emerald-500/5' : 'border-white/10 bg-white/5'}`}>
+              <div className="flex items-start gap-3">
+                <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${isCurrent ? 'bg-sky-500 text-white' : isCompleted ? 'bg-emerald-500 text-white' : 'bg-white/10 text-slate-300'}`}>
+                  {isCurrent ? '▶' : isCompleted ? '✓' : '○'}
+                </div>
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div>
+                    <div className="truncate text-sm font-semibold text-white">{getPointDisplayLabel(row.point, row.index)}</div>
                   </div>
-
-                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] uppercase tracking-wide text-slate-400">
-                    <span>Status: <span className="text-slate-200">{String(row.state || waitingLabel).toUpperCase()}</span></span>
-                  </div>
-
-                  <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 md:grid-cols-4">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wide text-slate-400">Distance</div>
-                      <div className={`font-mono text-xs ${isCurrent ? 'text-slate-50' : 'text-slate-200'}`}>{formatDistance(row.distanceKm ?? null)}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wide text-slate-400">Time</div>
-                      <div className={`font-mono text-xs ${isCurrent ? 'text-slate-50' : 'text-slate-200'}`}>{timeText}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wide text-slate-400">Elapsed</div>
-                      <div className={`font-mono text-xs ${isCurrent ? 'text-slate-50' : 'text-slate-200'}`}>{elapsedText}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wide text-slate-400">{metricLabel}</div>
-                      <div className={`font-mono text-xs ${isCurrent ? 'text-slate-50' : 'text-slate-200'}`}>{metricText || FALLBACK}</div>
-                    </div>
-                  </div>
-
-                  <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 md:grid-cols-3">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wide text-slate-400">Gap</div>
-                      <div className={`font-mono text-xs ${isCurrent ? 'text-slate-50' : 'text-slate-200'}`}>{row.rankDelta !== null ? `+${row.rankDelta}` : waitingLabel}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wide text-slate-400">Rank</div>
-                      <div className={`font-mono text-xs ${isCurrent ? 'text-slate-50' : 'text-slate-200'}`}>{row.pointRank !== null ? `#${row.pointRank}` : waitingLabel}</div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] uppercase tracking-wide text-slate-400">Status</div>
-                      <div className={`font-mono text-xs ${isCurrent ? 'text-slate-50' : 'text-slate-200'}`}>{String(row.state || FALLBACK).toUpperCase()}</div>
-                    </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+                    <MobileCell label="Distance" value={formatDistance(row.distanceKm ?? null)} />
+                    <MobileCell label="Split Time" value={row.reached && row.splitSeconds !== null ? formatSecondsToHMS(row.splitSeconds) : waitingLabel} />
+                    <MobileCell label="Elapsed" value={row.cumulativeSeconds !== null ? formatSecondsToHMS(row.cumulativeSeconds) : waitingLabel} />
+                    <MobileCell label={metricHeading} value={metricText} />
+                    <MobileCell label="Position" value={positionText} />
+                    <MobileCell label="Gap" value={row.rankDelta !== null ? `${row.rankDelta > 0 ? '+' : ''}${row.rankDelta}` : waitingLabel} />
                   </div>
                 </div>
               </div>
@@ -158,6 +175,15 @@ function SplitSectionCard({
         })}
       </div>
     </section>
+  );
+}
+
+function MobileCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-black/10 px-2 py-1.5">
+      <div className="text-[10px] uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="mt-0.5 font-mono text-[11px] font-semibold text-slate-100">{value || FALLBACK}</div>
+    </div>
   );
 }
 
@@ -224,16 +250,16 @@ export default function DynamicSplitSummaryTable(props: DynamicSplitSummaryTable
     return <div className="rounded-lg border border-dashed border-slate-700 bg-slate-950/40 p-4 text-sm text-slate-300">No split configuration found for this contest.</div>;
   }
 
-  const waitingLabel = model.isNotStarted ? 'Waiting for Start' : FALLBACK;
+  const waitingLabel = model.isNotStarted ? '—' : FALLBACK;
 
   const currentRow = model.currentPoint;
-  const raceStatus = model.isNotStarted ? 'Registered · Waiting for Start' : (model.athleteStatus || FALLBACK);
+  const raceStatus = model.lifecycleLabel || (model.isNotStarted ? 'Registered · Waiting for Start' : (model.athleteStatus || FALLBACK));
   const currentLeg = model.isFinished
     ? 'FINISHED'
     : model.isNotStarted
     ? 'Not Started'
     : (model.currentSection?.label ? String(model.currentSection.label).toUpperCase() : '—');
-  const currentSplit = model.isNotStarted ? 'Waiting for Start' : (model.currentSection?.label || (currentRow ? getPointDisplayLabel(currentRow.point, currentRow.index) : '—'));
+  const currentSplit = model.isNotStarted ? '-' : (model.currentSection?.label || (currentRow ? getPointDisplayLabel(currentRow.point, currentRow.index) : '—'));
   const visibleSections = model.sections.filter((section) => section.rows.length > 0);
   const progressStages = visibleSections.map((section, index) => {
     const reached = section.rows.filter((row) => row.reached).length;
@@ -258,7 +284,7 @@ export default function DynamicSplitSummaryTable(props: DynamicSplitSummaryTable
     ?? NaN,
   );
   const currentSpeedText = model.isNotStarted
-    ? 'Waiting for Start'
+    ? '-'
     : (Number.isFinite(currentSpeedKph) && currentSpeedKph > 0 ? formatSpeed(currentSpeedKph) : FALLBACK);
   const lastTimingPointRow = [...model.rows].filter((row) => row.reached).sort((a, b) => Number(a.cumulativeSeconds || 0) - Number(b.cumulativeSeconds || 0)).pop();
   const lastTimingPointText = model.isNotStarted ? '—' : (lastTimingPointRow ? getPointDisplayLabel(lastTimingPointRow.point, lastTimingPointRow.index) : '—');
@@ -267,6 +293,12 @@ export default function DynamicSplitSummaryTable(props: DynamicSplitSummaryTable
     ? new Date(lastUpdatedRaw > 1_000_000_000_000 ? lastUpdatedRaw : lastUpdatedRaw * 1000)
     : null;
   const lastUpdatedText = lastUpdatedDate && !Number.isNaN(lastUpdatedDate.getTime()) ? lastUpdatedDate.toLocaleString() : FALLBACK;
+  const officialRaceTimeText = model.officialRaceTimeSeconds !== null && model.officialRaceTimeSeconds !== undefined
+    ? formatSecondsToHMS(model.officialRaceTimeSeconds)
+    : waitingLabel;
+  const athleteRaceTimeText = model.chipRaceTimeSeconds !== null && model.chipRaceTimeSeconds !== undefined
+    ? formatSecondsToHMS(model.chipRaceTimeSeconds)
+    : waitingLabel;
 
   return (
     <div className="w-full max-w-full min-w-0 space-y-2 overflow-x-hidden">
@@ -276,7 +308,8 @@ export default function DynamicSplitSummaryTable(props: DynamicSplitSummaryTable
           <SummaryCard label="Race Status" value={raceStatus} />
           <SummaryCard label="Current Leg" value={currentLeg || FALLBACK} />
           <SummaryCard label="Current Split" value={currentSplit || FALLBACK} />
-          <SummaryCard label="Overall Time" value={model.totalRaceTimeSeconds ? formatSecondsToHMS(model.totalRaceTimeSeconds) : waitingLabel} />
+          <SummaryCard label="Official Race Time" value={officialRaceTimeText} />
+          <SummaryCard label="Athlete Race Time" value={athleteRaceTimeText} />
           <SummaryCard label="Overall Rank" value={model.isNotStarted ? waitingLabel : (Number.isFinite(Number(model.rankSummary.overall)) && Number(model.rankSummary.overall) > 0 ? rankText(model.rankSummary.overall) : waitingLabel)} />
           <SummaryCard label="Category Rank" value={model.isNotStarted ? waitingLabel : (Number.isFinite(Number(model.rankSummary.category)) && Number(model.rankSummary.category) > 0 ? rankText(model.rankSummary.category) : waitingLabel)} />
           <SummaryCard label="Gender Rank" value={model.isNotStarted ? waitingLabel : (Number.isFinite(Number(model.rankSummary.gender)) && Number(model.rankSummary.gender) > 0 ? rankText(model.rankSummary.gender) : waitingLabel)} />

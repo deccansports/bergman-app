@@ -37,6 +37,9 @@ type CourseTicket = {
   ticketCategory?: string | null;
   description?: string | null;
   order?: number | null;
+  eventDate?: string | null;
+  isHidden?: boolean;
+  subCategories?: any[];
   cutoffs?: {
     mode?: 'overall' | 'segment';
     overall?: string | null;
@@ -49,6 +52,15 @@ type CourseTicket = {
   courseMaps?: CourseMapsPayload | null;
 };
 
+function resolveIsHidden(raw: any): boolean {
+  const value = raw?.isHidden ?? raw?.hidden ?? raw?.visibility;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  const s = String(value ?? '').trim().toLowerCase();
+  if (s === 'true' || s === '1' || s === 'yes' || s === 'hidden') return true;
+  return false;
+}
+
 function normalizeTicketDefinition(raw: any, fallbackId: string, index: number): CourseTicket | null {
   const id = String(raw?.id || fallbackId || '').trim();
   if (!id) return null;
@@ -59,6 +71,9 @@ function normalizeTicketDefinition(raw: any, fallbackId: string, index: number):
     ticketCategory: raw?.ticketCategory || null,
     description: raw?.description || null,
     order: typeof raw?.order === 'number' ? raw.order : index,
+    eventDate: String(raw?.eventDate || raw?.date || raw?.ticketDate || raw?.raceDate || '').trim() || null,
+    isHidden: resolveIsHidden(raw),
+    subCategories: Array.isArray(raw?.subCategories) ? raw.subCategories : [],
     cutoffs: raw?.cutoffs || null,
     courseMaps: raw?.courseMaps || null,
   };
@@ -214,6 +229,9 @@ export async function GET(req: NextRequest) {
         ticketCategory: ticket.ticketCategory || null,
         description: ticket.description || null,
         order: typeof ticket.order === 'number' ? ticket.order : null,
+        eventDate: ticket.eventDate || null,
+        isHidden: ticket.isHidden ?? false,
+        subCategories: Array.isArray(ticket.subCategories) ? ticket.subCategories : [],
         cutoffs: ticket.cutoffs || null,
         courseMaps: ticket.courseMaps || null,
       })),

@@ -35,6 +35,7 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
     const feibotConfig = existingHub?.feibotConfig || {};
     const cloudConfig = feibotConfig?.cloud || {};
     const scoreConfig = feibotConfig?.score || {};
+    const persistedProviderState = serializeValue(existingHub?.providerState || {}) || {};
     const legacyEventUuid = String(feibotConfig?.legacyEventUuid || (feibotConfig?.eventUuid && feibotConfig?.eventUuid !== cloudConfig?.eventUuid ? feibotConfig?.eventUuid : '') || '').trim();
 
     let hasCredentials = false;
@@ -48,6 +49,19 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
       credentialsSource = 'none';
     }
 
+    const cloudEventUuid = String(cloudConfig?.eventUuid || feibotConfig?.eventUuid || '').trim();
+    const cloudAuthenticated = Boolean(cloudConfig?.authenticated);
+    const resolvedProviderState = {
+      provider: String(persistedProviderState?.provider || 'feibot'),
+      status: String(persistedProviderState?.status || (cloudAuthenticated && cloudEventUuid ? 'connected' : hasCredentials ? 'configured' : 'setup_required')),
+      authentication: String(persistedProviderState?.authentication || (cloudAuthenticated ? 'verified' : hasCredentials ? 'configured' : 'not_configured')),
+      configurationSource: String(persistedProviderState?.configurationSource || 'cloud_api'),
+      timingRulesImported: Boolean(persistedProviderState?.timingRulesImported),
+      participantsImported: Boolean(persistedProviderState?.participantsImported),
+      resultsImported: Boolean(persistedProviderState?.resultsImported),
+      updatedAt: String(persistedProviderState?.updatedAt || existingHub?.updatedAt || existing?.updatedAt || ''),
+    };
+
     return NextResponse.json({
       success: true,
       eventId,
@@ -60,14 +74,16 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
         feibotConfig: {
           hasCredentials,
           credentialsSource,
-          eventUuid: String(cloudConfig?.eventUuid || feibotConfig?.eventUuid || ''),
-          resolvedEventUuid: String(cloudConfig?.eventUuid || feibotConfig?.eventUuid || ''),
+          eventUuid: cloudEventUuid,
+          resolvedEventUuid: cloudEventUuid,
           legacyEventUuid,
           apiBaseUrl: String(process.env.FEIBOT_API_BASE_URL || cloudConfig?.apiBaseUrl || feibotConfig?.apiBaseUrl || 'https://apicn.feibot.com'),
           cloud: {
-            eventUuid: String(cloudConfig?.eventUuid || ''),
+            eventUuid: String(cloudConfig?.eventUuid || feibotConfig?.eventUuid || ''),
             apiBaseUrl: String(process.env.FEIBOT_API_BASE_URL || cloudConfig?.apiBaseUrl || 'https://apicn.feibot.com'),
             hasCredentials,
+            authenticated: cloudAuthenticated,
+            lastVerifiedAt: String(cloudConfig?.lastVerifiedAt || ''),
           },
           score: {
             eventUuid: String(scoreConfig?.eventUuid || ''),
@@ -77,6 +93,7 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
           },
           timingRuleSource: String(feibotConfig?.timingRuleSource || 'cloud'),
         },
+        providerState: resolvedProviderState,
       },
       message: 'Provider configuration retrieved',
     });
@@ -157,10 +174,20 @@ export async function PUT(req: NextRequest, { params }: { params: { eventId: str
       ? `https://score.feibot.com/onlineDateQuery/index.html#/progress/event?event_uuid=${encodeURIComponent(scoreEventUuid)}`
       : '';
     const previousLegacyEventUuid = String(existingHub?.feibotConfig?.legacyEventUuid || (existingHub?.feibotConfig?.eventUuid && existingHub?.feibotConfig?.eventUuid !== cloudEventUuid ? existingHub?.feibotConfig?.eventUuid : '') || '').trim();
+    const previouslyAuthenticated = Boolean(existingHub?.feibotConfig?.cloud?.authenticated);
+    const nextProviderState = {
+      ...(serializeValue(existingHub?.providerState || {}) || {}),
+      provider: 'feibot',
+      status: previouslyAuthenticated && cloudEventUuid ? 'connected' : 'configured',
+      authentication: previouslyAuthenticated ? 'verified' : 'configured',
+      configurationSource: 'cloud_api',
+      updatedAt: new Date().toISOString(),
+    };
 
     const nextHub = {
       ...existingHub,
       provider: 'feibot',
+      providerState: nextProviderState,
       feibotConfig: {
         ...(existingHub?.feibotConfig || {}),
         eventUuid: cloudEventUuid,
@@ -170,7 +197,7 @@ export async function PUT(req: NextRequest, { params }: { params: { eventId: str
           eventUuid: cloudEventUuid,
           apiBaseUrl,
           connected: Boolean(existingHub?.feibotConfig?.cloud?.connected),
-          authenticated: Boolean(existingHub?.feibotConfig?.cloud?.authenticated),
+          authenticated: previouslyAuthenticated,
         },
         legacyEventUuid: previousLegacyEventUuid || undefined,
         score: {
@@ -229,6 +256,7 @@ export async function PUT(req: NextRequest, { params }: { params: { eventId: str
     const refreshedHub = serializeValue(refreshedData.liveTrackingHub || {}) || {};
     const refreshedCloud = refreshedHub?.feibotConfig?.cloud || {};
     const refreshedScore = refreshedHub?.feibotConfig?.score || {};
+    const refreshedProviderState = serializeValue(refreshedHub?.providerState || {}) || {};
 
     let hasCredentials = false;
     let credentialsSource: 'cloudflare-secrets' | 'firestore' | 'none' = 'none';
@@ -240,6 +268,19 @@ export async function PUT(req: NextRequest, { params }: { params: { eventId: str
       hasCredentials = false;
       credentialsSource = 'none';
     }
+
+    const refreshedCloudEventUuid = String(refreshedHub?.feibotConfig?.cloud?.eventUuid || refreshedHub?.feibotConfig?.eventUuid || cloudEventUuid).trim();
+    const refreshedCloudAuthenticated = Boolean(refreshedCloud?.authenticated);
+    const resolvedProviderState = {
+      provider: String(refreshedProviderState?.provider || 'feibot'),
+      status: String(refreshedProviderState?.status || (refreshedCloudAuthenticated && refreshedCloudEventUuid ? 'connected' : hasCredentials ? 'configured' : 'setup_required')),
+      authentication: String(refreshedProviderState?.authentication || (refreshedCloudAuthenticated ? 'verified' : hasCredentials ? 'configured' : 'not_configured')),
+      configurationSource: String(refreshedProviderState?.configurationSource || 'cloud_api'),
+      timingRulesImported: Boolean(refreshedProviderState?.timingRulesImported),
+      participantsImported: Boolean(refreshedProviderState?.participantsImported),
+      resultsImported: Boolean(refreshedProviderState?.resultsImported),
+      updatedAt: String(refreshedProviderState?.updatedAt || refreshedHub?.updatedAt || refreshedData?.updatedAt || ''),
+    };
 
     return NextResponse.json({
       success: true,
@@ -253,14 +294,16 @@ export async function PUT(req: NextRequest, { params }: { params: { eventId: str
         feibotConfig: {
           hasCredentials,
           credentialsSource,
-          eventUuid: String(refreshedHub?.feibotConfig?.eventUuid || cloudEventUuid),
-          resolvedEventUuid: String(refreshedHub?.feibotConfig?.cloud?.eventUuid || refreshedHub?.feibotConfig?.eventUuid || cloudEventUuid),
+          eventUuid: String(refreshedHub?.feibotConfig?.eventUuid || refreshedCloudEventUuid),
+          resolvedEventUuid: refreshedCloudEventUuid,
           legacyEventUuid: String(refreshedHub?.feibotConfig?.legacyEventUuid || (refreshedHub?.feibotConfig?.eventUuid && refreshedHub?.feibotConfig?.eventUuid !== cloudEventUuid ? refreshedHub?.feibotConfig?.eventUuid : '') || ''),
           apiBaseUrl: String(refreshedHub?.feibotConfig?.apiBaseUrl || apiBaseUrl),
           cloud: {
-            eventUuid: String(refreshedCloud?.eventUuid || cloudEventUuid),
+            eventUuid: String(refreshedCloud?.eventUuid || refreshedCloudEventUuid),
             apiBaseUrl: String(refreshedCloud?.apiBaseUrl || apiBaseUrl),
             hasCredentials,
+            authenticated: refreshedCloudAuthenticated,
+            lastVerifiedAt: String(refreshedCloud?.lastVerifiedAt || ''),
           },
           score: {
             eventUuid: String(refreshedScore?.eventUuid || scoreEventUuid),
@@ -269,6 +312,7 @@ export async function PUT(req: NextRequest, { params }: { params: { eventId: str
           },
           timingRuleSource: String(refreshedHub?.feibotConfig?.timingRuleSource || 'cloud'),
         },
+        providerState: resolvedProviderState,
       },
       message: 'Provider configuration saved',
     });

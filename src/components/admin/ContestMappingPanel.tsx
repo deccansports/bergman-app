@@ -311,16 +311,16 @@ export function ContestMappingPanel({ eventId }: { eventId: string; connectionId
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={() => void loadView()}>
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+          <Button variant="outline" className="w-full sm:w-auto" onClick={() => void loadView()}>
             <RefreshCw className="mr-2 h-4 w-4" />
             Refresh
           </Button>
-          <Button variant="outline" onClick={autoMap}>
+          <Button variant="outline" className="w-full sm:w-auto" onClick={autoMap}>
             <Wand2 className="mr-2 h-4 w-4" />
             Auto-map
           </Button>
-          <Button onClick={() => void save()} disabled={saving}>
+          <Button className="w-full sm:w-auto" onClick={() => void save()} disabled={saving}>
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
             Save Mapping
           </Button>

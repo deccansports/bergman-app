@@ -330,6 +330,7 @@ export default function TicketsTab({
       registrationType: "individual",
       eventDate: "",
       openDate: "",
+      raceStartTime: "",
       closeDate: "",
       price: 0,
       ticketType: "Paid",
@@ -376,7 +377,7 @@ export default function TicketsTab({
         registrationType: editingTicket.registrationType || "individual",
         eventDate: editingTicket.eventDate || "",
         openDate: editingTicket.openDate || "",
-        startTime: editingTicket.startTime || "",
+        raceStartTime: editingTicket.raceStartTime || editingTicket.startTime || "",
         closeDate: editingTicket.closeDate || "",
         endTime: editingTicket.endTime || "",
         price: editingTicket.price ? editingTicket.price / 100 : 0,
@@ -415,7 +416,7 @@ export default function TicketsTab({
         registrationType: "individual",
         eventDate: "",
         openDate: "",
-        startTime: "",
+        raceStartTime: "",
         closeDate: "",
         endTime: "",
         price: 0,
@@ -746,7 +747,7 @@ export default function TicketsTab({
                   )} />
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-left">
                     <FormField control={form.control} name="eventDate" render={({ field }) => (
                         <FormItem>
                             <FormLabel className="flex items-center gap-2">
@@ -757,18 +758,24 @@ export default function TicketsTab({
                             <FormMessage />
                         </FormItem>
                     )} />
+                    <FormField control={form.control} name="raceStartTime" render={({ field }) => (
+                        <FormItem>
+                            <FormLabel className="flex items-center gap-2">
+                                <Clock className="h-4 w-4 text-primary" />
+                                Race Start Time (Optional)
+                            </FormLabel>
+                            <FormControl><Input type="time" {...field} value={field.value ?? ""} disabled={isSubmitting} /></FormControl>
+                            <FormDescription className="text-[10px]">Official race gun-start time (24-hour). Powers the countdown timer on the live tracking page.</FormDescription>
+                            <FormMessage />
+                        </FormItem>
+                    )} />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
                     <FormField control={form.control} name="openDate" render={({ field }) => (
                         <FormItem>
                             <FormLabel>Sale Start Date*</FormLabel>
                             <FormControl><Input type="date" {...field} value={field.value ?? ""} disabled={isSubmitting} /></FormControl>
-                            <FormMessage />
-                        </FormItem>
-                    )} />
-                    <FormField control={form.control} name="startTime" render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>Start Time (Optional)</FormLabel>
-                            <FormControl><Input type="time" {...field} value={field.value ?? ""} disabled={isSubmitting} /></FormControl>
-                            <FormDescription className="text-[10px]">24-hour format. Defaults to 00:00 if not set.</FormDescription>
                             <FormMessage />
                         </FormItem>
                     )} />
@@ -781,7 +788,7 @@ export default function TicketsTab({
                     )} />
                     <FormField control={form.control} name="endTime" render={({ field }) => (
                         <FormItem>
-                            <FormLabel>End Time (Optional)</FormLabel>
+                            <FormLabel>Sale End Time (Optional)</FormLabel>
                             <FormControl><Input type="time" {...field} value={field.value ?? ""} disabled={isSubmitting} /></FormControl>
                             <FormDescription className="text-[10px]">24-hour format. Defaults to 23:59 if not set.</FormDescription>
                             <FormMessage />

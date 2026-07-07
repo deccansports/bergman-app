@@ -65,6 +65,7 @@ export function ClientProviders({ children, initialNavEvents, initialNavPages }:
     pathname?.startsWith('/athlete-journey') ||
     pathname?.startsWith('/athlete-journey/race') ||
     pathname?.startsWith('/athlete-journey/result');
+  const isPublicLiveTrackingRoute = pathname?.startsWith('/live-tracking');
 
   useEffect(() => {
     getFooterConfigAction().then(result => {
@@ -81,6 +82,45 @@ export function ClientProviders({ children, initialNavEvents, initialNavPages }:
       <AuthProvider>
         <CartProvider>
           <Suspense fallback={<AthleteHubLoader />}>
+            {isPublicLiveTrackingRoute ? (
+              <>
+                <div className="flex flex-col min-h-screen">
+                  {!isLedCleanRoute ? (
+                    <div className="sticky top-0 z-50 w-full flex flex-col">
+                        <AnnouncementTicker />
+                        <AppHeader initialNavEvents={initialNavEvents} initialNavPages={initialNavPages} />
+                    </div>
+                  ) : null}
+
+                  <HeaderScrollEffect />
+                  <main className="flex-grow">
+                    {children}
+                  </main>
+                  {!isLedCleanRoute ? (
+                    <footer className="border-t border-white/10 bg-[#191919] text-white">
+                      <div className="container mx-auto px-6 py-14 md:px-10 lg:px-12">
+                        <div className="grid gap-y-12 gap-x-10 lg:grid-cols-[minmax(260px,1.4fr)_repeat(6,minmax(120px,1fr))] lg:items-start">
+                          <div className="space-y-5 lg:max-w-[280px]">
+                            <Link href="/" className="inline-flex items-center">
+                              <Image
+                                src="/Bmlogowhite.png"
+                                alt="Bergman logo"
+                                width={260}
+                                height={72}
+                                className="h-auto w-[220px] md:w-[260px]"
+                                style={{ width: 'auto', height: 'auto' }}
+                                priority
+                              />
+                            </Link>
+                          </div>
+                        </div>
+                      </div>
+                    </footer>
+                  ) : null}
+                </div>
+                <Toaster />
+              </>
+            ) : (
             <ClientAuthManager>
               <div className="flex flex-col min-h-screen">
                 {!isLedCleanRoute ? (
@@ -106,6 +146,7 @@ export function ClientProviders({ children, initialNavEvents, initialNavPages }:
                               width={260}
                               height={72}
                               className="h-auto w-[220px] md:w-[260px]"
+                              style={{ width: 'auto', height: 'auto' }}
                               priority
                             />
                           </Link>
@@ -185,6 +226,7 @@ export function ClientProviders({ children, initialNavEvents, initialNavPages }:
               </div>
               <Toaster />
             </ClientAuthManager>
+            )}
           </Suspense>
         </CartProvider>
       </AuthProvider>

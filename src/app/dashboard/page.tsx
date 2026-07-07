@@ -208,6 +208,15 @@ function DashboardPageContent() {
     return currentUserRaces.find(r => normalizeStatus(r.status) === 'Finished') || null;
   }, [showFinishCardForBookingId, currentUserRaces]);
 
+  const showLiveTrackingVisibilityCard = useMemo(() => {
+    return upcomingEvents.some((event: any) => Boolean(
+      event?.liveTrackingHub?.trackingConfig?.enabled
+      ?? event?.liveTrackingHub?.trackingConfig?.showOnHomepage
+      ?? event?.showLiveTrackingOnHomepage
+      ?? false,
+    ));
+  }, [upcomingEvents]);
+
 
   if (authLoading || isAuthenticating || (userFromAuth && dataLoading && !fetchError) ) return <DashboardSkeleton />;
   if (!userFromAuth) return (<div className="flex flex-col items-center justify-center min-h-[calc(100vh-10rem)]"><Loader2 className="h-12 w-12 animate-spin text-primary" /><p className="ml-4 text-muted-foreground text-left">Verifying user session...</p></div>);
@@ -222,10 +231,10 @@ function DashboardPageContent() {
             <div className="space-y-6 w-full">
                 <UserProfile user={userFromAuth} onUpdate={handleUserUpdate} />
                 <ClubAffiliationCard user={userFromAuth} onUpdate={handleUserUpdate} />
-                <LiveTrackingPrivacyCard />
 
               <EventSummary races={currentUserRaces} />
                 <RegisteredEvents />
+                  {showLiveTrackingVisibilityCard ? <LiveTrackingPrivacyCard collapsible defaultOpen={false} /> : null}
                 <AthleteRacePhotosCard />
                 <BelProgressCard />
                 <ActiveCancellationCard user={userFromAuth} />

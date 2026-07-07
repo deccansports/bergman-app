@@ -139,6 +139,7 @@ function LiveTrackingContent() {
               event?.liveTrackingHub?.trackingConfig?.enabled
               ?? (event?.liveDataSource ? event.liveDataSource !== 'none' : true)
             );
+            const trackingLabel = trackingEnabled ? 'Go to Tracking' : 'Yet to open';
 
             return (
             <Card key={event.id} className="group relative flex w-full flex-col overflow-hidden rounded-lg border border-border shadow-lg transition-shadow duration-300 hover:shadow-xl">
@@ -169,14 +170,14 @@ function LiveTrackingContent() {
                 <CardFooter className="mt-auto p-0 pt-4">
                   {trackingEnabled ? (
                     <Button asChild className="w-full">
-                      <Link href={`/live-tracking/${event.id}`}>
+                      <Link href={`/live-tracking/${event.customSlug || event.id}`}>
                         {title === 'Past Events' ? 'View Results / Replay' : 'Go to Tracking'}
                         <ArrowRight className="ml-2 h-4 w-4" />
                       </Link>
                     </Button>
                   ) : (
                     <Button className="w-full" disabled>
-                      Tracking Disabled
+                      {trackingLabel}
                     </Button>
                   )}
                 </CardFooter>

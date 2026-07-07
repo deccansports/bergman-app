@@ -1104,6 +1104,7 @@ export default function WorkWithBergmanPublicPage() {
                 width={220}
                 height={72}
                 className="h-auto w-44 sm:w-52 md:w-56 drop-shadow-[0_0_14px_rgba(255,255,255,0.18)]"
+                style={{ width: 'auto', height: 'auto' }}
                 priority
               />
             </div>

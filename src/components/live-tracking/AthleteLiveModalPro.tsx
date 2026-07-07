@@ -6,16 +6,19 @@ import { Loader2, Activity, Trophy, Clock, MapPin, Waves, ChevronsRight, Bike, F
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { cn, formatSecondsToHMS, hmsToSeconds, getInitials } from "@/lib/utils";
 import { motion } from "framer-motion";
 import type { LiveAthlete, Split, Leg, Status, TicketDefinition, EventCalendarEntry, CustomSplitPoint } from '@/lib/types';
 import type { ResolvedTimingConfiguration } from '@/lib/timingConfiguration';
 import Link from 'next/link';
+import Image from 'next/image';
 import { getCalendarEventsAction } from '@/lib/actions';
 import EventDisplayCard from '@/components/events/EventDisplayCard';
+import BergmanTrackerCard from './BergmanTrackerCard';
 import DynamicSplitSummaryTable from './DynamicSplitSummaryTable';
+import EventCountdown from './EventCountdown';
 import { useTimingConfigurationContext } from './TimingConfigurationContext';
 import { fetchJsonCached } from '@/lib/liveTrackingRequestCache';
 import { buildSplitModalModel } from './split-modal/utils';
@@ -67,11 +70,104 @@ const formatScheduledStart = (targetDate: Date | null) => {
   return targetDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
+const parseTicketDateTime = (dateRaw: unknown, timeRaw: unknown): Date | null => {
+  const dateText = String(dateRaw || '').trim();
+  const timeText = String(timeRaw || '').trim();
+  if (!dateText || !timeText) return null;
+
+  const datePart = /^\d{4}-\d{2}-\d{2}$/.test(dateText) ? dateText : dateText.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datePart)) return null;
+
+  const rawTime = timeText.replace(/\s+/g, ' ').toUpperCase();
+  const ampm = rawTime.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)$/i);
+  if (ampm) {
+    let hours = Number(ampm[1]);
+    const minutes = Number(ampm[2]);
+    const seconds = Number(ampm[3] || 0);
+    const suffix = String(ampm[4] || '').toUpperCase();
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) return null;
+    if (suffix === 'AM' && hours === 12) hours = 0;
+    if (suffix === 'PM' && hours < 12) hours += 12;
+    const normalized = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    const parsed = new Date(`${datePart}T${normalized}`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(rawTime)) {
+    const withSeconds = rawTime.length === 5 ? `${rawTime}:00` : rawTime;
+    const parsed = new Date(`${datePart}T${withSeconds}`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const fallback = new Date(`${datePart} ${rawTime}`);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+};
+
 const formatDistanceValue = (value: unknown) => {
   const numeric = Number(value);
   if (!Number.isFinite(numeric) || numeric < 0) return null;
   const rounded = Math.round(numeric * 10) / 10;
   return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)} km`;
+};
+
+const formatPaceValue = (value: unknown) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  const min = Math.floor(numeric / 60);
+  const sec = Math.round(numeric % 60);
+  return `${min}:${String(sec).padStart(2, '0')} /km`;
+};
+
+const formatClockFromUtcSeconds = (value: unknown) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return new Date(numeric * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+};
+
+const formatCountdownFromSeconds = (value: unknown) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) return null;
+  const total = Math.floor(numeric);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+};
+
+const getSignalBadgeClass = (kind: 'official' | 'estimated' | 'waiting' | 'delayed') => {
+  if (kind === 'official') return 'border-emerald-500/40 bg-emerald-500/15 text-emerald-200';
+  if (kind === 'estimated') return 'border-sky-500/40 bg-sky-500/15 text-sky-200';
+  if (kind === 'delayed') return 'border-orange-500/40 bg-orange-500/15 text-orange-200';
+  return 'border-slate-500/40 bg-slate-500/15 text-slate-200';
+};
+
+const formatCutoffTimeDisplay = (value: unknown) => {
+  const text = String(value ?? '').trim();
+  if (!text) return '—';
+
+  const parseSeconds = (input: string) => {
+    if (/^\d+$/.test(input)) return Number(input);
+    const parts = input.split(':').map((part) => part.trim());
+    if (parts.some((part) => !/^\d+$/.test(part))) return null;
+    if (parts.length === 2) {
+      const [minutes, seconds] = parts.map(Number);
+      return (minutes * 60) + seconds;
+    }
+    if (parts.length === 3) {
+      const [hours, minutes, seconds] = parts.map(Number);
+      return (hours * 3600) + (minutes * 60) + seconds;
+    }
+    return null;
+  };
+
+  const seconds = parseSeconds(text);
+  if (seconds === null || !Number.isFinite(seconds) || seconds < 0) return text;
+  const total = Math.floor(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 };
 
 const getSectionDistanceKm = (section: any) => {
@@ -145,7 +241,7 @@ const computeCourseMetricsFromContest = (contest: any) => {
   });
 
   const segmentTotals = { swim: 0, bike: 0, run: 0 };
-  let previousEnd = 0;
+
   for (const leg of orderedLegs) {
     const firstSplitUuid = String(leg?.firstSplitUuid || leg?.first_split_uuid || '').trim().toLowerCase();
     const lastSplitUuid = String(leg?.lastSplitUuid || leg?.last_split_uuid || '').trim().toLowerCase();
@@ -159,13 +255,12 @@ const computeCourseMetricsFromContest = (contest: any) => {
       return distance !== null ? Math.max(max, distance) : max;
     }, 0);
     const endDistance = Number.isFinite(lastDistance as number) ? Number(lastDistance) : fallbackEnd;
-    const startDistance = Number.isFinite(firstDistance as number) ? Number(firstDistance) : previousEnd;
+    const startDistance = Number.isFinite(firstDistance as number) ? Number(firstDistance) : 0;
     const legDistance = Math.max(0, endDistance - startDistance);
     const theme = inferLegTheme(leg);
     if (theme === 'swim') segmentTotals.swim += legDistance;
     if (theme === 'bike') segmentTotals.bike += legDistance;
     if (theme === 'run') segmentTotals.run += legDistance;
-    previousEnd = Math.max(previousEnd, endDistance);
   }
 
   const firstCheckpointName = String(
@@ -252,212 +347,83 @@ const renderAthleteDetailSkeleton = () => (
   </div>
 );
 
-interface UpcomingEventsModalProps {
-    isOpen: boolean;
-    onClose: () => void;
-}
-
-function UpcomingEventsModal({ isOpen, onClose }: UpcomingEventsModalProps) {
-    const [events, setEvents] = useState<EventCalendarEntry[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-
-    useEffect(() => {
-        if(isOpen) {
-            setIsLoading(true);
-            getCalendarEventsAction().then(result => {
-                if(result.success && result.events) {
-                    const upcoming = result.events.filter(e => !e.eventDate || new Date(e.eventDate) >= new Date());
-                    setEvents(upcoming.slice(0, 6));
-                }
-            }).finally(() => setIsLoading(false));
-        }
-    }, [isOpen]);
-    
-    return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className="sm:max-w-2xl">
-                <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2"><CalendarSearch className="h-6 w-6 text-primary"/>Find Your Next Race</DialogTitle>
-                    <DialogDescription>Your comeback is just one race away. Register for an upcoming event!</DialogDescription>
-                </DialogHeader>
-                <div className="py-4">
-                    {isLoading ? <Loader2 className="mx-auto h-8 w-8 animate-spin"/> : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto p-1">
-                            {events.length > 0 ? events.map(event => (
-                                <EventDisplayCard key={event.id} event={event} />
-                            )) : <p>No upcoming events found. Check back soon!</p>}
-                        </div>
-                    )}
-                </div>
-            </DialogContent>
-        </Dialog>
-    );
-}
-
-const RaceProgressBar: React.FC<{
-    athlete: LiveAthlete;
+const RaceProgressBar = ({ athlete, ticketDef }: {
+  athlete: LiveAthlete;
   timingConfiguration?: ResolvedTimingConfiguration | null;
-  participant?: Record<string, any> | null;
+  participant?: any;
   participantsByBib?: Record<string, any>;
   ticketDef?: TicketDefinition | null;
-}> = ({ athlete, timingConfiguration, participant, participantsByBib, ticketDef }) => {
-  const model = useMemo(
-    () => buildSplitModalModel({ athlete, timingConfiguration, participant, participantsByBib, ticketDef }),
-    [athlete, timingConfiguration, participant, participantsByBib, ticketDef],
+}) => {
+  const splits = Array.isArray(athlete?.splits) ? athlete.splits : [];
+  const latestSplit = [...splits]
+    .filter((split) => Number.isFinite(Number(split?.distance)) && Number(split?.distance) >= 0)
+    .sort((a, b) => Number(a?.time || 0) - Number(b?.time || 0))
+    .pop();
+
+  const coveredKm = Number(latestSplit?.distance || 0);
+  const courseMaps = (ticketDef as any)?.courseMaps || {};
+  const configuredTotalKm = Number(
+    Number(courseMaps?.swimDistance || 0)
+    + Number(courseMaps?.bikeDistance || 0)
+    + Number(courseMaps?.runDistance || 0)
+    + Number(courseMaps?.run1Distance || 0)
+    + Number(courseMaps?.run2Distance || 0),
   );
+  const inferredTotalKm = Math.max(coveredKm, ...splits.map((split) => Number(split?.distance || 0)).filter((value) => Number.isFinite(value) && value >= 0));
+  const totalKm = configuredTotalKm > 0 ? configuredTotalKm : inferredTotalKm;
+  const progressPct = totalKm > 0 ? Math.min(100, Math.max(0, (coveredKm / totalKm) * 100)) : 0;
+  const remainingKm = totalKm > 0 ? Math.max(0, totalKm - coveredKm) : 0;
 
-  const stages = useMemo(() => {
-    return model.sections.filter((section) => section.rows.length > 0);
-  }, [model.sections]);
-
-  const getCutoffLabel = (sectionTheme: string) => {
-    const cutoffs = ticketDef?.cutoffs;
-    if (!cutoffs) return 'No Cutoff';
-    if (cutoffs.mode === 'overall') {
-      return cutoffs.overall ? `Cutoff: ${cutoffs.overall}` : 'No Cutoff';
-    }
-
-    const theme = sectionTheme.toLowerCase();
-    const value = theme.includes('swim')
-      ? cutoffs.swim
-      : theme.includes('bike')
-        ? cutoffs.bike
-        : theme.includes('run 1') || theme.includes('run1')
-          ? cutoffs.run1
-          : theme.includes('run 2') || theme.includes('run2')
-            ? cutoffs.run2
-            : theme.includes('run')
-              ? cutoffs.run
-              : null;
-    return value ? `Cutoff: ${value}` : 'No Cutoff';
-  };
-
-  const stageStateByKey = useMemo(() => {
-    const stateMap = new Map<string, 'completed' | 'current' | 'future' | 'missed'>();
-    model.sectionTimeline.forEach((row) => stateMap.set(row.section.key, row.state));
-    return stateMap;
-  }, [model.sectionTimeline]);
-
-  const totalRows = stages.reduce((sum, section) => sum + section.rows.length, 0);
-  const reachedRows = stages.reduce((sum, section) => sum + section.rows.filter((row) => row.reached).length, 0);
-  const totalProgressPercentage = model.isFinished
-    ? 100
-    : totalRows > 0
-    ? Math.min(100, Math.max(0, (reachedRows / totalRows) * 100))
-    : 0;
-
-  const sectionToLeg = (section: { theme: string; label: string }): Leg | 'NOT_STARTED' => {
-    const token = `${section.theme} ${section.label}`.toLowerCase();
-    if (token.includes('swim')) return 'SWIM';
-    if (token.includes('bike') || token.includes('cycle')) return 'BIKE';
-    if (token.includes('t1')) return 'T1';
-    if (token.includes('t2')) return 'T2';
-    if (token.includes('run 1') || token.includes('run1')) return 'RUN1';
-    if (token.includes('run 2') || token.includes('run2')) return 'RUN2';
-    if (token.includes('run')) return 'RUN';
-    if (token.includes('finish')) return 'FINISH';
-    return 'NOT_STARTED';
-  };
-
-    return (
-        <div className="w-full pt-2">
-             <div className="flex justify-between items-center mb-1">
-        {stages.map((stage, i) => {
-          const state = stageStateByKey.get(stage.key) || 'future';
-          const isCompleted = model.isFinished || state === 'completed';
-          const isCurrent = !model.isNotStarted && state === 'current';
-          const stageLabel = stage.theme === 'finish' ? 'FINISH' : String(stage.label || stage.theme || `STAGE ${i + 1}`).toUpperCase();
-          const cutoffLabel = getCutoffLabel(stageLabel);
-                    return (
-                        <div key={i} className="z-10 flex flex-col items-center flex-1">
-               <span className={`text-xs font-medium mb-1 ${isCurrent || isCompleted ? 'text-primary' : 'text-muted-foreground'}`}>{stageLabel}</span>
-                            <div className={`w-6 h-6 rounded-full flex items-center justify-center border-2 transition-colors duration-300 ${
-                                isCompleted ? 'bg-primary border-primary' : isCurrent ? 'bg-background border-primary scale-110' : 'bg-background border-border'
-                            }`}>
-                <LegIcon leg={sectionToLeg({ theme: stage.theme, label: stage.label })} className={`h-4 w-4 transition-colors duration-300 ${isCompleted ? 'text-primary-foreground' : isCurrent ? 'text-primary' : 'text-muted-foreground'}`} />
-                            </div>
-                            <p className="font-mono text-[10px] mt-1 text-muted-foreground">
-                {stage.primaryMetricValue || '--:--'}
-                            </p>
-                            <p className="text-[10px] mt-0.5 text-muted-foreground text-center leading-tight max-w-[88px]">
-                              {cutoffLabel}
-                            </p>
-                        </div>
-                    );
-                })}
-            </div>
-            <div className="relative w-full h-2 mt-1">
-                <div className="absolute top-1/2 left-4 right-4 h-1 bg-slate-700 rounded-full -translate-y-1/2" />
-                <motion.div 
-                  className="absolute top-1/2 left-4 h-1 bg-yellow-400 rounded-full -translate-y-1/2"
-                  initial={{ width: 0 }}
-                  animate={{ width: `calc(${totalProgressPercentage}% - 8px)` }}
-                  transition={{ duration: 0.5, ease: "easeInOut" }}
-                />
-                <motion.div 
-                    className="absolute top-1/2 z-20"
-                    initial={{ left: '16px' }}
-                    animate={{ left: `calc(${totalProgressPercentage}% - 8px)` }}
-                    transition={{ duration: 0.5, ease: "easeInOut" }}
-                >
-                    <div className="w-4 h-4 bg-yellow-400 border-2 border-slate-900 rounded-full -translate-x-1/2 -translate-y-1/2 flex items-center justify-center">
-                        <UserIcon className="h-2 w-2 text-background" />
-                    </div>
-                </motion.div>
-            </div>
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="mb-1 flex items-center justify-between text-xs text-slate-300">
+          <span className="inline-flex items-center gap-1"><Route className="h-3.5 w-3.5" />Progress</span>
+          <span className="font-mono">{progressPct.toFixed(1)}%</span>
         </div>
-    );
+        <div className="h-2 w-full overflow-hidden rounded-full bg-slate-700/70">
+          <div className="h-full rounded-full bg-gradient-to-r from-sky-500 to-emerald-500 transition-all duration-700" style={{ width: `${progressPct}%` }} />
+        </div>
+      </div>
+      <div className="grid gap-2 text-xs sm:grid-cols-3">
+        <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+          <div className="inline-flex items-center gap-1 text-slate-400"><LocateFixed className="h-3.5 w-3.5" />Covered</div>
+          <div className="font-semibold text-white">{formatDistanceValue(coveredKm) || '0 km'}</div>
+        </div>
+        <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+          <div className="text-slate-400">Remaining</div>
+          <div className="font-semibold text-white">{formatDistanceValue(remainingKm) || '0 km'}</div>
+        </div>
+        <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+          <div className="inline-flex items-center gap-1 text-slate-400"><CheckCircle2 className="h-3.5 w-3.5" />Total</div>
+          <div className="font-semibold text-white">{formatDistanceValue(totalKm) || '—'}</div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
-const StatusMessage = ({ status, name, finishTime, onFindRaceClick, missedCutoffInfo, elapsedTime }: { status: Status; name: string; finishTime?: string | null, onFindRaceClick: () => void, missedCutoffInfo?: { segment: string; yourTime: string; cutoff: string } | null, elapsedTime: string }) => {
-    if (status === 'Finished') {
-        return (
-            <div className="text-center p-4 bg-green-900/50 rounded-lg border border-green-700 space-y-2">
-                <Trophy className="h-10 w-10 text-yellow-400 mx-auto" />
-                <h4 className="font-bold text-lg text-yellow-300">Congratulations, {name}!</h4>
-                <p className="text-sm text-green-200">You conquered the course. An incredible achievement!</p>
-                {finishTime && (
-                    <div className="pt-2">
-                        <p className="text-sm text-yellow-200/80">Finish Time</p>
-                        <p className="text-3xl sm:text-5xl font-bold font-mono text-yellow-300 tracking-tighter">{finishTime}</p>
-                    </div>
-                )}
-            </div>
-        );
-    }
-    if (status.startsWith('DNF') || status === 'DNQ' || status === 'DNS') {
-        let message = "Every race is a lesson. Rest up, learn, and come back stronger. The next finish line awaits you!";
-        if (missedCutoffInfo) {
-            message = `You missed the cutoff time for the ${missedCutoffInfo.segment} segment. Your time was ${missedCutoffInfo.yourTime} against a cutoff of ${missedCutoffInfo.cutoff}. Focus on this area, and you&apos;ll crush it next time!`;
-        }
-        return (
-            <div className="text-center p-4 bg-red-900/50 rounded-lg border border-red-700">
-                <Target className="h-10 w-10 text-red-300 mx-auto mb-2" />
-                <h4 className="font-bold text-lg text-red-200">A Tough Day Out There ({status})</h4>
-                <p className="text-sm text-red-200 mt-2">{message}</p>
-                 <div id="find-next-race-btn-wrapper" className="mt-4">
-                    <Button size="sm" className="bg-yellow-400 text-slate-900 hover:bg-yellow-300" onClick={onFindRaceClick}>
-                        <Rocket className="mr-2 h-4 w-4"/> Find Your Next Race
-                    </Button>
-                </div>
-            </div>
-        );
-    }
-     if (status === 'On Course') {
-        return (
-            <div className="text-center p-4 bg-blue-900/50 rounded-lg border border-blue-700 space-y-2">
-                <p className="text-sm text-blue-200/80">Elapsed Time</p>
-                <p className="text-4xl sm:text-5xl font-bold font-mono text-white tracking-tighter">{elapsedTime}</p>
-            </div>
-        );
-    }
-    return (
-        <div className="text-center p-4 bg-gray-800/50 rounded-lg border border-gray-600">
-            <Meh className="h-10 w-10 text-gray-300 mx-auto mb-2" />
-            <h4 className="font-bold text-lg text-gray-200">Not Yet Started</h4>
-            <p className="text-sm text-gray-300">The race hasn&apos;t begun for this athlete, or results are not yet available.</p>
+const UpcomingEventsModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
+  if (!isOpen) return null;
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(next) => { if (!next) onClose(); }}>
+      <DialogContent className="max-h-[80dvh] max-w-2xl overflow-hidden bg-slate-950 text-slate-50">
+        <DialogHeader>
+          <DialogTitle>Upcoming Events</DialogTitle>
+          <DialogDescription>Event discovery is temporarily unavailable in this view.</DialogDescription>
+        </DialogHeader>
+        <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-4 text-sm text-slate-300">
+          Please check the Events page for the latest schedule.
         </div>
-    );
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="secondary" onClick={onClose}>Close</Button>
+          </DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 };
 
 // ============================================
@@ -491,6 +457,7 @@ export default function AthleteLiveModalPro({
   const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [now, setNow] = useState(new Date());
   const [hydratedDetailAthlete, setHydratedDetailAthlete] = useState<LiveAthlete | null>(null);
+  const [noParticipantFound, setNoParticipantFound] = useState(false);
   const [timingConfiguration, setTimingConfiguration] = useState<ResolvedTimingConfiguration | null>(null);
   const [isTimingConfigurationLoading, setIsTimingConfigurationLoading] = useState(false);
   const [isDetailHydrating, setIsDetailHydrating] = useState(false);
@@ -721,6 +688,7 @@ export default function AthleteLiveModalPro({
 
   useEffect(() => {
     if (!open || !isDetailMode || !detailAthlete) return;
+    setNoParticipantFound(false);
 
     const athleteKey = `${eventId}:${String((detailAthlete as any)?.id || (detailAthlete as any)?.athleteUid || detailAthlete?.bib || bookingId || '').trim()}`;
     let pollTimer: number | null = null;
@@ -749,7 +717,12 @@ export default function AthleteLiveModalPro({
 
         const contextPayload = contextResponse ? await contextResponse.json().catch(() => null) : null;
         const matched = contextPayload?.success ? (contextPayload?.athlete || null) : null;
-        if (!matched || cancelled) return;
+        if (!matched) {
+          if (!cancelled) setNoParticipantFound(true);
+          return;
+        }
+        // matched found -> clear any previous "not found" state
+        if (!cancelled) setNoParticipantFound(false);
 
         const contextContestUuid = String(
           contextPayload?.contestContext?.contest?.contestUuid
@@ -779,6 +752,23 @@ export default function AthleteLiveModalPro({
             devices: Array.isArray(timingPayload?.devices) ? timingPayload.devices : [],
             legs: Array.isArray(timingPayload?.legs) ? timingPayload.legs : [],
             ageGroups: Array.isArray(timingPayload?.ageGroups) ? timingPayload.ageGroups : [],
+            legSplitMappingsByContest: timingPayload?.legSplitMappingsByContest && typeof timingPayload.legSplitMappingsByContest === 'object'
+              ? timingPayload.legSplitMappingsByContest
+              : contextTiming?.legSplitMappingsByContest && typeof contextTiming.legSplitMappingsByContest === 'object'
+                ? contextTiming.legSplitMappingsByContest
+                : {},
+            legSplitMappingUpdatedAt: timingPayload?.legSplitMappingUpdatedAt || contextTiming?.legSplitMappingUpdatedAt || null,
+            raceFlowByContest: timingPayload?.raceFlowByContest && typeof timingPayload.raceFlowByContest === 'object'
+              ? timingPayload.raceFlowByContest
+              : contextTiming?.raceFlowByContest && typeof contextTiming.raceFlowByContest === 'object'
+                ? contextTiming.raceFlowByContest
+                : {},
+            raceFlowTimelineByContest: timingPayload?.raceFlowTimelineByContest && typeof timingPayload.raceFlowTimelineByContest === 'object'
+              ? timingPayload.raceFlowTimelineByContest
+              : contextTiming?.raceFlowTimelineByContest && typeof contextTiming.raceFlowTimelineByContest === 'object'
+                ? contextTiming.raceFlowTimelineByContest
+                : {},
+            raceFlowTimelineUpdatedAt: timingPayload?.raceFlowTimelineUpdatedAt || contextTiming?.raceFlowTimelineUpdatedAt || null,
             splitsByContest: {
               ...(timingPayload?.splitsByContest || {}),
               ...(contextContestUuid && contextContestSplits.length > 0 ? { [contextContestUuid]: contextContestSplits } : {}),
@@ -996,7 +986,7 @@ export default function AthleteLiveModalPro({
         window.clearInterval(pollTimer);
       }
     };
-  }, [bookingId, detailAthlete, eventId, getDetailViewport, isDetailMode, open]);
+  }, [bookingId, detailAthlete, eventId, getDetailViewport, isDetailMode, open, restoreDetailScrollPosition, stripTransientDetailFields]);
 
   useEffect(() => {
     const sharedTimingConfiguration = timingConfigurationProp || timingConfigurationContext?.timingConfiguration || null;
@@ -1006,7 +996,6 @@ export default function AthleteLiveModalPro({
       return;
     }
     if (!open || !eventId) return;
-    if (timingConfiguration) return;
     let cancelled = false;
     const loadTimingConfiguration = async (options?: { showLoading?: boolean }) => {
       const cacheKey = `bergman:timingConfiguration:${eventId}`;
@@ -1054,10 +1043,15 @@ export default function AthleteLiveModalPro({
             splitsByContest: timingPayload?.splitsByContest && typeof timingPayload.splitsByContest === 'object' ? timingPayload.splitsByContest : {},
             timingPointsByContest: timingPayload?.timingPointsByContest && typeof timingPayload.timingPointsByContest === 'object' ? timingPayload.timingPointsByContest : {},
             ageGroupsByContest: timingPayload?.ageGroupsByContest && typeof timingPayload.ageGroupsByContest === 'object' ? timingPayload.ageGroupsByContest : {},
+            legSplitMappingsByContest: timingPayload?.legSplitMappingsByContest && typeof timingPayload.legSplitMappingsByContest === 'object' ? timingPayload.legSplitMappingsByContest : {},
+            legSplitMappingUpdatedAt: timingPayload?.legSplitMappingUpdatedAt || null,
+            raceFlowByContest: timingPayload?.raceFlowByContest && typeof timingPayload.raceFlowByContest === 'object' ? timingPayload.raceFlowByContest : {},
+            raceFlowTimelineByContest: timingPayload?.raceFlowTimelineByContest && typeof timingPayload.raceFlowTimelineByContest === 'object' ? timingPayload.raceFlowTimelineByContest : {},
+            raceFlowTimelineUpdatedAt: timingPayload?.raceFlowTimelineUpdatedAt || null,
             importedAt: timingPayload.importedAt || payload.importedAt || null,
             provider: timingPayload.provider || payload.provider || null,
           } as ResolvedTimingConfiguration;
-        });
+        }, { force: true });
 
         setTimingConfiguration(resolvedTimingConfiguration);
         if (typeof window !== 'undefined') {
@@ -1321,10 +1315,14 @@ export default function AthleteLiveModalPro({
       confidence,
       basedOn: paceSamples.length > 0 ? `${Math.min(5, paceSamples.length)} split deltas (median)` : (activeDetailAthlete.predictedPaceSecPerKm ? 'predicted pace model' : 'overall observed average'),
     };
-  }, [isDetailMode, activeDetailAthlete, effectiveStatus, ticketDef]);
+  }, [isDetailMode, activeDetailAthlete, effectiveStatus, ticketDef, resolvedTicketDef?.courseMaps]);
 
   const raceStartAt = useMemo(() => {
     if (!isDetailMode || !activeDetailAthlete) return null;
+    const ticketDate = String((resolvedTicketDef as any)?.eventDate || '').trim();
+    const ticketTime = String((resolvedTicketDef as any)?.raceStartTime || (resolvedTicketDef as any)?.startTime || '').trim();
+    const parsedTicketDateTime = parseTicketDateTime(ticketDate, ticketTime);
+    if (parsedTicketDateTime) return parsedTicketDateTime;
     const candidates: Array<number | string | null | undefined> = [
       (resolvedContest as any)?.startTime,
       (resolvedContest as any)?.start_time,
@@ -1361,7 +1359,7 @@ export default function AthleteLiveModalPro({
     }
 
     return null;
-  }, [isDetailMode, activeDetailAthlete, resolvedContest, splitModel]);
+  }, [isDetailMode, activeDetailAthlete, resolvedContest, splitModel, resolvedTicketDef]);
 
   const isBeforeRace = useMemo(() => {
     if (!isDetailMode || !activeDetailAthlete) return false;
@@ -1490,6 +1488,24 @@ export default function AthleteLiveModalPro({
     const detailReady = Boolean(detailReadyAthlete && !isTimingConfigurationLoading);
     const renderAthlete = detailReadyAthlete || activeDetailAthlete;
     const detailParticipant = renderAthlete || activeDetailAthlete;
+    if (noParticipantFound) {
+      return (
+        <Dialog open={open} onOpenChange={onClose}>
+          <DialogContent className="max-h-[60dvh] max-w-lg overflow-hidden bg-slate-950 text-slate-50">
+            <DialogHeader>
+              <DialogTitle>No participant found</DialogTitle>
+              <DialogDescription>Couldn&apos;t find a participant record in live:event:{eventId}:participant:index for the provided identifier.</DialogDescription>
+            </DialogHeader>
+            <div className="p-6 text-center text-sm text-slate-300">No participant found. Please verify the BIB or athlete identifier and try again.</div>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="secondary" onClick={onClose}>Close</Button>
+              </DialogClose>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      );
+    }
     const participantLive = (renderAthlete as any)?.participantLive || null;
     const currentSection = splitModel?.currentSection || null;
     const currentPoint = splitModel?.currentPoint || null;
@@ -1526,7 +1542,28 @@ export default function AthleteLiveModalPro({
       || splitModel?.totalDistanceKm
       || 0,
     ) || 0;
-    const raceNotStarted = isBeforeRace || Boolean(splitModel?.isNotStarted);
+    const lifecycleState = splitModel?.lifecycleState || (isBeforeRace ? 'UPCOMING' : 'LIVE_RACING');
+    const shouldShowEventCountdown = lifecycleState !== 'UPCOMING' && lifecycleState !== 'OFFICIAL_STARTED_WAITING_CHIP';
+    const lifecycleLabel = splitModel?.lifecycleLabel
+      || (lifecycleState === 'UPCOMING'
+        ? 'Upcoming'
+        : lifecycleState === 'OFFICIAL_STARTED_WAITING_CHIP'
+          ? 'Waiting for Chip Start'
+          : lifecycleState === 'CHIP_STARTED'
+            ? 'Chip Started · Waiting for First Checkpoint'
+            : lifecycleState === 'FINISHED'
+              ? 'Finished'
+              : 'Live Racing');
+    const officialStartAt = splitModel?.officialStartTimeSeconds && splitModel.officialStartTimeSeconds > 0
+      ? new Date(splitModel.officialStartTimeSeconds * 1000)
+      : raceStartAt;
+    const officialRaceTimeText = splitModel?.officialRaceTimeSeconds !== null && splitModel?.officialRaceTimeSeconds !== undefined
+      ? formatSecondsToHMS(splitModel.officialRaceTimeSeconds)
+      : '—';
+    const athleteRaceTimeText = splitModel?.chipRaceTimeSeconds !== null && splitModel?.chipRaceTimeSeconds !== undefined
+      ? formatSecondsToHMS(splitModel.chipRaceTimeSeconds)
+      : '—';
+    const raceNotStarted = lifecycleState === 'UPCOMING' || lifecycleState === 'OFFICIAL_STARTED_WAITING_CHIP';
     const hasTimingReads = Boolean(
       participantLive?.lastTimingPointUuid
       || participantLive?.last_timing_point_uuid
@@ -1553,75 +1590,102 @@ export default function AthleteLiveModalPro({
       : (Number(participantLive?.distanceRemaining ?? participantLive?.distance_remaining ?? Math.max(0, courseTotalDistanceKm - liveDistanceCovered)) || 0);
     const liveCurrentLeg = isRegisteredWaiting
       ? 'Not Started'
-      : (String(currentSection?.label || participantLive?.currentLeg || participantLive?.lastLegName || '').trim() || null);
+      : (String(participantLive?.currentLeg || participantLive?.lastLegName || activeDetailAthlete?.leg || '').trim() || null);
     const liveCurrentSplit = isRegisteredWaiting
-      ? 'Waiting for Start'
-      : (String(currentSection?.label || resolvedCurrentSplitName || participantLive?.currentSplit || participantLive?.expectedNextSplit || currentPoint?.point?.displayName || currentPoint?.point?.shortName || '').trim() || null);
+      ? '-'
+      : (String(resolvedCurrentSplitName || participantLive?.currentSplit || currentPoint?.point?.displayName || currentPoint?.point?.shortName || '').trim() || null);
     const liveLastTimingPoint = isRegisteredWaiting
       ? '—'
       : (resolvedLastTimingPointName || String(participantLive?.lastTimingPointName || participantLive?.lastTimingPoint || '').trim() || '—');
     const liveAverageSpeed = Number(participantLive?.averageSpeed ?? participantLive?.speed ?? splitModel?.overallAverageSpeed ?? NaN);
     const liveAveragePace = Number(participantLive?.averagePace ?? participantLive?.pace ?? splitModel?.overallAveragePace ?? NaN);
-    const liveOverallRank = isRegisteredWaiting ? null : (participantLive?.overallRank ?? currentRank.overall ?? null);
-    const liveContestRank = isRegisteredWaiting ? null : (participantLive?.contestRank ?? currentRank.category ?? null);
-    const liveGenderRank = isRegisteredWaiting ? null : (participantLive?.genderRank ?? currentRank.gender ?? null);
-    const liveAgeGroupRank = isRegisteredWaiting ? null : (participantLive?.ageGroupRank ?? splitModel?.rankSummary.category ?? null);
+    const liveCurrentSpeed = Number(participantLive?.speed ?? splitModel?.overallAverageSpeed ?? NaN);
+    const etaNextSplitUtc = Number(participantLive?.etaNextSplitUTC ?? participantLive?.etaNextSplitUtc ?? NaN);
+    const etaFinishUtc = Number(participantLive?.etaFinishUTC ?? participantLive?.etaFinishUtc ?? NaN);
+    const etaNextSplitCountdownSec = Number(
+      participantLive?.etaNextSplitCountdownSec
+      ?? (Number.isFinite(etaNextSplitUtc) && etaNextSplitUtc > 0 ? Math.max(0, Math.round(etaNextSplitUtc - (now.getTime() / 1000))) : NaN),
+    );
+    const predictionConfidence = String(participantLive?.predictionConfidence || (detailParticipant as any)?.predictionConfidence || '').trim().toUpperCase() || 'LOW';
+    const predictionSource = String(participantLive?.predictionSource || (detailParticipant as any)?.predictionSource || '').trim() || (isRegisteredWaiting ? 'WAITING_OFFICIAL' : 'OFFICIAL_TIMING');
+    const predictionStatus = String(participantLive?.predictionStatus || (detailParticipant as any)?.predictionStatus || '').trim() || (isRegisteredWaiting ? '🔴 Waiting for official timing' : '🟢 Official Timing');
+    const predictionUpdatedAtRaw = Number(participantLive?.predictionUpdatedAt || (detailParticipant as any)?.predictionUpdatedAt || NaN);
+    const predictionUpdatedAtText = Number.isFinite(predictionUpdatedAtRaw) && predictionUpdatedAtRaw > 0
+      ? new Date(predictionUpdatedAtRaw * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      : '—';
+    const predictionFrozen = Boolean(participantLive?.predictionFrozen || (detailParticipant as any)?.predictionFrozen);
+    const predictionFrozenReason = String(participantLive?.predictionFrozenReason || (detailParticipant as any)?.predictionFrozenReason || '').trim() || 'Waiting for next official timing point';
+    const confidenceBadgeKind: 'official' | 'estimated' | 'waiting' = predictionConfidence === 'HIGH' ? 'official' : predictionConfidence === 'MEDIUM' ? 'estimated' : 'waiting';
     const courseCutoffs = (resolvedContest as any)?.cutoffs || (resolvedTicketDef as any)?.cutoffs || null;
+    const cumulativeCutoffRows = courseCutoffs
+      ? (courseCutoffs.mode === 'overall'
+        ? [{ label: 'Overall / Finish Cutoff', value: formatCutoffTimeDisplay(courseCutoffs.overall) }]
+        : [
+            { label: 'Swim Cutoff', value: formatCutoffTimeDisplay(courseCutoffs.swim) },
+            { label: 'Bike Cutoff', value: formatCutoffTimeDisplay(courseCutoffs.bike) },
+            { label: 'Run Cutoff', value: formatCutoffTimeDisplay(courseCutoffs.run) },
+          ].filter((row) => row.value !== '—'))
+      : [];
     const swimDistance = Number(courseOverview.swim || 0);
     const bikeDistance = Number(courseOverview.bike || 0);
     const runDistance = Number(courseOverview.run || 0);
-    const waitingText = 'Waiting for Start';
-    const gpsLat = Number(participantLive?.lat ?? participantLive?.latitude ?? NaN);
-    const gpsLng = Number(participantLive?.lng ?? participantLive?.longitude ?? NaN);
-    const currentGpsText = Number.isFinite(gpsLat) && Number.isFinite(gpsLng) ? `${gpsLat.toFixed(5)}, ${gpsLng.toFixed(5)}` : 'Not Available';
+    const waitingText = '-';
     const currentSpeedText = isRegisteredWaiting
       ? '0 km/h'
-      : (Number.isFinite(liveAverageSpeed) && liveAverageSpeed > 0 ? `${liveAverageSpeed.toFixed(2)} km/h` : waitingText);
-    const scheduledStartText = formatScheduledStart(raceStartAt);
+      : (Number.isFinite(liveCurrentSpeed) && liveCurrentSpeed > 0 ? `${liveCurrentSpeed.toFixed(2)} km/h` : waitingText);
+    const scheduledStartText = formatScheduledStart(officialStartAt);
+    const eventNameText = String((resolvedContest as any)?.contestName || (resolvedContest as any)?.name || resolvedCategory || 'Race').trim();
+    const eventDateText = officialStartAt && !Number.isNaN(officialStartAt.getTime())
+      ? officialStartAt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+      : '';
 
     return (
       <>
         <Dialog open={open} onOpenChange={onClose}>
           <DialogContent onOpenAutoFocus={(event) => event.preventDefault()} onCloseAutoFocus={(event) => event.preventDefault()} className="flex h-[80dvh] w-[96vw] max-w-[960px] flex-col overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 p-0 text-slate-50 shadow-2xl selection:bg-sky-300 selection:text-slate-950 [-webkit-tap-highlight-color:transparent] sm:max-w-[960px] dark:border-slate-700 dark:bg-slate-950">
             <div className="relative flex flex-1 min-h-0 w-full max-w-full min-w-0 flex-col overflow-hidden bg-slate-950 text-slate-50 selection:bg-sky-300 selection:text-slate-950">
-              <DialogClose className="absolute right-3 top-3 z-50 rounded-full border border-white/15 bg-slate-950/80 p-2 text-slate-200 shadow-lg transition hover:bg-slate-800 hover:text-white">
-                <span className="sr-only">Close</span>
-                ×
-              </DialogClose>
               <DialogHeader className="flex-none border-b border-gray-700 p-3 pr-12 sm:p-4">
                 {detailReady ? (
-                  <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-                    <Avatar className="h-14 w-14 border-2 border-primary/50 sm:h-16 sm:w-16">
-                      <AvatarImage src={validAvatarUrl} alt={renderAthlete?.name || 'Athlete'} />
-                      <AvatarFallback className="bg-primary/20 text-primary text-lg font-semibold sm:text-xl">{getInitials(renderAthlete?.name || 'Athlete')}</AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0">
-                      <DialogTitle className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xl text-yellow-400 sm:text-2xl">
-                        <span className="min-w-0 truncate">{renderAthlete?.name || 'Athlete'}</span>
-                        {flagEmoji ? (
-                          <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-sm leading-none shadow-sm">
-                            {flagEmoji}
-                          </span>
-                        ) : null}
-                        <span className="font-mono text-base text-slate-400 sm:text-lg">({renderAthlete?.bib || '—'})</span>
-                      </DialogTitle>
-                      <DialogDescription className="space-y-1 break-words text-xs text-gray-300 sm:text-sm">
-                        <div>{renderAthlete?.gender || '—'} ·</div>
-                        <div>
-                          {resolvedCategory || 'Category pending'}
-                          {resolvedRegistrationStatus ? ` · ${resolvedRegistrationStatus}` : ''}
-                        </div>
-                        {resolvedClub && (
-                          <div>
-                            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-slate-900 shadow-sm dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-slate-100 sm:text-xs">
-                              Proudly representing {resolvedClub}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.28em] text-slate-400">
+                      <Image src="/bwshop.png" alt="Bergman logo" width={20} height={20} className="h-5 w-5 rounded-sm object-contain" />
+                      <span>{eventNameText}</span>
+                      {eventDateText ? <span className="text-slate-500">· {eventDateText}</span> : null}
+                      {scheduledStartText ? <span className="text-slate-500">· {scheduledStartText}</span> : null}
+                    </div>
+                    <div className="flex min-w-0 items-center gap-3 sm:gap-4">
+                      <Avatar className="h-14 w-14 border-2 border-primary/50 sm:h-16 sm:w-16">
+                        <AvatarImage src={validAvatarUrl} alt={renderAthlete?.name || 'Athlete'} />
+                        <AvatarFallback className="bg-primary/20 text-primary text-lg font-semibold sm:text-xl">{getInitials(renderAthlete?.name || 'Athlete')}</AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0">
+                        <DialogTitle className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xl text-yellow-400 sm:text-2xl">
+                          <span className="min-w-0 truncate">{renderAthlete?.name || 'Athlete'}</span>
+                          {flagEmoji ? (
+                            <span className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-sm leading-none shadow-sm">
+                              {flagEmoji}
                             </span>
+                          ) : null}
+                          <span className="font-mono text-base text-slate-400 sm:text-lg">({renderAthlete?.bib || '—'})</span>
+                        </DialogTitle>
+                        <DialogDescription className="space-y-1 break-words text-xs text-gray-300 sm:text-sm">
+                          <div>{renderAthlete?.gender || '—'} ·</div>
+                          <div>
+                            {resolvedCategory || 'Category pending'}
+                            {resolvedRegistrationStatus ? ` · ${resolvedRegistrationStatus}` : ''}
                           </div>
-                        )}
-                        {(resolvedCity || resolvedState || resolvedCountry) && (
-                          <div>{[resolvedCity, resolvedState, resolvedCountry].filter(Boolean).join(', ')}</div>
-                        )}
-                      </DialogDescription>
+                          {resolvedClub && (
+                            <div>
+                              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-slate-900 shadow-sm dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-slate-100 sm:text-xs">
+                                Proudly representing {resolvedClub}
+                              </span>
+                            </div>
+                          )}
+                          {(resolvedCity || resolvedState || resolvedCountry) && (
+                            <div>{[resolvedCity, resolvedState, resolvedCountry].filter(Boolean).join(', ')}</div>
+                          )}
+                        </DialogDescription>
+                      </div>
                     </div>
                   </div>
                 ) : (
@@ -1639,26 +1703,42 @@ export default function AthleteLiveModalPro({
                 <div className="w-full max-w-full min-w-0 space-y-3 overflow-hidden p-3 sm:p-4">
                 {!detailReady ? renderAthleteDetailSkeleton() : (
                   <>
-                {isBeforeRace ? (
+                <div className="w-full max-w-full min-w-0 pb-2">
+                  <BergmanTrackerCard
+                    data={detailParticipant as any}
+                    timingConfiguration={timingConfiguration}
+                    ticketDef={resolvedTicketDef}
+                    onViewMap={undefined}
+                    onRemove={() => {}}
+                    onSelect={() => {}}
+                  />
+                </div>
+                {shouldShowEventCountdown ? (
+                  <EventCountdown
+                    officialStartAt={officialStartAt}
+                    chipStartAt={splitModel?.chipStartTimeSeconds && splitModel.chipStartTimeSeconds > 0 ? new Date(splitModel.chipStartTimeSeconds * 1000) : null}
+                    splitModelLifecycle={splitModel?.lifecycleState || null}
+                    officialRaceTimeSeconds={splitModel?.officialRaceTimeSeconds ?? null}
+                    chipRaceTimeSeconds={splitModel?.chipRaceTimeSeconds ?? null}
+                    showAthleteTimers
+                  />
+                ) : null}
+                {!(lifecycleState === 'UPCOMING' || lifecycleState === 'OFFICIAL_STARTED_WAITING_CHIP' || lifecycleState === 'CHIP_STARTED') ? (
                   <Card className="border-slate-700 bg-slate-800/50">
                     <CardHeader className="p-3">
                       <CardTitle className="text-sm font-semibold text-emerald-300">Race Status</CardTitle>
                     </CardHeader>
-                    <CardContent className="space-y-3 p-3 text-sm text-slate-200">
-                      <div className="rounded-md border border-emerald-700/60 bg-emerald-950/20 p-3">
-                        <div className="font-semibold">🟢 Registered · Waiting for Start</div>
-                        <div className="mt-1 text-xs text-slate-300">Timing has not started yet. Live tracking will begin once this athlete crosses the start timing point.</div>
+                    <CardContent className="space-y-2 p-3 text-xs text-slate-200">
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="text-slate-400">Prediction Status</div>
+                        <div className={cn('mt-1 inline-flex items-center rounded-full border px-2 py-0.5 font-semibold', predictionFrozen ? getSignalBadgeClass('delayed') : getSignalBadgeClass('estimated'))}>
+                          {predictionFrozen ? '🔴 Waiting for official timing' : predictionStatus}
+                        </div>
                       </div>
-                      {raceStartAt && scheduledStartText ? (
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                            <div className="text-xs text-slate-400">Race Starts In</div>
-                            <div className="font-semibold text-white">{formatCountdownDuration(raceStartAt)}</div>
-                          </div>
-                          <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                            <div className="text-xs text-slate-400">Scheduled Start</div>
-                            <div className="font-semibold text-white">{scheduledStartText}</div>
-                          </div>
+                      {predictionFrozen ? (
+                        <div className="rounded-md border border-orange-700/60 bg-orange-950/30 p-2 text-orange-200">
+                          <div className="font-semibold">Estimated position unavailable</div>
+                          <div className="mt-1 text-[11px]">{predictionFrozenReason}</div>
                         </div>
                       ) : null}
                     </CardContent>
@@ -1688,87 +1768,21 @@ export default function AthleteLiveModalPro({
 
                   <Card className="border-slate-700 bg-slate-800/50">
                     <CardHeader className="p-3">
-                      <CardTitle className="text-sm font-semibold text-cyan-300">Current Position</CardTitle>
+                      <CardTitle className="text-sm font-semibold text-orange-300">Cumulative Cutoff</CardTitle>
                     </CardHeader>
-                    <CardContent className="grid gap-2 p-3 text-xs sm:grid-cols-2">
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Distance Covered</div>
-                        <div className="font-semibold text-white">{formatDistanceValue(liveDistanceCovered) || waitingText}</div>
-                      </div>
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Distance Remaining</div>
-                        <div className="font-semibold text-white">{formatDistanceValue(liveDistanceRemaining) || waitingText}</div>
-                      </div>
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Current Leg</div>
-                        <div className="font-semibold text-white">{liveCurrentLeg || waitingText}</div>
-                      </div>
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Current Split</div>
-                        <div className="font-semibold text-white">{liveCurrentSplit || waitingText}</div>
-                      </div>
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Last Timing Point</div>
-                        <div className="font-semibold text-white">{liveLastTimingPoint || waitingText}</div>
-                      </div>
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Current GPS</div>
-                        <div className="font-semibold text-white">{currentGpsText}</div>
-                      </div>
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Current Speed</div>
-                        <div className="font-semibold text-white">{currentSpeedText}</div>
-                      </div>
+                    <CardContent className="grid gap-2 p-3 text-xs sm:grid-cols-3">
+                      {cumulativeCutoffRows.length > 0 ? cumulativeCutoffRows.map((row) => (
+                        <div key={row.label} className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                          <div className="text-slate-400">{row.label}</div>
+                          <div className="font-semibold text-white">{row.value}</div>
+                          <div className="mt-1 text-[10px] text-slate-500">Cumulative elapsed race time from official start</div>
+                        </div>
+                      )) : (
+                        <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2 text-slate-400">No cutoff configured</div>
+                      )}
                     </CardContent>
                   </Card>
 
-                  <Card className="border-slate-700 bg-slate-800/50">
-                    <CardHeader className="p-3">
-                      <CardTitle className="text-sm font-semibold text-violet-300">Rankings</CardTitle>
-                    </CardHeader>
-                    <CardContent className="grid gap-2 p-3 text-xs sm:grid-cols-2">
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Overall Rank</div>
-                        <div className="font-semibold text-white">{Number.isFinite(Number(liveOverallRank)) && Number(liveOverallRank) > 0 ? `#${liveOverallRank}` : waitingText}</div>
-                      </div>
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Contest Rank</div>
-                        <div className="font-semibold text-white">{Number.isFinite(Number(liveContestRank)) && Number(liveContestRank) > 0 ? `#${liveContestRank}` : waitingText}</div>
-                      </div>
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Gender Rank</div>
-                        <div className="font-semibold text-white">{Number.isFinite(Number(liveGenderRank)) && Number(liveGenderRank) > 0 ? `#${liveGenderRank}` : waitingText}</div>
-                      </div>
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Age Group Rank</div>
-                        <div className="font-semibold text-white">{Number.isFinite(Number(liveAgeGroupRank)) && Number(liveAgeGroupRank) > 0 ? `#${liveAgeGroupRank}` : waitingText}</div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card className="border-slate-700 bg-slate-800/50">
-                    <CardHeader className="p-3">
-                      <CardTitle className="text-sm font-semibold text-orange-300">Cutoffs</CardTitle>
-                    </CardHeader>
-                    <CardContent className="grid gap-2 p-3 text-xs sm:grid-cols-2">
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Current Cutoff</div>
-                        <div className="font-semibold text-white">{String(participantLive?.cutoffReason || courseCutoffs?.mode || waitingText)}</div>
-                      </div>
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Cutoff Status</div>
-                        <div className="font-semibold text-white">{String(participantLive?.cutoffStatus || waitingText)}</div>
-                      </div>
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Time Remaining</div>
-                        <div className="font-semibold text-white">{participantLive?.estimatedFinish ? 'Calculated' : waitingText}</div>
-                      </div>
-                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
-                        <div className="text-slate-400">Status</div>
-                        <div className="font-semibold text-white">{participantLive?.dnf ? '🔴 DNF' : participantLive?.cutoffStatus || 'Within Cutoff'}</div>
-                      </div>
-                    </CardContent>
-                  </Card>
                 </div>
 
                 {missedCutoffInfo ? (
@@ -1839,6 +1853,95 @@ export default function AthleteLiveModalPro({
                     isLoading={!detailReady}
                   />
                 </div>
+
+                <div className="grid gap-3 lg:grid-cols-2">
+                  <Card className="border-slate-700 bg-slate-800/50 lg:col-span-2">
+                    <CardHeader className="p-3">
+                      <CardTitle className="text-sm font-semibold text-cyan-300">Estimated Live Position</CardTitle>
+                      <CardDescription className="text-[11px] text-slate-400">
+                        Current Position · Estimated from the latest official timing point. Position, speed, distance, and ETA are continuously predicted between timing checkpoints.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid gap-2 p-3 text-xs sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="flex items-center justify-between text-slate-400"><span>Distance Covered</span><span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', getSignalBadgeClass('estimated'))}>Estimated</span></div>
+                        <div className="font-semibold text-white">{formatDistanceValue(liveDistanceCovered) || waitingText}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="flex items-center justify-between text-slate-400"><span>Distance Remaining</span><span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', getSignalBadgeClass('estimated'))}>Estimated</span></div>
+                        <div className="font-semibold text-white">{formatDistanceValue(liveDistanceRemaining) || waitingText}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="flex items-center justify-between text-slate-400"><span>Current Leg</span><span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', getSignalBadgeClass('official'))}>Official</span></div>
+                        <div className="font-semibold text-white">{liveCurrentLeg || waitingText}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="flex items-center justify-between text-slate-400"><span>Current Split</span><span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', getSignalBadgeClass('official'))}>Official</span></div>
+                        <div className="font-semibold text-white">{liveCurrentSplit || waitingText}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="flex items-center justify-between text-slate-400"><span>Current Speed</span><span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', getSignalBadgeClass('estimated'))}>Estimated</span></div>
+                        <div className="font-semibold text-white">{currentSpeedText}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="flex items-center justify-between text-slate-400"><span>Average Speed</span><span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', getSignalBadgeClass('estimated'))}>Estimated</span></div>
+                        <div className="font-semibold text-white">{Number.isFinite(liveAverageSpeed) && liveAverageSpeed > 0 ? `${liveAverageSpeed.toFixed(2)} km/h` : waitingText}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="flex items-center justify-between text-slate-400"><span>Average Pace</span><span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', getSignalBadgeClass('estimated'))}>Estimated</span></div>
+                        <div className="font-semibold text-white">{formatPaceValue(liveAveragePace) || waitingText}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="flex items-center justify-between text-slate-400"><span>ETA Next Split</span><span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', getSignalBadgeClass('estimated'))}>Estimated</span></div>
+                        <div className="font-semibold text-white">{formatCountdownFromSeconds(etaNextSplitCountdownSec) || waitingText}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="flex items-center justify-between text-slate-400"><span>Estimated Finish</span><span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', getSignalBadgeClass('estimated'))}>Estimated</span></div>
+                        <div className="font-semibold text-white">{formatClockFromUtcSeconds(etaFinishUtc) || waitingText}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="flex items-center justify-between text-slate-400"><span>Last Official Timing Point</span><span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', getSignalBadgeClass('official'))}>Official</span></div>
+                        <div className="font-semibold text-white">{liveLastTimingPoint || waitingText}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="flex items-center justify-between text-slate-400"><span>Prediction Confidence</span><span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold', getSignalBadgeClass(confidenceBadgeKind))}>{predictionConfidence}</span></div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="text-slate-400">Prediction Source</div>
+                        <div className="font-semibold text-white truncate">{predictionSource || waitingText}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2 sm:col-span-2">
+                        <div className="text-slate-400">Last Updated</div>
+                        <div className="font-semibold text-white">{predictionUpdatedAtText}</div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-slate-700 bg-slate-800/50 lg:col-span-2">
+                    <CardHeader className="p-3">
+                      <CardTitle className="text-sm font-semibold text-orange-300">Cutoffs</CardTitle>
+                    </CardHeader>
+                    <CardContent className="grid gap-2 p-3 text-xs sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="text-slate-400">Current Cutoff</div>
+                        <div className="font-semibold text-white">{formatCutoffTimeDisplay(participantLive?.cutoffTime || participantLive?.cutoff || courseCutoffs?.overall || courseCutoffs?.swim || courseCutoffs?.bike || courseCutoffs?.run || waitingText)}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="text-slate-400">Cutoff Status</div>
+                        <div className="font-semibold text-white">{String(participantLive?.cutoffStatus || waitingText)}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="text-slate-400">Time Remaining</div>
+                        <div className="font-semibold text-white">{participantLive?.estimatedFinish ? 'Calculated' : waitingText}</div>
+                      </div>
+                      <div className="rounded-md border border-slate-700 bg-slate-900/50 p-2">
+                        <div className="text-slate-400">Status</div>
+                        <div className="font-semibold text-white">{participantLive?.dnf ? '🔴 DNF' : participantLive?.cutoffStatus || 'Within Cutoff'}</div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
                 </>
                 )}
                 </div>

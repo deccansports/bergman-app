@@ -506,7 +506,8 @@ export default function FinisherCertificate({
                 alt="Bergman Logo"
                 width={200}
                 height={66}
-                className="object-contain mx-auto"
+              className="h-auto w-auto object-contain mx-auto"
+              style={{ width: 'auto', height: 'auto' }}
             />
              <div className="flex items-center justify-center gap-4">
                 {flagSrc && <img src={flagSrc} alt={`${athlete.countryAtRace} flag`} className="h-8 rounded-sm"/>}

@@ -139,8 +139,6 @@ async function loadContestMapping(eventId: string) {
 }
 
 async function loadTimingConfigurationSnapshot(eventId: string) {
-  const direct = await getKV<any>(`event:${eventId}:timingConfiguration`, 'contest-mapping-view').catch(() => null);
-  if (direct) return direct;
   return getKV<any>(`live:event:${eventId}:timingConfiguration`, 'contest-mapping-view').catch(() => null);
 }
 
@@ -435,10 +433,10 @@ export async function GET(_req: NextRequest, { params }: { params: { eventId: st
     const mappedCount = mappedRows.filter((row: any) => row.status === 'mapped').length;
     const unmappedCount = importedCount - mappedCount;
     const lastImported = normalize((existing as any)?.lastImportedAt || (liveIndex as any)?.updatedAt || (eventIndex as any)?.updatedAt || null) || null;
-    const eventTimingPointCount = Array.isArray(timingConfiguration?.timingPoints)
-      ? timingConfiguration.timingPoints.length
-      : Array.isArray((timingConfiguration as any)?.course?.timingPoints)
-        ? (timingConfiguration as any).course.timingPoints.length
+    const eventTimingPointCount = Array.isArray(timingSnapshot?.timingPoints)
+      ? timingSnapshot.timingPoints.length
+      : Array.isArray((timingSnapshot as any)?.course?.timingPoints)
+        ? (timingSnapshot as any).course.timingPoints.length
         : 0;
     const totalMappedTimingPoints = importedContests.reduce((sum: number, row: any) => sum + Number(row?.timingPointCount || 0), 0);
 

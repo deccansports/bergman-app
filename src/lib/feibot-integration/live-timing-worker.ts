@@ -1,5 +1,6 @@
 import { getKV, putKV } from '@/lib/cloudflare/kv';
 import { callFeibotAPIWithCredentialFallback } from '@/lib/feibot-integration/api-client';
+import { liveAthleteIndexKvKey, liveAthleteKvKey, liveCourseConfigKvKey, liveCourseMapKvKey, liveLeaderboardKvKey, liveRaceProcessKvKey, liveResultIndexKvKey, liveResultKvKey, liveResultsKvKey, liveStatsKvKey, liveTimingsKvKey } from '@/lib/live-tracking/storageKeys';
 
 type AnyRecord = Record<string, any>;
 
@@ -164,6 +165,134 @@ function extractLatestSplits(row: any) {
   }
 
   return { all: splits, latest: splits[splits.length - 1] };
+}
+
+function normalizeResultStatus(value: unknown) {
+  const raw = normalizeLower(value);
+  if (!raw) return 'On Course';
+  if (raw === 'finished' || raw === 'finish' || raw === 'complete' || raw === 'completed' || raw === 'ok') return 'Finished';
+  if (raw === 'dnf' || raw === 'did_not_finish') return 'DNF';
+  if (raw === 'dns' || raw === 'did_not_start') return 'DNS';
+  if (raw === 'dnq' || raw === 'dq' || raw === 'disqualified') return 'DNQ';
+  if (raw === 'not_started' || raw === 'not started' || raw === 'pending') return 'Not Started';
+  return raw.toUpperCase();
+}
+
+function getResultProviderAthleteId(row: AnyRecord, bookingId: string, staticParticipant: AnyRecord | null) {
+  return normalize(
+    row?.providerAthleteId
+    || row?.provider_athlete_id
+    || row?.participant_uuid
+    || row?.participantUuid
+    || row?.providerUuid
+    || row?.uuid
+    || row?.id
+    || staticParticipant?.providerUuid
+    || staticParticipant?.participantUuid
+    || bookingId,
+  );
+}
+
+function getResultLookupValue(row: AnyRecord, staticParticipant: AnyRecord | null) {
+  return {
+    bib: normalize(row?.bib || row?.bib_no || row?.bibNumber || staticParticipant?.bib || staticParticipant?.bibNumber || ''),
+    contestUuid: normalize(
+      row?.contestUuid
+      || row?.contest_uuid
+      || staticParticipant?.contestUuid
+      || staticParticipant?.contest_uuid
+      || staticParticipant?.provider?.contestUuid
+      || '',
+    ),
+    contestName: normalize(
+      row?.contestName
+      || row?.contest_name
+      || staticParticipant?.contestName
+      || staticParticipant?.contest_name
+      || staticParticipant?.provider?.contestName
+      || '',
+    ),
+    athleteUid: normalize(row?.athleteUid || row?.bergmanAthleteId || staticParticipant?.athleteUid || ''),
+    email: normalize(row?.email || staticParticipant?.email || '').toLowerCase(),
+  };
+}
+
+function buildDynamicResultRecord(row: AnyRecord, staticParticipant: AnyRecord | null, bookingId: string, updatedAtIso: string) {
+  const latestSplits = extractLatestSplits(row);
+  const fallbackSplitRows = latestSplits.all.length > 0 ? latestSplits.all : [];
+  const providerAthleteId = getResultProviderAthleteId(row, bookingId, staticParticipant);
+  const lookup = getResultLookupValue(row, staticParticipant);
+  const status = normalizeResultStatus(
+    row?.status
+    || row?.result_status
+    || row?.race_status
+    || row?.state
+    || staticParticipant?.status,
+  );
+
+  const overallTime = parseSeconds(
+    row?.overallTime
+    || row?.totalTime
+    || row?.total_time
+    || row?.elapsed
+    || row?.elapsed_seconds
+    || row?.official_time
+    || row?.finish_time
+    || row?.finishTime,
+  ) ?? (latestSplits.latest ? Number(latestSplits.latest.cumulativeSeconds) : null);
+
+  const currentSplit = normalize(row?.currentSplit || row?.current_split || latestSplits.latest?.splitName || latestSplits.latest?.timingPointName || '');
+  const currentLeg = normalize(row?.currentLeg || row?.current_leg || row?.leg || row?.currentLegName || '').toUpperCase() || 'ON_COURSE';
+  const pace = parseSeconds(row?.pace || row?.avgPace || row?.averagePace) ?? null;
+  const speed = parseNumber(row?.speed || row?.avgSpeed || row?.averageSpeed || row?.currentSpeedKph) ?? null;
+
+  const resultRecord: AnyRecord = {
+    ...(staticParticipant || {}),
+    ...(row || {}),
+    providerAthleteId,
+    participantUuid: providerAthleteId,
+    participant_uuid: providerAthleteId,
+    bookingId,
+    bib: lookup.bib || null,
+    contestUuid: lookup.contestUuid || null,
+    contestName: lookup.contestName || null,
+    athleteUid: lookup.athleteUid || null,
+    email: lookup.email || null,
+    status,
+    currentLeg,
+    currentSplit,
+    lastTimingPoint: normalize(row?.lastTimingPoint || row?.last_timing_point || latestSplits.latest?.timingPointName || '') || null,
+    lastTimingPointUuid: normalize(row?.lastTimingPointUuid || row?.last_timing_point_uuid || latestSplits.latest?.timingPointUuid || '') || null,
+    overallTime,
+    chipTime: parseSeconds(row?.chipTime || row?.chip_time || row?.netTime || row?.net_time) ?? overallTime,
+    gunTime: parseSeconds(row?.gunTime || row?.gun_time) ?? overallTime,
+    legTime: parseSeconds(row?.legTime || row?.leg_time || row?.currentLegTime) ?? null,
+    segmentTime: latestSplits.latest ? Number((latestSplits.latest as any).splitSeconds || 0) : parseSeconds(row?.segmentTime || row?.splitTime || row?.lapTime) ?? null,
+    pace,
+    speed,
+    progressPercent: parseNumber(row?.progressPercent || row?.progress_percentage || row?.progress || row?.distanceProgressPct) ?? null,
+    distanceCovered: parseNumber(row?.distanceCovered || row?.distance_covered || row?.distanceKm || row?.distance || row?.km || row?.totalDistanceCovered) ?? null,
+    distanceRemaining: parseNumber(row?.distanceRemaining || row?.distance_remaining) ?? null,
+    overallRank: parseNumber(row?.overallRank || row?.rank || row?.position || row?.overall_position) ?? null,
+    genderRank: parseNumber(row?.genderRank || row?.gender_rank) ?? null,
+    categoryRank: parseNumber(row?.categoryRank || row?.category_rank) ?? null,
+    contestRank: parseNumber(row?.contestRank || row?.contest_rank) ?? null,
+    currentPosition: row?.currentPosition || row?.position || null,
+    gps: row?.gps || row?.location || row?.geo || null,
+    rawResult: row,
+    splits: fallbackSplitRows,
+    updatedAt: updatedAtIso,
+    source: 'feibot-live-worker',
+  };
+
+  resultRecord.finished = normalizeLower(status) === 'finished';
+  resultRecord.dnf = normalizeLower(status) === 'dnf';
+  resultRecord.dns = normalizeLower(status) === 'dns';
+  resultRecord.dnq = normalizeLower(status) === 'dnq';
+  resultRecord.lastDetection = parseTimestamp(row?.lastDetection || row?.lastSeen || row?.updatedAt || row?.timestamp || latestSplits.latest?.detectedAt || Date.now()) || Math.floor(Date.now() / 1000);
+  resultRecord.lastSeen = resultRecord.lastDetection;
+
+  return { providerAthleteId, resultRecord, lookup, splits: fallbackSplitRows };
 }
 
 function contestKey(contestUuid: string | null | undefined) {
@@ -523,7 +652,7 @@ export async function syncFeibotLiveTimingToKv(params: LiveTimingWorkerParams): 
     byBookingId: toBookingMap(participantIndex?.byBookingId),
   };
 
-  const out: Array<{ bookingId: string; payload: AnyRecord; gender: string; ageGroupUuid: string; contestUuid: string; participant: AnyRecord }> = [];
+  const out: Array<{ bookingId: string; payload: AnyRecord; gender: string; ageGroupUuid: string; contestUuid: string; participant: AnyRecord; sourceRow: AnyRecord }> = [];
   let unresolvedRows = 0;
 
   for (const row of rows) {
@@ -693,21 +822,113 @@ export async function syncFeibotLiveTimingToKv(params: LiveTimingWorkerParams): 
       ageGroupUuid: normalize(staticParticipant?.ageGroupUuid || staticParticipant?.age_group_uuid || ''),
       contestUuid: normalize(contestUuid || staticParticipant?.contestUuid || staticParticipant?.contest_uuid || ''),
       participant: staticParticipant,
+      sourceRow: row,
     });
   }
 
   buildRanking(out);
 
+  const resultRecords = out.map((entry) => {
+    const { providerAthleteId, resultRecord, lookup, splits } = buildDynamicResultRecord(entry.sourceRow, entry.participant, entry.bookingId, updatedAtIso);
+    const mergedResult = {
+      ...resultRecord,
+      ...entry.payload,
+      providerAthleteId,
+      bookingId: entry.bookingId,
+      participantUuid: providerAthleteId,
+      participant_uuid: providerAthleteId,
+      participantId: entry.bookingId,
+      resultUpdatedAt: updatedAtIso,
+      sourceRow: entry.sourceRow,
+      rawResult: entry.sourceRow,
+      splits: Array.isArray(entry.payload?.splits) && entry.payload.splits.length > 0 ? entry.payload.splits : (Array.isArray(splits) ? splits : []),
+      lookup,
+    };
+
+    return {
+      providerAthleteId,
+      bookingId: entry.bookingId,
+      participant: entry.participant,
+      lookup,
+      result: mergedResult,
+    };
+  });
+
+  const resultIndexByProviderAthleteId: Record<string, string> = {};
+  const resultIndexByBib: Record<string, string> = {};
+  const resultIndexByContest: Record<string, { contestUuid: string | null; contestName: string | null; providerAthleteIds: string[]; count: number }> = {};
+  const resultIndexByAthleteUid: Record<string, string> = {};
+  const resultIndexByBookingId: Record<string, string> = {};
+  const contestToIds = new Map<string, string[]>();
+
+  for (const record of resultRecords) {
+    const providerAthleteId = normalize(record.providerAthleteId);
+    if (providerAthleteId) resultIndexByProviderAthleteId[providerAthleteId] = providerAthleteId;
+    if (record.bookingId) resultIndexByBookingId[normalize(record.bookingId)] = providerAthleteId || record.bookingId;
+    if (record.lookup?.bib) resultIndexByBib[normalize(record.lookup.bib)] = providerAthleteId || record.bookingId;
+    if (record.lookup?.athleteUid) resultIndexByAthleteUid[normalizeLookupKey(record.lookup.athleteUid)] = providerAthleteId || record.bookingId;
+
+    const contestUuid = normalize(record.lookup?.contestUuid || '');
+    const contestName = normalize(record.lookup?.contestName || '');
+    const contestKeyValue = contestKey(contestUuid || contestName || null);
+    if (contestKeyValue) {
+      const ids = contestToIds.get(contestKeyValue) || [];
+      if (providerAthleteId && !ids.includes(providerAthleteId)) ids.push(providerAthleteId);
+      contestToIds.set(contestKeyValue, ids);
+      resultIndexByContest[contestKeyValue] = {
+        contestUuid: contestUuid || null,
+        contestName: contestName || null,
+        providerAthleteIds: ids,
+        count: ids.length,
+      };
+    }
+  }
+
   let updatedParticipants = 0;
-  for (const row of out) {
-    await putKV(`live:event:${eventId}:participantLive:${row.bookingId}`, row.payload, 'live-timing-worker');
+  for (const row of resultRecords) {
+    await putKV(liveResultKvKey(eventId, row.providerAthleteId), row.result, 'live-timing-worker');
+    await putKV(`live:event:${eventId}:participantLive:${row.bookingId}`, row.result, 'live-timing-worker');
+    if (row.lookup?.bib) await putKV(`live:event:${eventId}:lookup:bib:${row.lookup.bib}`, row.providerAthleteId, 'live-timing-worker');
+    if (row.lookup?.contestUuid) await putKV(`live:event:${eventId}:lookup:contest:${row.lookup.contestUuid}`, resultIndexByContest[contestKey(row.lookup.contestUuid)], 'live-timing-worker');
+    if (row.lookup?.athleteUid) await putKV(`live:event:${eventId}:lookup:user:${row.lookup.athleteUid}`, row.providerAthleteId, 'live-timing-worker');
+    if (row.lookup?.email) await putKV(`live:event:${eventId}:lookup:email:${row.lookup.email}`, row.providerAthleteId, 'live-timing-worker');
+    if (row.providerAthleteId) await putKV(`live:event:${eventId}:lookup:provider:${row.providerAthleteId}`, row.providerAthleteId, 'live-timing-worker');
     updatedParticipants += 1;
   }
+
+  const resultCount = resultRecords.length;
+  const lookupWrites = Object.keys(resultIndexByBib).length + Object.keys(resultIndexByProviderAthleteId).length + Object.keys(resultIndexByAthleteUid).length + Object.keys(resultIndexByBookingId).length + Object.keys(resultIndexByContest).length;
+
+  await putKV(liveResultIndexKvKey(eventId), {
+    eventId,
+    updatedAt: updatedAtIso,
+    source: 'feibot-live-worker',
+    count: resultCount,
+    participantCount: resultCount,
+    byProviderAthleteId: resultIndexByProviderAthleteId,
+    byBib: resultIndexByBib,
+    byContest: resultIndexByContest,
+    byAthleteUid: resultIndexByAthleteUid,
+    byBookingId: resultIndexByBookingId,
+  }, 'live-timing-worker');
+
+  await putKV(liveResultsKvKey(eventId), resultRecords.map((record) => record.result), 'live-timing-worker');
 
   console.log('[LIVE TIMING WORKER] participantLive updated', {
     eventId,
     updatedParticipants,
     unresolvedRows,
+  });
+
+  console.log('[LIVE TIMING WORKER] Live Results Sync Complete', {
+    eventId,
+    resultRecordsDownloaded: rows.length,
+    resultRecordsParsed: resultCount,
+    resultKvWrites: resultCount,
+    lookupWrites,
+    skippedRecords: unresolvedRows,
+    updatedRecords: updatedParticipants,
+    durationMs: Date.now() - Date.parse(updatedAtIso),
   });
 
   const leaderboardRows = out
@@ -750,6 +971,11 @@ export async function syncFeibotLiveTimingToKv(params: LiveTimingWorkerParams): 
       contestName: participant?.contestName || participant?.contest_name || null,
       ageGroupUuid: participant?.ageGroupUuid || participant?.age_group_uuid || entry.ageGroupUuid || null,
       ageGroupName: participant?.ageGroupName || participant?.age_group_name || null,
+      // Always preserve country from the static participant — Feibot timing payload has no country
+      country: participant?.country || participant?.countryName || (payload as any)?.country || null,
+      countryCode: participant?.countryCode || participant?.country_code || (payload as any)?.countryCode || null,
+      countryName: participant?.countryName || participant?.country || (payload as any)?.countryName || null,
+      countryAtRace: participant?.countryAtRace || participant?.country || (payload as any)?.countryAtRace || null,
       leg: payload?.currentLeg || null,
       splitName: payload?.currentSplit || null,
       lastUpdateTime: payload?.lastSeen || null,

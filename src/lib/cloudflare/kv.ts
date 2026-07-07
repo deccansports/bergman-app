@@ -279,24 +279,42 @@ export async function batchDeleteKV(
 /**
  * Batch list KV keys with a prefix pattern
  * Returns all keys matching the pattern
+ * Includes retry logic with exponential backoff for rate limiting (429 errors)
  */
 export async function listKVByPrefix(
     prefix: string,
     _source: string
 ): Promise<string[]> {
-    try {
-        const response = await cfRequest(
-            `/keys?prefix=${encodeURIComponent(prefix)}&limit=1000`,
-            { method: 'GET' }
-        );
-        
-        const data = (await response.json()) as any;
-        const keys = (data?.result || []).map((item: any) => item.name as string);
-        
-        console.log(`[LIST KV] Found ${keys.length} keys with prefix "${prefix}" from ${_source}`);
-        return keys;
-    } catch (error) {
-        console.error(`[LIST KV] Failed to list keys with prefix "${prefix}":`, error);
-        return [];
+    const maxRetries = 5;
+    const baseDelayMs = 1000;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            const response = await cfRequest(
+                `/keys?prefix=${encodeURIComponent(prefix)}&limit=1000`,
+                { method: 'GET' }
+            );
+            
+            const data = (await response.json()) as any;
+            const keys = (data?.result || []).map((item: any) => item.name as string);
+            
+            console.log(`[LIST KV] Found ${keys.length} keys with prefix "${prefix}" from ${_source}`);
+            return keys;
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            const is429 = errorMsg.includes('429') || errorMsg.includes('throttling');
+            
+            if (is429 && attempt < maxRetries) {
+                const delayMs = baseDelayMs * Math.pow(2, attempt);
+                console.warn(`[LIST KV] Rate limited (429). Retry ${attempt + 1}/${maxRetries} after ${delayMs}ms for prefix "${prefix}"`);
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+                continue;
+            }
+            
+            console.error(`[LIST KV] Failed to list keys with prefix "${prefix}":`, error);
+            return [];
+        }
     }
+    
+    return [];
 }

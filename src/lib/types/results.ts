@@ -135,6 +135,7 @@ export interface LiveAthlete {
   participantUuid?: string | null;
   participant_uuid?: string | null;
   bib: string;
+  bibNumber?: string | null;
   name: string;
   category: string;
   ageGroup: string | null;
@@ -150,7 +151,7 @@ export interface LiveAthlete {
   contest_name?: string | null;
   providerContestUuid?: string | null;
   providerContestName?: string | null;
-  privacy?: 'PUBLIC' | 'PRIVATE' | string | null;
+  privacy?: 'PUBLIC' | 'ANONYMOUS' | 'PRIVATE' | string | null;
   liveTracking?: {
     provider?: string | null;
     participantUuid?: string | null;
@@ -158,7 +159,7 @@ export interface LiveAthlete {
     contestName?: string | null;
     bib?: string | null;
     chip?: string | null;
-    privacy?: 'PUBLIC' | 'PRIVATE' | string | null;
+    privacy?: 'PUBLIC' | 'ANONYMOUS' | 'PRIVATE' | string | null;
   };
   status: string;
   leg: string;
@@ -184,6 +185,14 @@ export interface LiveAthlete {
   predictedPaceSecPerKm?: number;
   etaNextSplitUTC?: number;
   etaFinishUTC?: number;
+  etaNextSplitCountdownSec?: number;
+  predictionConfidence?: 'HIGH' | 'MEDIUM' | 'LOW' | string;
+  predictionSource?: string;
+  predictionSourceDetail?: string;
+  predictionStatus?: string;
+  predictionUpdatedAt?: number;
+  predictionFrozen?: boolean;
+  predictionFrozenReason?: string | null;
   cutoffStatus?: 'On Track' | 'May Miss Cutoff' | 'N/A';
   cutoffReason?: string | null;
   clubName?: string | null;

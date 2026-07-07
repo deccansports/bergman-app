@@ -9,7 +9,7 @@ import { getThemeClasses, iconForPoint } from './presentation';
 
 export default function TimingPointCard({ row, theme, isCurrent, showConnector, startTime }: { row: TimingRow; theme: SectionThemeKey; isCurrent: boolean; showConnector: boolean; startTime?: number | null }) {
   const themeClasses = getThemeClasses(theme);
-  const statusLabel = row.state === 'completed' ? 'Completed' : row.state === 'current' ? 'Current split' : row.state === 'missed' ? 'Missed' : 'Future';
+  const statusLabel = row.state === 'completed' ? 'Completed' : row.state === 'current' ? 'Current split' : row.state === 'missed' ? 'Missed' : '';
   const metricLabel = theme === 'transition' ? 'Elapsed' : theme === 'bike' ? 'Speed' : 'Pace';
   const timeText = row.reached && row.splitSeconds !== null ? formatSecondsToHMS(row.splitSeconds) : '—';
   const clockText = row.reached && row.cumulativeSeconds !== null && startTime ? formatTimeOfDay(startTime + row.cumulativeSeconds) : '—';
@@ -44,7 +44,7 @@ export default function TimingPointCard({ row, theme, isCurrent, showConnector, 
               {row.point.shortName && row.point.shortName !== row.point.displayName ? <div className="mt-0.5 text-[11px] text-slate-400">{row.point.shortName}</div> : null}
             </div>
             <div className="flex flex-wrap justify-end gap-1.5">
-              <span className={cn('rounded-full border px-2.5 py-1 text-[11px] font-semibold', themeClasses.pill)}>{statusLabel}</span>
+              {statusLabel ? <span className={cn('rounded-full border px-2.5 py-1 text-[11px] font-semibold', themeClasses.pill)}>{statusLabel}</span> : null}
               {isCurrent ? <span className="rounded-full border border-white/20 bg-white/15 px-2.5 py-1 text-[11px] font-semibold text-white">LIVE</span> : null}
               {row.isFastest ? <span className="rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-semibold text-emerald-300">FASTEST SEGMENT</span> : null}
               {row.rankDelta !== null ? (

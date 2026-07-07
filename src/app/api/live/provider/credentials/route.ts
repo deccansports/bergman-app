@@ -158,6 +158,7 @@ export async function GET(_req: NextRequest) {
     const data = snap.exists ? snap.data()! : null;
     const globalCredential = await getStoredFeibotGlobalCredential().catch(() => null);
     const eventCredential = await getStoredFeibotEventCredential(eventIdFromQuery || String(data?.eventId || '').trim()).catch(() => null);
+    const integration = eventIdFromQuery ? await loadFeibotIntegration(eventIdFromQuery).catch(() => null) : null;
     const linkedEventUuid = String(data?.cloudEventUuid || data?.eventUuid || '').trim() || null;
     const credentialBoundEventUuid = String(data?.credentialBoundEventUuid || eventCredential?.eventUuid || '').trim() || null;
     const credentialType = String(data?.credentialType || (eventCredential ? 'event' : globalCredential ? 'account' : 'auto')).trim() as 'account' | 'event' | 'auto';
@@ -174,29 +175,42 @@ export async function GET(_req: NextRequest) {
     const envHasAk = !!process.env.FEIBOT_ACCESS_KEY?.trim();
     const envHasSk = !!process.env.FEIBOT_SECRET_KEY?.trim();
     const storeHasCreds = !!(data?.accessKey && data?.secretKey);
+    const eventStoreHasCreds = Boolean(eventCredential?.accessKey && eventCredential?.secretKey);
+    const configured = (envHasAk && envHasSk) || storeHasCreds || eventStoreHasCreds;
+    const source = envHasAk && envHasSk ? 'env' : configured ? 'firestore' : 'none';
+    const resolvedEventUuid = String(
+      integration?.cloudEventUuid || integration?.eventUuid || linkedEventUuid || eventCredential?.eventUuid || '',
+    ).trim() || null;
+    const resolvedUpdatedAt = String(integration?.updatedAt || data?.updatedAt || '').trim() || null;
+    const resolvedLastAuthResult = String(data?.lastAuthResult || '').trim()
+      || (integration?.authenticated || integration?.credentialsValid ? 'success' : '')
+      || null;
+    const resolvedLastAuthAt = String(data?.lastAuthAt || '').trim()
+      || String(integration?.updatedAt || '').trim()
+      || null;
 
     const encryptionEnabled = Boolean(await getCredentialEncryptionKey());
 
     return NextResponse.json({
-      configured: envHasAk || storeHasCreds,
-      source: envHasAk ? 'env' : storeHasCreds ? 'firestore' : 'none',
+      configured,
+      source,
       encryptionEnabled,
       account: data?.account ? '****' : null,
-      accessKey: storeHasCreds ? '********************' : envHasAk ? '(env)' : null,
-      secretKey: storeHasCreds ? '****************************' : envHasSk ? '(env)' : null,
-      eventUuid: linkedEventUuid,
-      linkedEventUuid,
-      cloudEventUuid: linkedEventUuid,
+      accessKey: storeHasCreds || eventStoreHasCreds ? '********************' : envHasAk ? '(env)' : null,
+      secretKey: storeHasCreds || eventStoreHasCreds ? '****************************' : envHasSk ? '(env)' : null,
+      eventUuid: resolvedEventUuid,
+      linkedEventUuid: resolvedEventUuid,
+      cloudEventUuid: String(integration?.cloudEventUuid || linkedEventUuid || '').trim() || null,
       credentialBoundEventUuid,
       storedBoundEventUuid: credentialBoundEventUuid,
       runtimeEventUuid: runtimeResolution.resolvedEventUuid,
-      updatedAt: data?.updatedAt || null,
+      updatedAt: resolvedUpdatedAt,
       updatedBy: data?.updatedBy || null,
       version: data?.version || 0,
-      lastAuthResult: data?.lastAuthResult || null,
-      lastAuthAt: data?.lastAuthAt || null,
+      lastAuthResult: resolvedLastAuthResult,
+      lastAuthAt: resolvedLastAuthAt,
       credentialMode: String(data?.credentialMode || 'auto'),
-      eventCredentialConfigured: Boolean(eventCredential?.accessKey && eventCredential?.secretKey),
+      eventCredentialConfigured: eventStoreHasCreds,
       accountCredentialConfigured: Boolean(globalCredential?.accessKey && globalCredential?.secretKey),
       currentCredentialInUse: String(data?.credentialMode || data?.credentialType || 'auto'),
       lastSuccessfulCredential: String(data?.lastSuccessfulCredential || data?.currentCredentialInUse || data?.credentialMode || '—'),

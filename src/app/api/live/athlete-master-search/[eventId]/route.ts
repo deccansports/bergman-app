@@ -4,7 +4,8 @@ import { getFirestoreInstance } from '@/lib/firebaseAdmin';
 import { getKV, listKVByPrefix, putKV } from '@/lib/cloudflare/kv';
 import { loadParticipantIndex as loadParticipantIndexStore, loadParticipantPublicView } from '@/lib/liveTrackingParticipantStore';
 import { isPublicTrackingEligibleParticipant, isPublicEligibleRegistrationStatus, isHiddenByRegistrationStatus } from '@/lib/liveTrackingEligibility';
-import { canAccessPrivateLiveTracking, getParticipantLiveTrackingPrivacy, maskPrivateAthlete, resolveLiveTrackingAccess } from '@/lib/liveTrackingPrivacy';
+import { canAccessPrivateLiveTracking, getParticipantLiveTrackingPrivacy, maskAnonymousAthlete } from '@/lib/liveTrackingPrivacy';
+import { resolveLiveTrackingAccess } from '@/lib/liveTrackingAccess';
 
 export const dynamic = 'force-dynamic';
 
@@ -670,6 +671,10 @@ async function rebuildAthleteMasterIndex(eventId: string) {
         lastName: split.lastName,
         gender: norm(reg?.gender) || norm(bestProvider?.gender) || null,
         dob: norm(reg?.dob || reg?.dateOfBirth) || norm(bestProvider?.dob) || null,
+        country: norm(reg?.country || reg?.countryCode || reg?.country_code || reg?.countryName || reg?.countryAtRace || reg?.nationality) || norm(bestProvider?.country || bestProvider?.countryCode || bestProvider?.country_code || bestProvider?.countryName || bestProvider?.countryAtRace || bestProvider?.nationality) || null,
+        countryCode: norm(reg?.countryCode || reg?.country_code || reg?.country) || norm(bestProvider?.countryCode || bestProvider?.country_code || bestProvider?.country) || null,
+        countryName: norm(reg?.countryName || reg?.countryAtRace || reg?.country) || norm(bestProvider?.countryName || bestProvider?.countryAtRace || bestProvider?.country) || null,
+        nationality: norm(reg?.nationality) || norm(bestProvider?.nationality) || null,
         club: norm(reg?.clubName || reg?.club) || norm(bestProvider?.club) || null,
         category: norm(reg?.raceCategory || reg?.ticketName) || norm(bestProvider?.category || bestProvider?.contestName) || null,
         ageGroup: norm(reg?.ageGroup || reg?.selectedSubCategory || reg?.age_category || providerAgeGroupName) || null,
@@ -683,6 +688,10 @@ async function rebuildAthleteMasterIndex(eventId: string) {
           provider: mapped ? norm(bestProvider?.provider || 'feibot') : null,
           providerUuid: mapped ? norm(bestProvider?.providerUuid || bestProvider?.participantUuid || bestProvider?.id) : null,
           chip: mapped ? norm(bestProvider?.chip || bestProvider?.chipCode) : norm(reg?.chipCode || reg?.chip) || null,
+          country: mapped ? norm(bestProvider?.country || bestProvider?.countryCode || bestProvider?.country_code || bestProvider?.countryName || bestProvider?.countryAtRace || bestProvider?.nationality) || null : null,
+          countryCode: mapped ? norm(bestProvider?.countryCode || bestProvider?.country_code || bestProvider?.country) || null : null,
+          countryName: mapped ? norm(bestProvider?.countryName || bestProvider?.countryAtRace || bestProvider?.country) || null : null,
+          nationality: mapped ? norm(bestProvider?.nationality) || null : null,
           contestUuid: mapped ? norm(bestProvider?.contestUuid) || null : null,
           contestName: mapped ? norm(bestProvider?.contestName || bestProvider?.category) || null : null,
           mappingScore: bestScore || 0,
@@ -691,6 +700,10 @@ async function rebuildAthleteMasterIndex(eventId: string) {
         registration: {
           email: norm(reg?.email || reg?.buyerEmail) || null,
           phone: norm(reg?.mobile || reg?.phone) || null,
+          country: norm(reg?.country || reg?.countryCode || reg?.country_code || reg?.countryName || reg?.countryAtRace || reg?.nationality) || null,
+          countryCode: norm(reg?.countryCode || reg?.country_code || reg?.country) || null,
+          countryName: norm(reg?.countryName || reg?.countryAtRace || reg?.country) || null,
+          nationality: norm(reg?.nationality) || null,
           status: norm(reg?.ticketStatus || reg?.registrationStatus || reg?.status) || 'registered',
           selectedSubCategory: norm(reg?.selectedSubCategory) || null,
           ageGroup: norm(reg?.ageGroup || reg?.selectedSubCategory || reg?.age_category) || null,
@@ -746,6 +759,10 @@ async function rebuildAthleteMasterIndex(eventId: string) {
         lastName: split.lastName,
         gender: norm(prov?.gender) || null,
         dob: norm(prov?.dob) || null,
+        country: norm(prov?.country || prov?.countryCode || prov?.country_code || prov?.countryName || prov?.countryAtRace || prov?.nationality) || null,
+        countryCode: norm(prov?.countryCode || prov?.country_code || prov?.country) || null,
+        countryName: norm(prov?.countryName || prov?.countryAtRace || prov?.country) || null,
+        nationality: norm(prov?.nationality) || null,
         club: norm(prov?.club) || null,
         category: norm(prov?.category || prov?.contestName) || null,
         ageGroup: norm(prov?.ageGroup || prov?.age_group || prov?.ageGroupName || prov?.age_group_name) || null,
@@ -759,6 +776,10 @@ async function rebuildAthleteMasterIndex(eventId: string) {
           provider: norm(prov?.provider || 'feibot') || 'feibot',
           providerUuid,
           chip: norm(prov?.chip || prov?.chipCode) || null,
+          country: norm(prov?.country || prov?.countryCode || prov?.country_code || prov?.countryName || prov?.countryAtRace || prov?.nationality) || null,
+          countryCode: norm(prov?.countryCode || prov?.country_code || prov?.country) || null,
+          countryName: norm(prov?.countryName || prov?.countryAtRace || prov?.country) || null,
+          nationality: norm(prov?.nationality) || null,
           contestUuid: norm(prov?.contestUuid) || null,
           contestName: norm(prov?.contestName || prov?.category) || null,
           mappingScore: 0,
@@ -767,6 +788,10 @@ async function rebuildAthleteMasterIndex(eventId: string) {
         registration: {
           email: norm(prov?.email) || null,
           phone: norm(prov?.phone || prov?.mobile) || null,
+          country: norm(prov?.country || prov?.countryCode || prov?.country_code || prov?.countryName || prov?.countryAtRace || prov?.nationality) || null,
+          countryCode: norm(prov?.countryCode || prov?.country_code || prov?.country) || null,
+          countryName: norm(prov?.countryName || prov?.countryAtRace || prov?.country) || null,
+          nationality: norm(prov?.nationality) || null,
           status: 'provider_only',
           selectedSubCategory: null,
           ageGroup: norm(prov?.ageGroup || prov?.age_group) || null,
@@ -1122,11 +1147,15 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
     }
     const modeRaw = lower(req.nextUrl.searchParams.get('mode'));
     const mode: 'bib' | 'name' | 'email' = modeRaw === 'name' ? 'name' : modeRaw === 'email' ? 'email' : 'bib';
+    const kvOnly = req.nextUrl.searchParams.get('kvOnly') === '1' || req.nextUrl.searchParams.get('kvOnly') === 'true';
     const access = await resolveLiveTrackingAccess(req);
 
     const timings: Array<{ step: string; ms: number }> = [];
     const searchStart = nowMs();
     console.log('[AthleteSearch] Search Started', { eventId, q, mode });
+    if (kvOnly) {
+      console.log('[AthleteSearch] KV-only mode enabled', { eventId, q, mode });
+    }
 
     const loadStart = nowMs();
     const participantIndex = await loadSearchIndex(eventId);
@@ -1204,6 +1233,10 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
           resolvedBookingId: norm(row?.bookingId || row?.id || row?.registrationId || row?.bergmanAthleteId) || null,
           providerUuid: norm(row?.provider?.providerUuid || row?.providerUuid || row?.participantUuid || row?.participant_uuid) || null,
           athleteUid: norm(row?.athleteUid || row?.bergmanAthleteId || row?.userId || row?.participantUuid || row?.participant_uuid) || null,
+          country: norm(row?.country || row?.countryCode || row?.country_code || row?.countryName || row?.countryAtRace || row?.nationality || row?.registration?.country || row?.registration?.countryCode || row?.registration?.countryName || row?.registration?.countryAtRace || row?.registration?.nationality || row?.provider?.country || row?.provider?.countryCode || row?.provider?.countryName || row?.provider?.countryAtRace || row?.provider?.nationality) || null,
+          countryCode: norm(row?.countryCode || row?.country_code || row?.country || row?.registration?.countryCode || row?.provider?.countryCode) || null,
+          countryName: norm(row?.countryName || row?.countryAtRace || row?.country || row?.registration?.countryName || row?.registration?.countryAtRace || row?.provider?.countryName || row?.provider?.countryAtRace) || null,
+          nationality: norm(row?.nationality || row?.registration?.nationality || row?.provider?.nationality) || null,
           contestUuid: norm(row?.contestUuid || row?.provider?.contestUuid || row?.contest_uuid) || null,
           contestName: norm(row?.contestName || row?.provider?.contestName || row?.contest_name || row?.category) || null,
           bib: norm(row?.bib || row?.bibNumber) || null,
@@ -1211,7 +1244,7 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
           ageGroup: ageGroupName || row?.ageGroupName || row?.ageGroup || 'Unknown',
         };
         if (privacy === 'PRIVATE' && !canAccessPrivateLiveTracking(outputRow, access)) return null;
-        if (privacy === 'PRIVATE' && access.isPublic) return maskPrivateAthlete(outputRow);
+        if (privacy === 'ANONYMOUS' && access.isPublic) return maskAnonymousAthlete(outputRow);
         return outputRow;
       })
       .filter(Boolean);
@@ -1251,6 +1284,7 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
       totalIndex: Array.isArray((reloadedIndex as any)?.participants) ? (reloadedIndex as any).participants.length : Object.keys(byBib).length,
       matches: visibleMatches,
       diagnostics: {
+        searchMode: kvOnly ? 'kv-only' : 'default-kv',
         timings,
         totalDurationMs: totalDuration,
         sourceKey: searchIndexCache.get(eventId)?.sourceKey || null,

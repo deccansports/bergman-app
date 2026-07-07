@@ -20,7 +20,8 @@ export default function MaintenanceScreen({ message }: { message?: string }) {
                 alt="Bergman Logo" 
                 width={240} 
                 height={80} 
-                className="object-contain"
+                className="h-auto w-auto object-contain"
+                style={{ width: 'auto', height: 'auto' }}
                 priority
             />
         </div>

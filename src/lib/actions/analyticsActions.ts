@@ -8,6 +8,7 @@ import type { AdminOnly } from '@/lib/types/admin';
 import { format, parseISO, isAfter, isEqual, startOfDay, subYears, isBefore } from 'date-fns';
 import { getKV, putKV } from '../cloudflare/kv';
 import { getCachedServerValue } from '@/lib/serverCache';
+import { loadRegistrationParticipantsForEventMetrics } from '@/lib/participantMetricsSource';
 
 /**
  * SCALE-FIRST: Uses aggregation queries (count) instead of full collection scans.
@@ -274,8 +275,16 @@ export async function computeCountryRegistrationMetricsAction(country: 'IN' | 'U
     // Use all events and filter in memory (works even when country format is 'India' / 'USA')
     const eventsSnap = await adminDb
       .collection('events')
-      .select('country', 'currency', 'eventDate')
+      .select('eventName', 'country', 'currency', 'eventDate')
       .get();
+
+    const eventMetaById = new Map<string, { eventName: string }>();
+    eventsSnap.docs.forEach((doc) => {
+      const data = doc.data() as any;
+      eventMetaById.set(doc.id, {
+        eventName: String(data?.eventName || '').trim() || 'N/A',
+      });
+    });
 
     const eventIds = eventsSnap.docs
       .filter((doc) => {
@@ -298,14 +307,16 @@ export async function computeCountryRegistrationMetricsAction(country: 'IN' | 'U
 
     // Read per-event subcollections to avoid collectionGroup index constraints
     for (const eid of eventIds) {
-      const participantsSnap = await adminDb
-        .collection('events')
-        .doc(eid)
-        .collection('participants')
-        .select('name', 'email', 'registeredAt', 'amountPaidPaisa', 'ticketStatus', 'eventName')
-        .get();
+      const { participants: sourceParticipants } = await loadRegistrationParticipantsForEventMetrics({
+        db: adminDb,
+        eventId: eid,
+        actionName,
+      });
 
-      allParticipants.push(...participantsSnap.docs.map(doc => serializeParticipantData(doc)));
+      allParticipants.push(...sourceParticipants.map((participant: EventParticipant) => ({
+        ...participant,
+        eventName: participant.eventName || eventMetaById.get(eid)?.eventName || 'N/A',
+      })));
 
       const cancellationsSnap = await adminDb
         .collection('events')
@@ -394,11 +405,11 @@ export async function computeEventRegistrationMetricsAction(eventId: string): Pr
     const now = new Date();
     const startOfToday = startOfDay(now);
     
-    // Fetch only necessary fields: registration metrics and latest 5 registrations
-    const participantsSnap = await adminDb.collection('events').doc(eventId).collection('participants')
-      .select('name', 'email', 'registeredAt', 'amountPaidPaisa', 'ticketStatus', 'eventName')
-      .get();
-    const allParticipants = participantsSnap.docs.map(doc => serializeParticipantData(doc));
+    const { participants: allParticipants } = await loadRegistrationParticipantsForEventMetrics({
+      db: adminDb,
+      eventId,
+      actionName,
+    });
     
     const cancellationsSnap = await adminDb.collection('events').doc(eventId).collection('cancellations')
       .select('calculatedRefundAmountPaisa')

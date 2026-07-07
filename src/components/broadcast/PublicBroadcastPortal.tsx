@@ -7,7 +7,7 @@ import { Copy, ExternalLink, Radio, Share2, Volume2 } from 'lucide-react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import type { PublicBroadcastCamera, PublicBroadcastEvent, PublicBroadcastFeaturedVideo } from '@/lib/broadcast/public';
 import { getPlaybackUrl } from '@/lib/cloudflare/stream';
-import CloudflareHlsPlayer, { type CloudflareHlsDiagnostics } from '@/components/broadcast/CloudflareHlsPlayer';
+import CloudflareHlsPlayer, { type CloudflareHlsDiagnostics, type CloudflareHlsTimelineMarker } from '@/components/broadcast/CloudflareHlsPlayer';
 
 type AthleteOverlay = {
   athlete?: { name?: string; bibNumber?: string; raceCategory?: string; clubName?: string };
@@ -67,6 +67,40 @@ export default function PublicBroadcastPortal({
     if (Number.isNaN(started.getTime())) return null;
     return started.toLocaleString();
   }, [selectedCamera?.lastConnectedAt, selectedCamera?.lastStreamStartedAt]);
+
+  const timelineMarkers = useMemo<CloudflareHlsTimelineMarker[]>(() => {
+    const rawTimingPoints = Array.isArray((event as any)?.liveTrackingHub?.timingPoints)
+      ? (event as any).liveTrackingHub.timingPoints
+      : [];
+
+    const labels = [
+      { label: '🏊 Swim Start', percent: 0 },
+      { label: '🚴 Bike Start', percent: 33 },
+      { label: '🏃 Run Start', percent: 66 },
+      { label: '🏁 Finish', percent: 100 },
+    ] satisfies Array<{ label: string; percent: number }>;
+
+    if (!Array.isArray(rawTimingPoints) || rawTimingPoints.length === 0) {
+      return labels.map((item) => ({ label: item.label, percent: item.percent }));
+    }
+
+    const resolved = labels.map((item, index) => {
+      const point = rawTimingPoints.find((row: any) => {
+        const text = String(row?.displayName || row?.shortName || row?.name || row?.label || row?.leg || '').toLowerCase();
+        return item.label.toLowerCase().includes('swim') ? text.includes('swim') :
+          item.label.toLowerCase().includes('bike') ? text.includes('bike') :
+          item.label.toLowerCase().includes('run') ? text.includes('run') :
+          text.includes('finish');
+      });
+
+      return {
+        label: point ? String(point?.displayName || point?.shortName || point?.name || item.label) : item.label,
+        percent: item.percent,
+      } as CloudflareHlsTimelineMarker;
+    });
+
+    return resolved;
+  }, [event]);
 
   const goLive = useCallback(async () => {
     const player = playerRef.current;
@@ -176,6 +210,8 @@ export default function PublicBroadcastPortal({
                   title={selectedCamera?.name || event.eventName}
                   className="h-full w-full object-contain bg-black"
                   showControls
+                  dvrWindowHours={4}
+                  timelineMarkers={timelineMarkers}
                   onDiagnosticsChange={setDiagnostics}
                 />
               ) : featuredVideoEmbedUrl ? (

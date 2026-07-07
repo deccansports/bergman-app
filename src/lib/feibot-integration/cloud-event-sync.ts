@@ -9,6 +9,8 @@ function normalize(value: unknown) {
   return String(value ?? '').trim();
 }
 
+const inFlightCloudSync = new Map<string, Promise<any>>();
+
 function asArray<T = any>(value: unknown): T[] {
   return Array.isArray(value) ? value as T[] : [];
 }
@@ -387,6 +389,188 @@ function extractRows(payload: any): any[] {
   return walk(payload);
 }
 
+const EXCLUDED_CLOUD_IMPORT_STATUSES = new Set([
+  'cancelled',
+  'canceled',
+  'cancel',
+  'deleted',
+  'inactive',
+  'withdrawn',
+  'withdraw',
+  'transferred',
+  'transfer',
+  'refunded',
+  'refund',
+  'dns',
+  'did_not_start',
+  'hidden',
+  'duplicate',
+]);
+
+function rowParticipantUuid(row: any) {
+  return normalize(row?.participant_uuid || row?.participantUuid || row?.uuid || row?.UUID || row?.id);
+}
+
+function rowContestUuid(row: any) {
+  return normalize(row?.contest_uuid || row?.contestUuid || row?.contest?.uuid || row?.contest?.UUID || row?.contestId || row?.contest_id);
+}
+
+function rowBib(row: any) {
+  return normalize(row?.bib || row?.bib_no || row?.bibNumber || row?.bib_number || row?.number || row?.no);
+}
+
+function rowChip(row: any) {
+  return normalize(row?.chip || row?.chip_code || row?.chipCode || row?.chip_id || row?.chipId || row?.chipNumber || row?.chip_number);
+}
+
+function rowEmail(row: any) {
+  return normalize(row?.email || row?.mail || row?.e_mail || row?.Email || '').toLowerCase();
+}
+
+function rowName(row: any) {
+  return normalize(row?.name || row?.full_name || row?.fullName || row?.participant_name || row?.athlete_name || [row?.firstName || row?.first_name, row?.lastName || row?.last_name].filter(Boolean).join(' '));
+}
+
+function rowDob(row: any) {
+  const raw = normalize(row?.dob || row?.birthday || row?.date_of_birth || row?.birthDate || row?.birth_date);
+  if (!raw) return '';
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, '0')}-${String(parsed.getUTCDate()).padStart(2, '0')}`;
+}
+
+function rowStatus(row: any) {
+  return normalize(row?.status || row?.providerStatus || row?.registrationStatus || row?.registration_status || row?.ticketStatus || row?.ticket_status).toLowerCase();
+}
+
+function isTrackableCloudRow(row: any) {
+  const status = rowStatus(row);
+  if (status && EXCLUDED_CLOUD_IMPORT_STATUSES.has(status)) return false;
+  if (row?.deleted === true || row?.isDeleted === true || row?.hidden === true || row?.isHidden === true) return false;
+  return true;
+}
+
+function preferredParticipantRow(a: any, b: any) {
+  const score = (row: any) => {
+    let s = 0;
+    if (isTrackableCloudRow(row)) s += 50;
+    if (rowBib(row)) s += 10;
+    if (rowChip(row)) s += 10;
+    if (rowEmail(row)) s += 10;
+    if (rowName(row)) s += 10;
+    if (rowContestUuid(row)) s += 10;
+    return s;
+  };
+
+  return score(b) > score(a) ? b : a;
+}
+
+function uniqueRowsByParticipantUuid(rows: any[]) {
+  const byUuid = new Map<string, any>();
+  const withoutUuid: any[] = [];
+  let merged = 0;
+
+  for (const row of rows) {
+    const participantUuid = rowParticipantUuid(row);
+    if (!participantUuid) {
+      withoutUuid.push(row);
+      continue;
+    }
+
+    if (!byUuid.has(participantUuid)) {
+      byUuid.set(participantUuid, row);
+      continue;
+    }
+
+    merged += 1;
+    byUuid.set(participantUuid, preferredParticipantRow(byUuid.get(participantUuid), row));
+  }
+
+  return {
+    rows: [...byUuid.values(), ...withoutUuid],
+    merged,
+  };
+}
+
+function duplicateGroups(rows: any[], keyFn: (row: any) => string, label: string, limit = 200) {
+  const map = new Map<string, any[]>();
+  for (const row of rows) {
+    const key = keyFn(row);
+    if (!key) continue;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)?.push(row);
+  }
+
+  const groups = Array.from(map.entries())
+    .filter(([, group]) => group.length > 1)
+    .sort((a, b) => b[1].length - a[1].length)
+    .slice(0, limit)
+    .map(([key, group]) => ({
+      key,
+      count: group.length,
+      contestUuids: Array.from(new Set(group.map((row) => rowContestUuid(row)).filter(Boolean))),
+      bibs: Array.from(new Set(group.map((row) => rowBib(row)).filter(Boolean))).slice(0, 10),
+      emails: Array.from(new Set(group.map((row) => rowEmail(row)).filter(Boolean))).slice(0, 10),
+      participantUuids: Array.from(new Set(group.map((row) => rowParticipantUuid(row)).filter(Boolean))).slice(0, 10),
+    }));
+
+  return {
+    label,
+    duplicateGroups: groups.length,
+    samples: groups,
+  };
+}
+
+function analyzeCloudParticipantRows(rows: any[]) {
+  const byParticipantUuid = duplicateGroups(rows, (row) => rowParticipantUuid(row), 'participant_uuid');
+  const byBib = duplicateGroups(rows, (row) => rowBib(row), 'bib');
+  const byEmail = duplicateGroups(rows, (row) => rowEmail(row), 'email');
+  const byChip = duplicateGroups(rows, (row) => rowChip(row), 'chip_code');
+  const byContestAndEmail = duplicateGroups(rows, (row) => {
+    const contest = rowContestUuid(row);
+    const email = rowEmail(row);
+    return contest && email ? `${contest}::${email}` : '';
+  }, 'contest_uuid + email');
+  const byContestAndUuid = duplicateGroups(rows, (row) => {
+    const contest = rowContestUuid(row);
+    const uuid = rowParticipantUuid(row);
+    return contest && uuid ? `${contest}::${uuid}` : '';
+  }, 'contest_uuid + participant_uuid');
+
+  const athleteMultiContest = duplicateGroups(rows, (row) => {
+    const email = rowEmail(row);
+    if (email) return `email:${email}`;
+    const name = rowName(row);
+    const dob = rowDob(row);
+    return name && dob ? `name_dob:${name.toLowerCase()}|${dob}` : '';
+  }, 'athlete identity');
+
+  const statusCounts: Record<string, number> = {};
+  for (const row of rows) {
+    const status = rowStatus(row) || 'unknown';
+    statusCounts[status] = Number(statusCounts[status] || 0) + 1;
+  }
+
+  const trackableRows = rows.filter((row) => isTrackableCloudRow(row));
+  const uniqueByUuid = uniqueRowsByParticipantUuid(trackableRows);
+
+  return {
+    totalRows: rows.length,
+    trackableRows: trackableRows.length,
+    excludedRows: rows.length - trackableRows.length,
+    uniqueParticipantRows: uniqueByUuid.rows.length,
+    mergedByParticipantUuid: uniqueByUuid.merged,
+    statusCounts,
+    byParticipantUuid,
+    byBib,
+    byEmail,
+    byChip,
+    byContestAndEmail,
+    byContestAndUuid,
+    athleteMultiContest,
+  };
+}
+
 function resolveDownloadUrl(payload: any) {
   return normalize(payload?.download_url || payload?.downloadUrl || payload?.url || '');
 }
@@ -645,7 +829,7 @@ function buildContestPackages(entities: { contests: any[]; timingPoints: any[]; 
   return packaged;
 }
 
-export async function syncFeibotCloudEventInfo(params: {
+async function syncFeibotCloudEventInfoInternal(params: {
   eventId: string;
   eventUuid?: string;
   apiBaseUrl?: string;
@@ -822,7 +1006,12 @@ export async function syncFeibotCloudEventInfo(params: {
   const contestValidationRows: any[] = [];
 
   const participantsPayload = await resolveDownloadPayload(participants.data);
-  const participantRows = extractRows(participantsPayload);
+  const participantRowsRaw = extractRows(participantsPayload);
+  const rawAnalysis = analyzeCloudParticipantRows(participantRowsRaw);
+  const filteredRows = participantRowsRaw.filter((row) => isTrackableCloudRow(row));
+  const uniqueRows = uniqueRowsByParticipantUuid(filteredRows);
+  const participantRows = uniqueRows.rows;
+  const downloadedParticipantsCount = participantRowsRaw.length;
   const participantsCount = participantRows.length;
 
   console.log('[FEIBOT PARTICIPANT IMPORT][STEP 1] Download complete', {
@@ -832,7 +1021,10 @@ export async function syncFeibotCloudEventInfo(params: {
   });
   console.log('[FEIBOT PARTICIPANT IMPORT][STEP 2] Participant Count', {
     eventId: params.eventId,
-    participantRows: participantsCount,
+    participantRows: downloadedParticipantsCount,
+    trackableRows: filteredRows.length,
+    uniqueParticipantRows: participantsCount,
+    mergedByParticipantUuid: uniqueRows.merged,
   });
 
   const { participants: staticParticipants, participantIndexPayload, stats: participantImportStats } = await buildFeibotParticipantImport({
@@ -859,6 +1051,10 @@ export async function syncFeibotCloudEventInfo(params: {
     eventId: params.eventId,
     userLookupFailures: Number(participantImportStats.userLookupFailures || 0),
     participantFailures: Number(participantImportStats.participantFailures || 0),
+    excludedByStatus: Number(participantImportStats.excludedByStatus || 0),
+    duplicateByParticipantUuid: Number(participantImportStats.duplicateByParticipantUuid || 0),
+    duplicateByProviderUuid: Number(participantImportStats.duplicateByProviderUuid || 0),
+    duplicateByBookingId: Number(participantImportStats.duplicateByBookingId || 0),
   });
   console.log('[FEIBOT PARTICIPANT IMPORT][STEP 5] Writing timingParticipant', {
     eventId: params.eventId,
@@ -871,11 +1067,18 @@ export async function syncFeibotCloudEventInfo(params: {
     if (!participantUuid) continue;
 
     await putKV(`live:event:${params.eventId}:participant:${participantUuid}`, participant, 'cloud-event-sync');
-    await putKV(`live:event:${params.eventId}:lookup:bib:${String(participant.bib || '').trim()}`, participantUuid, 'cloud-event-sync');
-    await putKV(`live:event:${params.eventId}:lookup:provider:${String(participant.providerUuid || '').trim()}`, participantUuid, 'cloud-event-sync');
-    await putKV(`live:event:${params.eventId}:lookup:user:${String(participant.athleteUid || '').trim()}`, participantUuid, 'cloud-event-sync');
-    await putKV(`live:event:${params.eventId}:lookup:chip:${String(participant.chip || '').trim()}`, participantUuid, 'cloud-event-sync');
-    await putKV(`live:event:${params.eventId}:lookup:email:${String(participant.email || '').trim().toLowerCase()}`, participantUuid, 'cloud-event-sync');
+
+    const bib = String(participant.bib || '').trim();
+    const providerUuid = String(participant.providerUuid || '').trim();
+    const athleteUid = String(participant.athleteUid || '').trim();
+    const chip = String(participant.chip || '').trim();
+    const email = String(participant.email || '').trim().toLowerCase();
+
+    if (bib) await putKV(`live:event:${params.eventId}:lookup:bib:${bib}`, participantUuid, 'cloud-event-sync');
+    if (providerUuid) await putKV(`live:event:${params.eventId}:lookup:provider:${providerUuid}`, participantUuid, 'cloud-event-sync');
+    if (athleteUid) await putKV(`live:event:${params.eventId}:lookup:user:${athleteUid}`, participantUuid, 'cloud-event-sync');
+    if (chip) await putKV(`live:event:${params.eventId}:lookup:chip:${chip}`, participantUuid, 'cloud-event-sync');
+    if (email) await putKV(`live:event:${params.eventId}:lookup:email:${email}`, participantUuid, 'cloud-event-sync');
   }
 
   await putKV(`live:event:${params.eventId}:participant:index`, participantIndexPayload, 'cloud-event-sync');
@@ -901,18 +1104,75 @@ export async function syncFeibotCloudEventInfo(params: {
   });
 
   for (const participant of staticParticipants) {
-    await putKV(`live:event:${params.eventId}:timingParticipant:${participant.bookingId}`, participant, 'cloud-event-sync');
-    const participantUuid = String(participant.participantUuid || participant.bookingId || '').trim();
+    const bookingId = String(participant.bookingId || '').trim();
+    if (bookingId) {
+      await putKV(`live:event:${params.eventId}:timingParticipant:${bookingId}`, participant, 'cloud-event-sync');
+    }
+
+    const participantUuid = String(participant.participantUuid || bookingId || '').trim();
     if (participantUuid) {
-      await putKV(`live:event:${params.eventId}:live:${participantUuid}`, { updatedAt: lastSync, bookingId: participant.bookingId || null }, 'cloud-event-sync');
+      await putKV(`live:event:${params.eventId}:live:${participantUuid}`, { updatedAt: lastSync, bookingId: bookingId || null }, 'cloud-event-sync');
     }
   }
+
+  const providerParticipantsIndex = {
+    provider: 'feibot',
+    source: 'feibot-cloud-api',
+    importTime: lastSync,
+    downloadedCount: downloadedParticipantsCount,
+    importedCount: staticParticipants.length,
+    excludedCount: Math.max(downloadedParticipantsCount - staticParticipants.length, 0),
+    participantCount: staticParticipants.length,
+    byProviderUuid: participantProviderUuidIndex,
+    byBib: participantBibIndex,
+    byChip: participantChipIndex,
+    byEmail: participantEmailIndex,
+    byContest: participantIndexPayload.byContest || {},
+    byAgeGroup: participantIndexPayload.byAgeGroup || {},
+    duplicateStats: {
+      duplicateByParticipantUuid: Number(participantImportStats.duplicateByParticipantUuid || 0),
+      duplicateByProviderUuid: Number(participantImportStats.duplicateByProviderUuid || 0),
+      duplicateByBookingId: Number(participantImportStats.duplicateByBookingId || 0),
+      excludedByStatus: Number(participantImportStats.excludedByStatus || 0),
+      mergedRawByParticipantUuid: Number(uniqueRows.merged || 0),
+    },
+    analysis: rawAnalysis,
+  };
+
+  const providerParticipantsPayload = {
+    provider: 'feibot',
+    source: 'feibot-cloud-api',
+    importTime: lastSync,
+    downloadedCount: downloadedParticipantsCount,
+    importedCount: staticParticipants.length,
+    excludedCount: Math.max(downloadedParticipantsCount - staticParticipants.length, 0),
+    durationMs: Number(participants.diagnostics?.responseTimeMs || 0),
+    mappingSummary: {
+      totalProviderParticipants: staticParticipants.length,
+      downloadedRows: downloadedParticipantsCount,
+      excludedRows: Math.max(downloadedParticipantsCount - staticParticipants.length, 0),
+      duplicateByParticipantUuid: Number(participantImportStats.duplicateByParticipantUuid || 0),
+      duplicateByProviderUuid: Number(participantImportStats.duplicateByProviderUuid || 0),
+      duplicateByBookingId: Number(participantImportStats.duplicateByBookingId || 0),
+      mergedRawByParticipantUuid: Number(uniqueRows.merged || 0),
+    },
+    participants: staticParticipants,
+  };
+
+  await putKV(`live:event:${params.eventId}:providerParticipants`, providerParticipantsPayload, 'cloud-event-sync');
+  await putKV(`live:event:${params.eventId}:providerParticipants:index`, providerParticipantsIndex, 'cloud-event-sync');
+
   console.log('[FEIBOT PARTICIPANT IMPORT][STEP 7] Import Complete', {
     eventId: params.eventId,
     source: 'feibot-cloud-api',
+    downloadedRows: downloadedParticipantsCount,
     participantCount: staticParticipants.length,
     matchedUsers: matchedUsersCount,
     userLookupFailures: Number(participantImportStats.userLookupFailures || 0),
+    duplicateByParticipantUuid: Number(participantImportStats.duplicateByParticipantUuid || 0),
+    duplicateByProviderUuid: Number(participantImportStats.duplicateByProviderUuid || 0),
+    duplicateByBookingId: Number(participantImportStats.duplicateByBookingId || 0),
+    excludedByStatus: Number(participantImportStats.excludedByStatus || 0),
   });
 
   const snapshot = {
@@ -939,7 +1199,8 @@ export async function syncFeibotCloudEventInfo(params: {
     ageGroupsCount: ageGroupCount,
     devices: timingConfiguration.devices,
     devicesCount: Array.isArray(timingConfiguration.devices) ? timingConfiguration.devices.length : 0,
-    participantsCount,
+    participantsCount: staticParticipants.length,
+    downloadedParticipantsCount,
     categoryCount: contestCount,
     diagnostics: {
       timingRules: {
@@ -953,6 +1214,14 @@ export async function syncFeibotCloudEventInfo(params: {
         responseTimeMs: participants.diagnostics?.responseTimeMs || 0,
         timestamp: participants.diagnostics?.timestamp || null,
         stringToSign: participants.diagnostics?.stringToSign || null,
+        downloadedRows: downloadedParticipantsCount,
+        importedRows: staticParticipants.length,
+        excludedRows: Math.max(downloadedParticipantsCount - staticParticipants.length, 0),
+        duplicateByParticipantUuid: Number(participantImportStats.duplicateByParticipantUuid || 0),
+        duplicateByProviderUuid: Number(participantImportStats.duplicateByProviderUuid || 0),
+        duplicateByBookingId: Number(participantImportStats.duplicateByBookingId || 0),
+        excludedByStatus: Number(participantImportStats.excludedByStatus || 0),
+        analysis: rawAnalysis,
       },
       timingValidation: {
         contests: contestValidationRows,
@@ -980,7 +1249,8 @@ export async function syncFeibotCloudEventInfo(params: {
       splitsCount: splitCount,
       ageGroupsCount: ageGroupCount,
       devicesCount: Array.isArray(timingConfiguration.devices) ? timingConfiguration.devices.length : 0,
-      participantsCount,
+      participantsCount: staticParticipants.length,
+      downloadedParticipantsCount,
       apiBaseUrl,
       timingRulesStatus,
     },
@@ -1012,4 +1282,33 @@ export async function syncFeibotCloudEventInfo(params: {
   }, 'cloud-event-sync');
 
   return { success: true, snapshot };
+}
+
+export async function syncFeibotCloudEventInfo(params: {
+  eventId: string;
+  eventUuid?: string;
+  apiBaseUrl?: string;
+  scoreEventUuid?: string;
+  triggeredBy?: string;
+}) {
+  const syncKey = `${normalize(params.eventId)}::${normalize(params.eventUuid || '')}`;
+  const existing = inFlightCloudSync.get(syncKey);
+  if (existing) {
+    console.log('[FEIBOT CLOUD SYNC] Reusing in-flight sync', {
+      eventId: params.eventId,
+      eventUuid: normalize(params.eventUuid || '') || null,
+      triggeredBy: params.triggeredBy || 'unknown',
+    });
+    return existing;
+  }
+
+  const promise = syncFeibotCloudEventInfoInternal(params);
+  inFlightCloudSync.set(syncKey, promise);
+  try {
+    return await promise;
+  } finally {
+    if (inFlightCloudSync.get(syncKey) === promise) {
+      inFlightCloudSync.delete(syncKey);
+    }
+  }
 }

@@ -185,6 +185,7 @@ export default function LiveDisplayPage() {
                 title={firstStream.name}
                 className="h-full w-full object-contain bg-black"
                 showControls
+                dvrWindowHours={4}
                 showDiagnostics
                 onDiagnosticsChange={setDiagnostics}
             />

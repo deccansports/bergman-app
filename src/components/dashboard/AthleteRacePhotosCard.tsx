@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Image from 'next/image';
-import { Camera, ExternalLink, Loader2, UserRoundSearch } from 'lucide-react';
+import { Camera, ChevronDown, ChevronUp, ExternalLink, Loader2, UserRoundSearch } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -60,6 +60,7 @@ export default function AthleteRacePhotosCard() {
   const [isLoading, setIsLoading] = useState(true);
   const [results, setResults] = useState<AthletePhotoResult[]>([]);
   const [activeGalleryUrl, setActiveGalleryUrl] = useState<string | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -85,6 +86,15 @@ export default function AthleteRacePhotosCard() {
             splitSecondPixSearchByFace: event.splitSecondPixSearchByFace ?? null,
           }))
           .filter((event) => event.bibNumber && event.splitSecondPixEventId)
+          .reduce<AthleteMappedEvent[]>((acc, event) => {
+            const dedupeKey = `${String(event.eventId || '').trim()}::${String(event.bibNumber || '').trim()}`;
+            if (!dedupeKey.trim()) return acc;
+            if (acc.some((item) => `${String(item.eventId || '').trim()}::${String(item.bibNumber || '').trim()}` === dedupeKey)) {
+              return acc;
+            }
+            acc.push(event);
+            return acc;
+          }, [])
           .sort((a, b) => {
             const aTime = a?.eventDate ? new Date(a.eventDate).getTime() : 0;
             const bTime = b?.eventDate ? new Date(b.eventDate).getTime() : 0;
@@ -169,21 +179,37 @@ export default function AthleteRacePhotosCard() {
     <Card className="shadow-sm border-emerald-500/20 bg-gradient-to-br from-emerald-50 via-background to-cyan-50 dark:from-emerald-950/20 dark:to-cyan-950/20 overflow-hidden">
       <div className="h-1 w-full bg-gradient-to-r from-emerald-500 via-cyan-500 to-sky-500" />
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-foreground">
-          <Camera className="h-5 w-5 text-emerald-600" /> {titleText}
-        </CardTitle>
-        <CardDescription>
-          Directly matched using your registered event and bib details, then fetched from Split Second Pix.
-        </CardDescription>
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <CardTitle className="flex items-center gap-2 text-foreground">
+              <Camera className="h-5 w-5 text-emerald-600" /> {titleText}
+            </CardTitle>
+            <CardDescription>
+              Directly matched using your registered event and bib details, then fetched from Split Second Pix.
+            </CardDescription>
+          </div>
+
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0 gap-2 rounded-xl"
+            onClick={() => setIsExpanded((prev) => !prev)}
+          >
+            {isExpanded ? 'Collapse' : 'Expand'}
+            {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </Button>
+        </div>
+
         {!isLoading && results.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 pt-1">
+          <div className="flex flex-wrap items-center gap-2 pt-2">
             <Badge variant="outline">{totalPhotos} preview photos</Badge>
             <Badge variant="secondary">{results.length} linked event{results.length === 1 ? '' : 's'}</Badge>
             <Badge variant="outline">{eventsWithGallery} events with gallery</Badge>
           </div>
         )}
       </CardHeader>
-      <CardContent className="space-y-5">
+      <CardContent className={isExpanded ? 'space-y-5' : 'pt-0'}>
         {isLoading && (
           <div className="grid gap-4">
             {[...Array(2)].map((_, index) => (
@@ -198,7 +224,7 @@ export default function AthleteRacePhotosCard() {
           </div>
         )}
 
-        {!isLoading && results.map((result) => (
+        {!isLoading && isExpanded && results.map((result) => (
           <div key={`${result.eventId}-${result.bibNumber}`} className="rounded-2xl border bg-background/80 p-4 space-y-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div className="space-y-2">
@@ -276,6 +302,12 @@ export default function AthleteRacePhotosCard() {
             )}
           </div>
         ))}
+
+        {!isLoading && results.length > 0 && !isExpanded && (
+          <div className="rounded-2xl border border-dashed border-emerald-500/25 bg-background/70 p-5 text-sm text-muted-foreground">
+            Expand to view your race photos, linked events, and gallery actions.
+          </div>
+        )}
       </CardContent>
 
       <Dialog open={!!activeGalleryUrl} onOpenChange={(open) => !open && setActiveGalleryUrl(null)}>

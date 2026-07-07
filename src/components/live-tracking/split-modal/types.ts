@@ -62,6 +62,12 @@ export type SplitModalModel = {
   isNotStarted: boolean;
   isFinished: boolean;
   isDnfLike: boolean;
+  lifecycleState: 'UPCOMING' | 'OFFICIAL_STARTED_WAITING_CHIP' | 'CHIP_STARTED' | 'LIVE_RACING' | 'FINISHED';
+  lifecycleLabel: string;
+  officialStartTimeSeconds: number | null;
+  chipStartTimeSeconds: number | null;
+  officialRaceTimeSeconds: number | null;
+  chipRaceTimeSeconds: number | null;
   timingPoints: ResolvedTimingPoint[];
   rows: TimingRow[];
   sections: SectionGroup[];

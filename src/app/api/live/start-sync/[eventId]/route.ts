@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getFirestoreInstance } from '@/lib/firebaseAdmin';
+import { putKV } from '@/lib/cloudflare/kv';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,52 +38,88 @@ export async function POST(
       );
     }
 
-    const db = getFirestoreInstance();
-    const eventRef = db.collection('events').doc(eventId);
+    const apiBaseUrl = String(process.env.FEIBOT_API_BASE_URL || 'https://apicn.feibot.com');
+    const updatedAt = new Date().toISOString();
 
-    // Update provider configuration metadata only (no credentials persisted from frontend)
-    await eventRef.set(
-      {
-        liveTrackingHub: {
-          provider: 'feibot',
-          feibotConfig: {
-            eventUuid,
-            cloudEventUuid: eventUuid,
-            scoreEventUuid,
-            apiBaseUrl: String(process.env.FEIBOT_API_BASE_URL || 'https://apicn.feibot.com'),
-            cloud: {
-              eventUuid,
-              apiBaseUrl: String(process.env.FEIBOT_API_BASE_URL || 'https://apicn.feibot.com'),
-            },
-            score: {
-              eventUuid: scoreEventUuid,
-            },
-            timingRuleSource: 'cloud',
-          },
-          trackingConfig: {
-            enabled: true,
-            enableReplayMode: true,
-          },
+    const liveTrackingHub = {
+      provider: 'feibot',
+      feibotConfig: {
+        eventUuid,
+        cloudEventUuid: eventUuid,
+        scoreEventUuid,
+        apiBaseUrl,
+        cloud: {
+          eventUuid,
+          apiBaseUrl,
         },
+        score: {
+          eventUuid: scoreEventUuid,
+        },
+        timingRuleSource: 'cloud',
       },
-      { merge: true }
-    );
+      trackingConfig: {
+        enabled: true,
+        enableReplayMode: true,
+      },
+      providerState: {
+        provider: 'feibot',
+        status: 'connected',
+        authentication: 'verified',
+        configurationSource: 'cloud_api',
+        timingRulesImported: true,
+        participantsImported: true,
+        resultsImported: true,
+        updatedAt,
+      },
+      updatedAt,
+    };
 
-    await eventRef.set(
-      {
-        providerState: {
-          provider: 'feibot',
-          status: 'connected',
-          authentication: 'verified',
-          configurationSource: 'cloud_api',
-          timingRulesImported: true,
-          participantsImported: true,
-          resultsImported: true,
-          updatedAt: new Date().toISOString(),
-        },
+    const kvConfig = {
+      provider: 'feibot',
+      providerConfig: {
+        eventUuid,
+        apiBaseUrl,
       },
-      { merge: true }
-    );
+      feibotConfig: {
+        eventUuid,
+        apiBaseUrl,
+        cloud: {
+          eventUuid,
+          apiBaseUrl,
+        },
+        score: {
+          eventUuid: scoreEventUuid,
+          overviewUrl: scoreEventUuid ? `https://score.feibot.com/?id=${encodeURIComponent(scoreEventUuid)}` : '',
+          progressUrl: scoreEventUuid
+            ? `https://score.feibot.com/onlineDateQuery/index.html#/progress/event?event_uuid=${encodeURIComponent(scoreEventUuid)}`
+            : '',
+          available: Boolean(scoreEventUuid),
+        },
+        timingRuleSource: 'cloud',
+      },
+      trackingConfig: {
+        enabled: true,
+        enableReplayMode: true,
+      },
+      providerState: {
+        provider: 'feibot',
+        status: 'connected',
+        authentication: 'verified',
+        configurationSource: 'cloud_api',
+        timingRulesImported: true,
+        participantsImported: true,
+        resultsImported: true,
+        updatedAt,
+      },
+      liveTrackingHub,
+      updatedAt,
+    };
+
+    await Promise.all([
+      putKV(`event:${eventId}:config`, kvConfig, 'api-live-start-sync'),
+      putKV(`live:event:${eventId}:config`, kvConfig, 'api-live-start-sync'),
+      putKV(`live:event:${eventId}:provider-config`, kvConfig, 'api-live-start-sync'),
+    ]);
 
     return NextResponse.json({
       success: true,
@@ -110,29 +146,25 @@ export async function DELETE(
       );
     }
 
-    const db = getFirestoreInstance();
-    const eventRef = db.collection('events').doc(eventId);
-
-    await eventRef.set(
-      {
-        liveTrackingHub: {
-          trackingConfig: {
-            enabled: false,
-          },
-        },
+    const updatedAt = new Date().toISOString();
+    const kvConfig = {
+      provider: 'feibot',
+      trackingConfig: {
+        enabled: false,
       },
-      { merge: true }
-    );
-
-    await eventRef.set(
-      {
-        providerState: {
-          status: 'disabled',
-          updatedAt: new Date().toISOString(),
-        },
+      providerState: {
+        provider: 'feibot',
+        status: 'disabled',
+        updatedAt,
       },
-      { merge: true }
-    );
+      updatedAt,
+    };
+
+    await Promise.all([
+      putKV(`event:${eventId}:config`, kvConfig, 'api-live-start-sync'),
+      putKV(`live:event:${eventId}:config`, kvConfig, 'api-live-start-sync'),
+      putKV(`live:event:${eventId}:provider-config`, kvConfig, 'api-live-start-sync'),
+    ]);
 
     return NextResponse.json({
       success: true,

@@ -89,6 +89,24 @@ function dedupeParticipants<T extends Record<string, any>>(items: T[]): T[] {
   return Array.from(merged.values());
 }
 
+function isTimingOnlyParticipantRecord(participant: any): boolean {
+  const bookingId = String(participant?.bookingId || '').trim().toLowerCase();
+  const registrationSource = String(participant?.registration?.source || '').trim().toLowerCase();
+  const provider = String(participant?.provider || '').trim().toLowerCase();
+  const hasTicketSignals = Boolean(
+    participant?.ticketId ||
+    participant?.ticketName ||
+    participant?.ticketStatus ||
+    participant?.amountPaidPaisa ||
+    participant?.pricingBreakdown
+  );
+
+  if (bookingId.startsWith('fdb:')) return true;
+  if (registrationSource === 'feibot-fdb') return true;
+  if (provider === 'feibot' && !hasTicketSignals) return true;
+  return false;
+}
+
 function toNumberOrNull(value: any): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
@@ -161,68 +179,50 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    // Base query for participants (type filtering happens in-memory)
+    // Base query for participants (type filtering happens in-memory).
+    // IMPORTANT: merge registrations + legacy participants so mixed-migration events are complete.
     const participantsRef = getRegistrationsCollectionRef(adminDb, eventId);
-    const registrationsSnapshot = backupAll
-      ? await participantsRef.get()
-      : await participantsRef.where('ticketStatus', '==', 'Active').get();
+    const legacyParticipantsRef = adminDb.collection('events').doc(eventId).collection('participants');
 
-    // If indexed active query returns empty, fallback to full scan + in-memory active filter.
-    const registrationsDocs = (!backupAll && registrationsSnapshot.empty)
-      ? (await participantsRef.get()).docs.filter((doc) => {
-          const data = doc.data() as any;
-          return String(data?.ticketStatus || '').trim() === 'Active';
-        })
-      : registrationsSnapshot.docs;
+    const [registrationsSnapshotRaw, legacySnapshotRaw] = await Promise.all([
+      participantsRef.get(),
+      legacyParticipantsRef.get(),
+    ]);
 
-    let participantListAll = dedupeParticipants(
-      registrationsDocs.map((doc) => ({
+    const registrationsDocs = backupAll
+      ? registrationsSnapshotRaw.docs
+      : registrationsSnapshotRaw.docs.filter((doc) => String((doc.data() as any)?.ticketStatus || '').trim() === 'Active');
+
+    const legacyDocs = backupAll
+      ? legacySnapshotRaw.docs
+      : legacySnapshotRaw.docs.filter((doc) => String((doc.data() as any)?.ticketStatus || '').trim() === 'Active');
+
+    let participantListAll = dedupeParticipants([
+      ...registrationsDocs.map((doc) => ({
         ...(serializeParticipantData(doc) as EventParticipant),
         id: doc.id,
-      }))
-    );
-
-    // Legacy Firestore fallback (events/{eventId}/participants) before KV fallback.
-    if (participantListAll.length === 0) {
-      const legacyParticipantsRef = adminDb.collection('events').doc(eventId).collection('participants');
-      const legacySnapshot = backupAll
-        ? await legacyParticipantsRef.get()
-        : await legacyParticipantsRef.where('ticketStatus', '==', 'Active').get();
-
-      const legacyDocs = (!backupAll && legacySnapshot.empty)
-        ? (await legacyParticipantsRef.get()).docs.filter((doc) => {
-            const data = doc.data() as any;
-            return String(data?.ticketStatus || '').trim() === 'Active';
-          })
-        : legacySnapshot.docs;
-
-      participantListAll = dedupeParticipants(
-        legacyDocs.map((doc) => ({
-          ...(serializeParticipantData(doc) as EventParticipant),
-          id: doc.id,
-        }))
-      );
-
-      if (participantListAll.length > 0) {
-        console.log(`${actionName} Using legacy Firestore participants source`, {
-          eventId,
-          rows: participantListAll.length,
-        });
-      }
-    }
+      })),
+      ...legacyDocs.map((doc) => ({
+        ...(serializeParticipantData(doc) as EventParticipant),
+        id: doc.id,
+      })),
+    ]).filter((participant) => !isTimingOnlyParticipantRecord(participant));
 
     if (participantListAll.length === 0) {
-      const [legacyIndex, fullParticipantsIndex, liveParticipantIndex, eventParticipantIndex] = await Promise.all([
+      const [legacyIndex, fullParticipantsIndex, fullParticipantsIndexPlural, liveParticipantIndex, eventParticipantIndex] = await Promise.all([
         getKV<any>(`event:${eventId}:index`, actionName),
         getKV<any>(`event:${eventId}:participants:index`, actionName),
+        getKV<any>(`events:${eventId}:participants:index`, actionName),
         getKV<any>(`live:event:${eventId}:participant:index`, actionName),
         getKV<any>(`event:${eventId}:participant:index`, actionName),
       ]);
 
+      // Always prefer the main participants index for exports (full roster), then fallback to compact/legacy keys.
       const kvPicked = pickBestKvParticipantRows([
+        { payload: fullParticipantsIndex, source: `event:${eventId}:participants:index` },
+        { payload: fullParticipantsIndexPlural, source: `events:${eventId}:participants:index` },
         { payload: liveParticipantIndex, source: `live:event:${eventId}:participant:index` },
         { payload: eventParticipantIndex, source: `event:${eventId}:participant:index` },
-        { payload: fullParticipantsIndex, source: `event:${eventId}:participants:index` },
         { payload: legacyIndex, source: `event:${eventId}:index` },
       ]);
       const kvRows = kvPicked.rows;
@@ -257,7 +257,8 @@ export async function GET(request: NextRequest) {
         });
 
         // Final safety dedupe after normalization/mapping
-        participantListAll = dedupeParticipants(participantListAll);
+        participantListAll = dedupeParticipants(participantListAll)
+          .filter((participant) => !isTimingOnlyParticipantRecord(participant));
       }
     }
     

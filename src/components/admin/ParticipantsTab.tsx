@@ -28,7 +28,9 @@ import {
   reassignDuplicateBibsAction,
   findUserForParticipantRegistrationAction,
   registerParticipantFromDatabaseAction,
+  repairLegacyParticipantsMirrorAction,
   getBelSeasonLeaderboardAction,
+  verifyParticipantIntegrityAction,
 } from "@/lib/actions";
 
 import { getAllClubs } from "@/lib/actions/clubActions";
@@ -230,6 +232,8 @@ export default function ParticipantsTab({
   const [isSyncingClubs, setIsSyncingClubs] = useState(false);
   const [isAssigningBibs, setIsAssigningBibs] = useState(false);
   const [isCleaningBibs, setIsCleaningBibs] = useState(false);
+  const [isVerifyingIntegrity, setIsVerifyingIntegrity] = useState(false);
+  const [isRepairingLegacyMirror, setIsRepairingLegacyMirror] = useState(false);
   const [isSendingWhatsApp, setIsSendingWhatsApp] = useState<string | null>(null);
   const [isSendingEmail, setIsSendingEmail] = useState<string | null>(null);
 
@@ -431,12 +435,23 @@ export default function ParticipantsTab({
     if (selectedEventId) {
       setParticipants([]);
       setLastVisibleId(null);
-      fetchParticipants(selectedEventId, null);
+      fetchParticipants(selectedEventId, null, false);
     } else {
       setParticipants([]);
       setTotalCount(0);
       setLastVisibleId(null);
     }
+  }, [selectedEventId, fetchParticipants]);
+
+  useEffect(() => {
+    if (!selectedEventId) return;
+
+    const interval = setInterval(() => {
+      setLastVisibleId(null);
+      fetchParticipants(selectedEventId, null, false);
+    }, 20000);
+
+    return () => clearInterval(interval);
   }, [selectedEventId, fetchParticipants]);
 
   useEffect(() => {
@@ -482,7 +497,7 @@ export default function ParticipantsTab({
   const refreshData = () => {
     if (selectedEventId) {
       setLastVisibleId(null);
-      fetchParticipants(selectedEventId, null);
+      fetchParticipants(selectedEventId, null, false);
     }
   };
 
@@ -1160,6 +1175,46 @@ export default function ParticipantsTab({
     setIsSyncing(false);
   };
 
+  const handleVerifyIntegrity = async () => {
+    if (!selectedEventId) return;
+    setIsVerifyingIntegrity(true);
+    const result = await verifyParticipantIntegrityAction(selectedEventId, 15);
+    if (!result.success) {
+      toast({ variant: "destructive", title: "Integrity Check Failed", description: result.message });
+      setIsVerifyingIntegrity(false);
+      return;
+    }
+
+    const mismatchSummary = `FS:${result.firestoreCount ?? 0} KV:${result.kvCount ?? 0} | Missing in FS:${result.missingInFirestoreCount ?? 0} Missing in KV:${result.missingInKvCount ?? 0} | Dup(FS):${result.duplicateGroupsInFirestore ?? 0} Dup(KV):${result.duplicateGroupsInKv ?? 0}`;
+
+    console.log('[ParticipantsTab] integrity-check-result', result);
+
+    toast({
+      title: 'Integrity Check Complete',
+      description: mismatchSummary,
+    });
+
+    setIsVerifyingIntegrity(false);
+  };
+
+  const handleRepairLegacyMirror = async () => {
+    if (!selectedEventId) return;
+    setIsRepairingLegacyMirror(true);
+    const result = await repairLegacyParticipantsMirrorAction(selectedEventId);
+    if (!result.success) {
+      toast({ variant: 'destructive', title: 'Legacy Mirror Repair Failed', description: result.message });
+      setIsRepairingLegacyMirror(false);
+      return;
+    }
+
+    toast({
+      title: 'Legacy Mirror Repaired',
+      description: `${result.repairedCount ?? 0} participants mirrored to legacy collection.`,
+    });
+
+    setIsRepairingLegacyMirror(false);
+  };
+
   const handleDownload = () => {
     if (blockIfReadOnly()) return;
     if (!selectedEventId) return;
@@ -1260,6 +1315,14 @@ export default function ParticipantsTab({
               <Button size="sm" variant="outline" onClick={handleSyncKV} disabled={isSyncing || !selectedEventId || isViewOnlyAdmin}>
                 {isSyncing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
                 Sync to KV
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleVerifyIntegrity} disabled={isVerifyingIntegrity || !selectedEventId}>
+                {isVerifyingIntegrity ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <AlertTriangle className="h-4 w-4 mr-2" />}
+                Verify FS ↔ KV
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleRepairLegacyMirror} disabled={isRepairingLegacyMirror || !selectedEventId}>
+                {isRepairingLegacyMirror ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                Repair Legacy Mirror
               </Button>
               <Button size="sm" variant="outline" onClick={handleAssignMissingBibs} disabled={isAssigningBibs || !selectedEventId || isViewOnlyAdmin}>
                 {isAssigningBibs ? <Loader2 className="h-4 w-4 animate-spin mr-2"/> : <Hash className="h-4 w-4 mr-2"/>}

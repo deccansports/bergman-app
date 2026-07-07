@@ -32,9 +32,22 @@ function generateAdminBookingId(): string {
 }
 
 async function getParticipantsFromKv(eventId: string): Promise<EventParticipant[] | null> {
-  const kvKey = `event:${eventId}:participants:index`;
-  const cached = await getKV<EventParticipant[]>(kvKey, 'participantActions');
-  return Array.isArray(cached) ? cached : null;
+  const normalizedEventId = String(eventId || '').trim();
+  if (!normalizedEventId) return null;
+
+  const canonicalKey = `event:${normalizedEventId}:participants:index`;
+  const legacyKey = `event:${normalizedEventId}:participant:index`;
+
+  const [canonical, legacy] = await Promise.all([
+    getKV<EventParticipant[]>(canonicalKey, 'participantActions').catch(() => null),
+    getKV<EventParticipant[]>(legacyKey, 'participantActions').catch(() => null),
+  ]);
+
+  if (Array.isArray(canonical) && canonical.length > 0) return canonical;
+  if (Array.isArray(legacy) && legacy.length > 0) return legacy;
+  if (Array.isArray(canonical)) return canonical;
+  if (Array.isArray(legacy)) return legacy;
+  return null;
 }
 
 function getParticipantDedupKey(participant: any, fallbackIndex: number): string {
@@ -85,8 +98,6 @@ function isTimingOnlyParticipantRecord(participant: any): boolean {
     participant?.pricingBreakdown
   );
 
-  if (bookingId.startsWith('fdb:')) return true;
-  if (registrationSource === 'feibot-fdb') return true;
   if (provider === 'feibot' && !hasTicketSignals) return true;
   return false;
 }
@@ -158,6 +169,102 @@ function collapseRelayParticipantRecords(participants: EventParticipant[]): Even
   });
 
   return [...standalone, ...collapsedRelayTeams];
+}
+
+export async function resolveCanonicalParticipantRef(
+  db: FirebaseFirestore.Firestore,
+  eventId: string,
+  payload: any,
+  preferredDocId?: string | null,
+): Promise<FirebaseFirestore.DocumentReference> {
+  const participantsRef = getRegistrationsCollectionRef(db, eventId);
+  const normalizedEmail = String(payload?.email || payload?.buyerEmail || '').trim().toLowerCase();
+  const athleteUid = String(payload?.athleteUid || payload?.userId || '').trim();
+  const bookingId = String(payload?.bookingId || '').trim();
+  const registrationAttemptId = String(payload?.registrationAttemptId || payload?.registrationId || '').trim();
+  const transactionId = String(payload?.transactionId || payload?.paymentId || '').trim();
+  const razorpayOrderId = String(payload?.razorpayOrderId || '').trim();
+
+  const normalizeSubCategory = (value: any) => {
+    const raw = String(value || '').trim();
+    return raw && raw !== 'NONE' ? raw : null;
+  };
+
+  const ticketId = String(payload?.ticketId || '').trim();
+  const selectedSubCategory = normalizeSubCategory(payload?.selectedSubCategory);
+
+  const matchesTicketScope = (docData: any) => {
+    if (!ticketId) return false;
+    const docTicketId = String(docData?.ticketId || '').trim();
+    const docSubCategory = normalizeSubCategory(docData?.selectedSubCategory);
+    return docTicketId === ticketId && docSubCategory === selectedSubCategory;
+  };
+
+  const queries: Array<Promise<FirebaseFirestore.QuerySnapshot>> = [];
+  if (registrationAttemptId) queries.push(participantsRef.where('registrationAttemptId', '==', registrationAttemptId).limit(1).get());
+  if (bookingId) queries.push(participantsRef.where('bookingId', '==', bookingId).limit(1).get());
+  if (transactionId) {
+    queries.push(participantsRef.where('transactionId', '==', transactionId).limit(1).get());
+    queries.push(participantsRef.where('paymentId', '==', transactionId).limit(1).get());
+  }
+  if (razorpayOrderId) queries.push(participantsRef.where('razorpayOrderId', '==', razorpayOrderId).limit(1).get());
+
+  for (const snap of await Promise.all(queries)) {
+    if (!snap.empty) return snap.docs[0].ref;
+  }
+
+  // Weak identity fallback: only reuse athlete/email records when they match the same
+  // ticket + sub-category scope. This prevents accidental overwrite of an existing
+  // different registration by the same athlete/email.
+  if (ticketId && athleteUid) {
+    const byAthlete = await participantsRef.where('athleteUid', '==', athleteUid).limit(20).get();
+    const scoped = byAthlete.docs.find((doc) => matchesTicketScope(doc.data()));
+    if (scoped) return scoped.ref;
+  }
+
+  if (ticketId && normalizedEmail) {
+    const byEmail = await participantsRef.where('email', '==', normalizedEmail).limit(20).get();
+    const scoped = byEmail.docs.find((doc) => matchesTicketScope(doc.data()));
+    if (scoped) return scoped.ref;
+  }
+
+  const docId = String(
+    preferredDocId
+    || registrationAttemptId
+    || bookingId
+    || transactionId
+    || razorpayOrderId
+    || athleteUid
+    || normalizedEmail
+    || payload?.id
+    || ''
+  ).trim() || participantsRef.doc().id;
+
+  return participantsRef.doc(docId);
+}
+
+export async function writeCanonicalParticipant(
+  db: FirebaseFirestore.Firestore,
+  eventId: string,
+  payload: any,
+  preferredDocId?: string | null,
+) {
+  const ref = await resolveCanonicalParticipantRef(db, eventId, payload, preferredDocId);
+  await ref.set(payload, { merge: true });
+
+  // Backward-compatibility mirror: keep legacy participants collection populated
+  // while canonical source of truth remains registrations.
+  const legacyRef = db.collection('events').doc(eventId).collection('participants').doc(ref.id);
+  await legacyRef.set(
+    {
+      ...payload,
+      mirroredFromRegistrations: true,
+      mirroredAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return ref;
 }
 
 function enrichParticipantContestFields(participant: any, fallbackEventId?: string | null) {
@@ -391,131 +498,26 @@ export async function getParticipantsPaginatedAction(
   dedupedTotalCount?: number;
 }> {
   try {
-    const db = getFirestoreInstance();
-
-    const enrichParticipantsWithClubNames = async (items: any[]) => {
-      if (!Array.isArray(items) || items.length === 0) return items;
-
-      const clubIds = Array.from(new Set(
-        items
-          .map((p: any) => String(p?.clubId || '').trim())
-          .filter((clubId) => !!clubId && clubId !== NO_CLUB_SELECTED_VALUE)
-      ));
-
-      const clubNameById = new Map<string, string>();
-      await Promise.all(clubIds.map(async (clubId) => {
-        try {
-          const clubDoc = await db.collection('clubs').doc(clubId).get();
-          if (clubDoc.exists) {
-            const clubName = String(clubDoc.data()?.name || '').trim();
-            if (clubName) clubNameById.set(clubId, clubName);
-          }
-        } catch {
-          // Non-blocking enrichment
-        }
-      }));
-
-      return items.map((participant: any) => {
-        const rawClubId = String(participant?.clubId || '').trim();
-        if (!rawClubId || rawClubId === NO_CLUB_SELECTED_VALUE) {
-          return { ...participant, clubId: null, clubName: null };
-        }
-
-        const resolvedClubName = clubNameById.get(rawClubId);
-        if (resolvedClubName) {
-          return { ...participant, clubId: rawClubId, clubName: resolvedClubName };
-        }
-
-        return participant;
-      });
-    };
-
-    // Only use cache if not forcing refresh
-    if (!forceRefresh) {
-      const cachedParticipants = await getParticipantsFromKv(eventId);
-      if (cachedParticipants && cachedParticipants.length > 0) {
-        const normalizedCached = collapseRelayParticipantRecords(cachedParticipants.map((p: any) => ({
-          ...p,
-          id: p?.id || p?.bookingId || null,
-        }))).filter((p: any) => !isTimingOnlyParticipantRecord(p));
-        const dedupedCached = dedupeParticipants(normalizedCached as any[]);
-        const normalizedWithClubNames = await enrichParticipantsWithClubNames(dedupedCached as any[]);
-
-        const sorted = [...normalizedWithClubNames].sort((a: any, b: any) => {
-          const aDate = new Date((a as any)?.registeredAt || 0).getTime();
-          const bDate = new Date((b as any)?.registeredAt || 0).getTime();
-          return bDate - aDate;
-        });
-
-        const startIndex = lastId
-          ? Math.max(0, sorted.findIndex((participant: any) => participant.id === lastId) + 1)
-          : 0;
-        const page = sorted.slice(startIndex, startIndex + pageSize);
-
-        return {
-          success: true,
-          message: 'Fetched from cache.',
-          participants: serializeValue(page),
-          lastId: page.length > 0 ? String((page[page.length - 1] as any).id || '') || undefined : undefined,
-          totalCount: sorted.length,
-          source: 'kv',
-          rawTotalCount: normalizedCached.length,
-          dedupedTotalCount: sorted.length,
-        };
-      }
+    const normalizedEventId = String(eventId || '').trim();
+    if (!normalizedEventId) {
+      return { success: false, message: 'Event ID is required.', participants: [] };
     }
 
-    // Fetch from Firestore (forced or cache miss) and build a single filtered+deduped dataset
-    // so counts and pages always stay in sync.
-    console.log(`[getParticipantsPaginatedAction] Fetching participant dataset from Firestore (forceRefresh=${forceRefresh})...`);
-    const colRef = getRegistrationsCollectionRef(db, eventId);
-    const legacyColRef = db.collection('events').doc(eventId).collection('participants');
+    console.log(`[getParticipantsPaginatedAction] Fetching participant dataset from KV (forceRefresh=${forceRefresh})...`);
+    const kvParticipants = await getParticipantsFromKv(normalizedEventId);
+    const kvRows = Array.isArray(kvParticipants) ? kvParticipants : [];
 
-    let allSnap = await colRef.get();
-    if (allSnap.empty) {
-      const legacySnap = await legacyColRef.get();
-      if (!legacySnap.empty) {
-        const legacyRegistrations = collapseRelayParticipantRecords(legacySnap.docs.map((doc) => {
-          const participant = serializeParticipantData(doc) as EventParticipant;
-          return {
-            ...participant,
-            id: (participant as any)?.id || doc.id,
-          } as EventParticipant;
-        })).filter((participant: any) => !isTimingOnlyParticipantRecord(participant));
+    const normalizedKv = collapseRelayParticipantRecords(
+      kvRows.map((p: any) => ({
+        ...p,
+        id: p?.id || p?.bookingId || null,
+      }))
+    );
 
-        if (legacyRegistrations.length > 0) {
-          const batchSize = 350;
-          for (let i = 0; i < legacyRegistrations.length; i += batchSize) {
-            const batch = db.batch();
-            for (const participant of legacyRegistrations.slice(i, i + batchSize)) {
-              const participantRecord = participant as any;
-              const docId = String(participantRecord.bookingId || participantRecord.id || '').trim();
-              if (!docId) continue;
-              batch.set(colRef.doc(docId), {
-                ...participantRecord,
-                source: participantRecord.source || 'registration',
-                updatedAt: FieldValue.serverTimestamp(),
-              }, { merge: true });
-            }
-            await batch.commit();
-          }
-          allSnap = await colRef.get();
-        }
-      }
-    }
-    const allParticipantsRaw = collapseRelayParticipantRecords(allSnap.docs.map((doc) => {
-      const participant = serializeParticipantData(doc) as EventParticipant;
-      return {
-        ...participant,
-        id: (participant as any)?.id || doc.id,
-      } as EventParticipant;
-    }));
-
-    const registrationParticipants = allParticipantsRaw.filter((participant: any) => !isTimingOnlyParticipantRecord(participant));
+    const registrationParticipants = normalizedKv.filter((participant: any) => !isTimingOnlyParticipantRecord(participant));
     const dedupedAll = dedupeParticipants(registrationParticipants as any[]);
-    const withClubNames = await enrichParticipantsWithClubNames(dedupedAll as any[]);
 
-    const sorted = [...withClubNames].sort((a: any, b: any) => {
+    const sorted = [...dedupedAll].sort((a: any, b: any) => {
       const aDate = new Date((a as any)?.registeredAt || 0).getTime();
       const bDate = new Date((b as any)?.registeredAt || 0).getTime();
       return bDate - aDate;
@@ -526,31 +528,187 @@ export async function getParticipantsPaginatedAction(
       : 0;
     const pageParticipants = sorted.slice(startIndex, startIndex + pageSize);
     const totalCount = sorted.length;
-    const rawTotalCount = allParticipantsRaw.length;
+    const rawTotalCount = normalizedKv.length;
 
     console.log('[getParticipantsPaginatedAction] participant-source-breakdown', {
-      eventId,
-      rawFirestoreDocs: allParticipantsRaw.length,
+      eventId: normalizedEventId,
+      rawKvRows: normalizedKv.length,
       afterRegistrationFilter: registrationParticipants.length,
       dedupedRegistrationParticipants: totalCount,
       pageSizeReturned: pageParticipants.length,
-      excludedTimingOnlyRows: Math.max(0, allParticipantsRaw.length - registrationParticipants.length),
+      excludedTimingOnlyRows: Math.max(0, normalizedKv.length - registrationParticipants.length),
       isPaginatedRequest: Boolean(lastId),
     });
 
     return {
       success: true,
-      message: forceRefresh ? 'Fetched from Firestore (forced refresh).' : 'Fetched from Firestore.',
+      message: forceRefresh ? 'Fetched from KV (forced refresh).' : 'Fetched from KV.',
       participants: serializeValue(pageParticipants),
       lastId: pageParticipants.length > 0 ? String((pageParticipants[pageParticipants.length - 1] as any).id || '') || undefined : undefined,
       totalCount,
-      source: 'firestore',
+      source: 'kv',
       rawTotalCount,
       dedupedTotalCount: totalCount,
     };
   } catch (e: any) {
     console.error("[getParticipantsPaginatedAction] Error:", e.message);
     return { success: false, message: e.message, participants: [] }; 
+  }
+}
+
+export async function verifyParticipantIntegrityAction(
+  eventId: string,
+  sampleLimit: number = 25,
+): Promise<{
+  success: boolean;
+  message: string;
+  eventId?: string;
+  firestoreCount?: number;
+  kvCount?: number;
+  firestoreUniqueKeys?: number;
+  kvUniqueKeys?: number;
+  duplicateGroupsInFirestore?: number;
+  duplicateGroupsInKv?: number;
+  missingInFirestoreCount?: number;
+  missingInKvCount?: number;
+  missingInFirestoreSample?: string[];
+  missingInKvSample?: string[];
+}> {
+  try {
+    const normalizedEventId = String(eventId || '').trim();
+    if (!normalizedEventId) {
+      return { success: false, message: 'Event ID is required.' };
+    }
+
+    const db = getFirestoreInstance();
+    const registrationsRef = getRegistrationsCollectionRef(db, normalizedEventId);
+    const [registrationsSnap, kvParticipants] = await Promise.all([
+      registrationsRef.get(),
+      getParticipantsFromKv(normalizedEventId),
+    ]);
+
+    const firestoreParticipants = registrationsSnap.docs.map((doc, index) => {
+      const participant = serializeParticipantData(doc) as EventParticipant;
+      return {
+        ...participant,
+        id: (participant as any)?.id || doc.id,
+        bookingId: String((participant as any)?.bookingId || doc.id || '').trim(),
+        __dedupKey: getParticipantDedupKey({
+          ...participant,
+          id: (participant as any)?.id || doc.id,
+          bookingId: String((participant as any)?.bookingId || doc.id || '').trim(),
+        }, index),
+      } as any;
+    });
+
+    const kvRows = Array.isArray(kvParticipants) ? kvParticipants : [];
+    const kvNormalized = kvRows.map((participant: any, index: number) => ({
+      ...participant,
+      id: participant?.id || participant?.bookingId || null,
+      __dedupKey: getParticipantDedupKey(participant, index),
+    }));
+
+    const fsGroup = new Map<string, number>();
+    const kvGroup = new Map<string, number>();
+
+    firestoreParticipants.forEach((p: any) => fsGroup.set(p.__dedupKey, (fsGroup.get(p.__dedupKey) || 0) + 1));
+    kvNormalized.forEach((p: any) => kvGroup.set(p.__dedupKey, (kvGroup.get(p.__dedupKey) || 0) + 1));
+
+    const fsUnique = new Set(Array.from(fsGroup.keys()));
+    const kvUnique = new Set(Array.from(kvGroup.keys()));
+
+    const missingInFirestore = Array.from(kvUnique).filter((key) => !fsUnique.has(key));
+    const missingInKv = Array.from(fsUnique).filter((key) => !kvUnique.has(key));
+
+    const duplicateGroupsInFirestore = Array.from(fsGroup.values()).filter((count) => count > 1).length;
+    const duplicateGroupsInKv = Array.from(kvGroup.values()).filter((count) => count > 1).length;
+
+    const summary = {
+      eventId: normalizedEventId,
+      firestoreCount: firestoreParticipants.length,
+      kvCount: kvNormalized.length,
+      firestoreUniqueKeys: fsUnique.size,
+      kvUniqueKeys: kvUnique.size,
+      duplicateGroupsInFirestore,
+      duplicateGroupsInKv,
+      missingInFirestoreCount: missingInFirestore.length,
+      missingInKvCount: missingInKv.length,
+      missingInFirestoreSample: missingInFirestore.slice(0, Math.max(1, sampleLimit)),
+      missingInKvSample: missingInKv.slice(0, Math.max(1, sampleLimit)),
+    };
+
+    console.log('[verifyParticipantIntegrityAction] summary', summary);
+
+    return {
+      success: true,
+      message: 'Participant integrity check completed.',
+      ...summary,
+    };
+  } catch (e: any) {
+    console.error('[verifyParticipantIntegrityAction] failed', {
+      eventId,
+      error: e?.message || String(e),
+    });
+    return { success: false, message: e?.message || 'Failed to verify participant integrity.' };
+  }
+}
+
+export async function repairLegacyParticipantsMirrorAction(
+  eventId: string,
+): Promise<{ success: boolean; message: string; repairedCount?: number; skippedCount?: number }> {
+  try {
+    const normalizedEventId = String(eventId || '').trim();
+    if (!normalizedEventId) return { success: false, message: 'Event ID is required.' };
+
+    const db = getFirestoreInstance();
+    const registrationsRef = getRegistrationsCollectionRef(db, normalizedEventId);
+    const legacyRef = db.collection('events').doc(normalizedEventId).collection('participants');
+
+    const registrationsSnap = await registrationsRef.get();
+    if (registrationsSnap.empty) {
+      return { success: true, message: 'No registrations found to mirror.', repairedCount: 0, skippedCount: 0 };
+    }
+
+    let repairedCount = 0;
+    let skippedCount = 0;
+
+    for (const doc of registrationsSnap.docs) {
+      const payload = serializeParticipantData(doc) as EventParticipant;
+      if (isTimingOnlyParticipantRecord(payload)) {
+        skippedCount++;
+        continue;
+      }
+
+      await legacyRef.doc(doc.id).set(
+        {
+          ...payload,
+          id: String((payload as any)?.id || doc.id),
+          mirroredFromRegistrations: true,
+          mirroredAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      repairedCount++;
+    }
+
+    console.log('[repairLegacyParticipantsMirrorAction] complete', {
+      eventId: normalizedEventId,
+      repairedCount,
+      skippedCount,
+    });
+
+    return {
+      success: true,
+      message: `Legacy participants mirror repaired (${repairedCount} docs).`,
+      repairedCount,
+      skippedCount,
+    };
+  } catch (e: any) {
+    console.error('[repairLegacyParticipantsMirrorAction] failed', {
+      eventId,
+      error: e?.message || String(e),
+    });
+    return { success: false, message: e?.message || 'Failed to repair legacy participants mirror.' };
   }
 }
 
@@ -1274,7 +1432,12 @@ export async function transferParticipantToEventAction(input: {
       if (targetParticipantPayload[key] === undefined) delete targetParticipantPayload[key];
     });
 
-    const newParticipantRef = await db.collection('events').doc(targetEventId).collection('participants').add(targetParticipantPayload);
+    const newParticipantRef = await writeCanonicalParticipant(
+      db,
+      targetEventId,
+      targetParticipantPayload,
+      targetParticipantPayload.bookingId,
+    );
 
     const [updatedSourceSnap, updatedTargetSnap] = await Promise.all([
       sourceParticipantRef.get(),
@@ -1384,13 +1547,15 @@ export async function addParticipantToEventAction(eventId: string, pData: any) {
         if(!ticketSnap.exists) throw new Error("Ticket not found");
         const tData = ticketSnap.data() as TicketDefinition;
 
-        const res = await eventRef.collection('participants').add({
+        const participantPayload = {
             ...pData,
           agreedPolicyChangeFlow: true,
             ticketName: tData.ticketName,
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp()
-        });
+        };
+
+        const res = await writeCanonicalParticipant(db, eventId, participantPayload, String(pData?.bookingId || pData?.id || '').trim());
         
         const updated = await res.get();
         await _mirrorParticipantToKV(serializeParticipantData(updated));
@@ -1412,7 +1577,7 @@ export async function addParticipantFromUserAction(eventId: string, uid: string,
         const ticketSnap = await eventRef.collection('ticketDefinitions').doc(ticketId).get();
         const tData = ticketSnap.data() as TicketDefinition;
 
-        const res = await eventRef.collection('participants').add({
+        const res = await writeCanonicalParticipant(db, eventId, {
             athleteUid: uid,
             name: userData.name,
             email: userData.email?.toLowerCase(),
@@ -1423,7 +1588,7 @@ export async function addParticipantFromUserAction(eventId: string, uid: string,
             registeredAt: new Date().toISOString(),
             createdAt: FieldValue.serverTimestamp(),
             updatedAt: FieldValue.serverTimestamp()
-        });
+        }, `uid:${uid}:${ticketId}`);
 
         const updated = await res.get();
         await _mirrorParticipantToKV(serializeParticipantData(updated));
@@ -1705,10 +1870,7 @@ export async function registerParticipantFromDatabaseAction(input: {
       await putKV(`user:${userId}:profile`, serializeValue(userData), 'registerParticipantFromDatabaseAction');
     }
 
-    const participantByEmail = await db
-      .collection('events')
-      .doc(eventId)
-      .collection('participants')
+    const participantByEmail = await getRegistrationsCollectionRef(db, eventId)
       .where('email', '==', email)
       .get();
 
@@ -1836,7 +1998,13 @@ export async function registerParticipantFromDatabaseAction(input: {
 
     Object.keys(participantPayload).forEach((k) => participantPayload[k] === undefined && delete participantPayload[k]);
 
-    const participantRef = await getRegistrationsCollectionRef(db, eventId).add(participantPayload);
+    const participantRef = await writeCanonicalParticipant(db, eventId, participantPayload, bookingId);
+    console.log('[registerParticipantFromDatabaseAction] canonical-write', {
+      eventId,
+      path: participantRef.path,
+      participantId: participantRef.id,
+      bookingId,
+    });
     const participantSnap = await participantRef.get();
     const serializedParticipant = serializeParticipantData(participantSnap) as EventParticipant;
 

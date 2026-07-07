@@ -31,7 +31,8 @@ export interface User {
   pincode?: string | null;
   emergencyContactNumber?: string | null;
   idProofUrl?: string | null;
-  liveTrackingPrivacy?: 'PUBLIC' | 'PRIVATE' | null;
+  liveTrackingPrivacy?: 'PUBLIC' | 'ANONYMOUS' | 'PRIVATE' | null;
+  trackingVisibility?: 'PUBLIC' | 'ANONYMOUS' | 'PRIVATE' | null;
   upcomingEvents?: { eventId: string; eventName: string; eventDate?: string; bookingId?: string; registeredDate?: string; bibNumber?: string; ticketCategory?: string; raceCategory?: string }[];
   isBlacklisted?: boolean;
   blacklistReason?: string | null;

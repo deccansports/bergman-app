@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import initSqlJs from 'sql.js';
-import { FieldValue } from 'firebase-admin/firestore';
 
 import { getFirestoreInstance } from '@/lib/firebaseAdmin';
 import { isJobCancelRequested, requestJobCancel, startJob, updateJobProgress } from '@/lib/jobManager';
@@ -14,10 +13,20 @@ import { serializeValue } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 120;
 
-const MAX_FILE_SIZE_MB = Math.max(Number(process.env.FDB_IMPORT_MAX_MB || 50), 5);
+const MAX_FILE_SIZE_MB = Math.max(Number(process.env.FDB_IMPORT_MAX_MB || 100), 5);
 const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
-const LOG_KEY_LIMIT = 200;
+const LOG_KEY_LIMIT = 500;
+const KV_WRITE_TIMEOUT_MS = Math.max(Number(process.env.FDB_IMPORT_KV_WRITE_TIMEOUT_MS || 15000), 5000);
+
+function getImportStateKey(eventId: string) {
+  return `live:event:${eventId}:fdb-import:state`;
+}
+
+function getImportHistoryKey(eventId: string) {
+  return `live:event:${eventId}:fdb-import:history`;
+}
 
 type Row = Record<string, any>;
 
@@ -52,6 +61,8 @@ type ImportSummary = {
     activeParticipants: number;
   };
   kvRecordsWritten: number;
+  errorMessages?: string[];
+  warningMessages?: string[];
   importedContests?: Array<{
     contestUuid: string;
     contestName: string;
@@ -227,15 +238,31 @@ function deriveMetadata(tables: Record<string, Row[]>) {
 }
 
 async function persistState(eventId: string, patch: Row) {
-  const db = getFirestoreInstance();
-  await db.collection('liveTracking').doc(eventId).set(
-    {
-      provider: 'feibot',
-      updatedAt: FieldValue.serverTimestamp(),
-      ...patch,
+  const key = getImportStateKey(eventId);
+  const current = (await getKV<Record<string, any>>(key, '[API /live-tracking/feibot/fdb-import state]')) || {};
+  const next = {
+    ...current,
+    ...patch,
+    provider: 'feibot',
+    updatedAt: new Date().toISOString(),
+    database: {
+      ...(current?.database || {}),
+      ...(patch?.database || {}),
     },
-    { merge: true },
-  );
+    progress: {
+      ...(current?.progress || {}),
+      ...(patch?.progress || {}),
+    },
+  };
+  await withTimeout(putKV(key, next, '[API /live-tracking/feibot/fdb-import state]'), 5000, 'Import state write');
+}
+
+async function appendImportHistory(eventId: string, row: Record<string, any>) {
+  const key = getImportHistoryKey(eventId);
+  const current = (await getKV<Record<string, any>[]>(key, '[API /live-tracking/feibot/fdb-import history]')) || [];
+  const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const next = [{ id, ...row }, ...current].slice(0, 25);
+  await withTimeout(putKV(key, next, '[API /live-tracking/feibot/fdb-import history]'), 5000, 'Import history write');
 }
 
 async function updateProgress(eventId: string, jobId: string, progress: number, stage: string, message: string, summary?: Row) {
@@ -299,25 +326,48 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string) {
   }) as Promise<T>;
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function putTrackedKV(key: string, value: any, logs: RuntimeLog[], summary: ImportSummary) {
   const startedAt = Date.now();
   const payloadSize = Buffer.byteLength(JSON.stringify(serializeValue(value) ?? null));
   try {
-    await withTimeout(putKV(key, value, '[API /live-tracking/feibot/fdb-import]'), 5000, `KV write ${key}`);
+    await withTimeout(putKV(key, value, '[API /live-tracking/feibot/fdb-import]'), KV_WRITE_TIMEOUT_MS, `KV write ${key}`);
     logs.push({ ts: new Date().toISOString(), action: 'WRITE', key, status: 'SUCCESS', durationMs: Date.now() - startedAt, detail: `${Math.max(1, Math.round(payloadSize / 1024))} KB` });
     summary.kvRecordsWritten += 1;
     return true;
   } catch (error: any) {
-    logs.push({
-      ts: new Date().toISOString(),
-      action: 'WRITE',
-      key,
-      status: 'FAILED',
-      durationMs: Date.now() - startedAt,
-      detail: error?.message || 'KV write failed',
-    });
-    summary.errors += 1;
-    return false;
+    const firstErrorMessage = error?.message || 'KV write failed';
+    try {
+      await wait(200);
+      await withTimeout(putKV(key, value, '[API /live-tracking/feibot/fdb-import]'), KV_WRITE_TIMEOUT_MS, `KV write retry ${key}`);
+      logs.push({
+        ts: new Date().toISOString(),
+        action: 'WRITE',
+        key,
+        status: 'SUCCESS',
+        durationMs: Date.now() - startedAt,
+        detail: `${Math.max(1, Math.round(payloadSize / 1024))} KB (retried once)`,
+      });
+      summary.kvRecordsWritten += 1;
+      return true;
+    } catch (retryError: any) {
+      const failDetail = retryError?.message || firstErrorMessage;
+      logs.push({
+        ts: new Date().toISOString(),
+        action: 'WRITE',
+        key,
+        status: 'FAILED',
+        durationMs: Date.now() - startedAt,
+        detail: `${failDetail} (first attempt: ${firstErrorMessage})`,
+      });
+      summary.errors += 1;
+      if (!summary.errorMessages) summary.errorMessages = [];
+      summary.errorMessages.push(`KV write failed [${key}]: ${failDetail}`);
+      return false;
+    }
   }
 }
 
@@ -352,6 +402,8 @@ function buildBlankImportSummary(eventId: string, databaseName: string, database
       activeParticipants: 0,
     },
     kvRecordsWritten: 0,
+    errorMessages: [],
+    warningMessages: [],
     importedContests: [],
     tablesRead: 0,
     tablesIgnored: 0,
@@ -379,6 +431,8 @@ async function validateCompletedImport(eventId: string, summary: ImportSummary, 
     { key: `live:event:${eventId}:split:index`, label: 'splitIndex' },
     { key: `live:event:${eventId}:timingPoint:index`, label: 'timingPointIndex' },
     { key: `live:event:${eventId}:participant:index`, label: 'participantIndex' },
+    { key: `live:event:${eventId}:participants:index`, label: 'participantsIndex' },
+    { key: `live:event:${eventId}:providerParticipants`, label: 'providerParticipants' },
   ];
 
   let timedOut = false;
@@ -592,7 +646,7 @@ async function processImportJob(
     if (keysToDelete.size) {
       const startedDelete = Date.now();
       await batchDeleteKV(Array.from(keysToDelete), '[API /live-tracking/feibot/fdb-import]');
-      logs.push({ ts: new Date().toISOString(), action: 'DELETE', key: `event:${eventId}:* + live:event:${eventId}:*`, status: 'SUCCESS', durationMs: Date.now() - startedDelete, detail: `${keysToDelete.size} keys` });
+      logs.push({ ts: new Date().toISOString(), action: 'DELETE', key: `live:event:${eventId}:*`, status: 'SUCCESS', durationMs: Date.now() - startedDelete, detail: `${keysToDelete.size} keys` });
     }
 
     await throwIfImportCancelled(jobId);
@@ -1438,9 +1492,16 @@ async function processImportJob(
       timingValidationWarnings.forEach((warning) => console.warn('[Timing Configuration Warning]', warning));
     }
 
+    if (timingValidationWarnings.length > 0) {
+      if (!summary.warningMessages) summary.warningMessages = [];
+      summary.warningMessages.push(...timingValidationWarnings);
+    }
+
     if (timingValidationErrors.length > 0) {
       summary.errors += timingValidationErrors.length;
       summary.validationStatus = 'FAILED';
+      if (!summary.errorMessages) summary.errorMessages = [];
+      summary.errorMessages.push(...timingValidationErrors);
       console.error('Timing Configuration Validation Failed', {
         eventId,
         errorCount: timingValidationErrors.length,
@@ -1800,10 +1861,20 @@ async function processImportJob(
       userLookupFailures: Number(participantImportStats.userLookupFailures || 0),
       participantFailures: Number(participantImportStats.participantFailures || 0),
     });
+    logs.push({
+      ts: new Date().toISOString(),
+      action: 'WRITE',
+      key: 'FDB upload manifest',
+      status: 'SUCCESS',
+      durationMs: 0,
+      detail: `File ${fileName} (${Math.max(1, Math.round(fileSize / 1024))} KB), ${participants.length} parsed rows, ${staticParticipants.length} normalized participants`,
+    });
 
     const replaceExistingParticipants = options?.replaceExistingParticipants === true;
     const forceEmptyImport = options?.forceEmptyImport === true;
-    const existingLiveIndex = await getKV<any>(`live:event:${eventId}:participant:index`, 'fdb-import');
+    const existingLiveIndex =
+      (await getKV<any>(`event:${eventId}:participants:index`, 'fdb-import')) ||
+      (await getKV<any>(`live:event:${eventId}:participant:index`, 'fdb-import'));
     const existingLiveCount = Array.isArray(existingLiveIndex?.participants)
       ? existingLiveIndex.participants.length
       : Number(existingLiveIndex?.participantCount || existingLiveIndex?.count || 0);
@@ -1831,25 +1902,32 @@ async function processImportJob(
       const participantAthleteUidIndex = Object.fromEntries(Object.entries(participantIndexPayload.byAthleteUid || {}).map(([key, value]) => [key, value || null]));
       const participantNameIndex = Object.fromEntries(Object.entries(participantIndexPayload.byName || {}).map(([key, value]) => [key, value || null]));
       const participantChipIndex = Object.fromEntries(Object.entries(participantIndexPayload.byChip || {}).map(([key, value]) => [key, value || null]));
+      const providerParticipantsPayload = {
+        eventId,
+        provider: 'feibot',
+        source: 'feibot-fdb',
+        generatedAt: importedAtIso,
+        count: staticParticipants.length,
+        participants: staticParticipants,
+        importedCount: staticParticipants.length,
+      };
       console.log('[FEIBOT PARTICIPANT IMPORT][STEP 5] Writing timingParticipant', {
         eventId,
         staticParticipants: staticParticipants.length,
       });
       await throwIfImportCancelled(jobId);
-      for (let i = 0; i < staticParticipants.length; i += 200) {
-        const batch = staticParticipants.slice(i, i + 200);
+      for (let i = 0; i < staticParticipants.length; i += 50) {
+        const batch = staticParticipants.slice(i, i + 50);
         await Promise.all(batch.map((participant) => {
           const bookingId = String(participant.bookingId || '').trim();
           const participantUuid = String(participant.participantUuid || bookingId || '').trim();
-          const staticKey = `live:event:${eventId}:timingParticipant:${bookingId}`;
-          const writes = [putTrackedKV(staticKey, participant, logs, summary)];
+          const writes: Promise<boolean>[] = [];
+          if (bookingId) {
+            const staticKey = `live:event:${eventId}:timingParticipant:${bookingId}`;
+            writes.push(putTrackedKV(staticKey, participant, logs, summary));
+          }
           if (participantUuid) {
             writes.push(putTrackedKV(`live:event:${eventId}:participant:${participantUuid}`, participant, logs, summary));
-            writes.push(putTrackedKV(`live:event:${eventId}:lookup:bib:${String(participant.bib || '').trim()}`, participantUuid, logs, summary));
-            writes.push(putTrackedKV(`live:event:${eventId}:lookup:provider:${String(participant.providerUuid || '').trim()}`, participantUuid, logs, summary));
-            writes.push(putTrackedKV(`live:event:${eventId}:lookup:user:${String(participant.athleteUid || '').trim()}`, participantUuid, logs, summary));
-            writes.push(putTrackedKV(`live:event:${eventId}:lookup:chip:${String(participant.chip || '').trim()}`, participantUuid, logs, summary));
-            writes.push(putTrackedKV(`live:event:${eventId}:lookup:email:${String(participant.email || '').trim().toLowerCase()}`, participantUuid, logs, summary));
           }
           return Promise.all(writes).then(() => undefined);
         }));
@@ -1859,6 +1937,9 @@ async function processImportJob(
         eventId,
         participantIndexCount: Number(participantIndexPayload?.participantCount || 0),
       });
+      await putTrackedKV(`event:${eventId}:providerParticipants`, providerParticipantsPayload, logs, summary);
+      await putTrackedKV(`live:event:${eventId}:providerParticipants`, providerParticipantsPayload, logs, summary);
+      await putTrackedKV(`live:event:${eventId}:participants`, participantIndexPayload, logs, summary);
       await putTrackedKV(`live:event:${eventId}:participant:bib`, participantBibIndex, logs, summary);
       await putTrackedKV(`live:event:${eventId}:participant:uuid`, participantUuidIndex, logs, summary);
       await putTrackedKV(`live:event:${eventId}:participant:providerUuid`, participantProviderUuidIndex, logs, summary);
@@ -1869,6 +1950,9 @@ async function processImportJob(
       await putTrackedKV(`live:event:${eventId}:participant:contest`, participantIndexPayload.byContest, logs, summary);
       await putTrackedKV(`live:event:${eventId}:participant:ageGroup`, participantIndexPayload.byAgeGroup, logs, summary);
       await putTrackedKV(`live:event:${eventId}:participant:index`, participantIndexPayload, logs, summary);
+      await putTrackedKV(`live:event:${eventId}:participants:index`, participantIndexPayload, logs, summary);
+
+      // FDB imports are KV-only. No Firestore participant writes/deletes are performed.
     }
 
     console.log('[FEIBOT PARTICIPANT IMPORT][STEP 7] Import Complete', {
@@ -1941,11 +2025,7 @@ async function processImportJob(
       },
     });
 
-    await getFirestoreInstance()
-      .collection('liveTracking')
-      .doc(eventId)
-      .collection('importHistory')
-      .add({
+    await appendImportHistory(eventId, {
         startedAt: new Date(startedAt).toISOString(),
         completedAt: new Date().toISOString(),
         duration: summary.importDurationMs,
@@ -2022,9 +2102,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: false, message: 'eventId is required' }, { status: 400 });
     }
 
-    const db = getFirestoreInstance();
-    const liveDoc = await db.collection('liveTracking').doc(eventId).get();
-    let liveData = liveDoc.exists ? serializeValue(liveDoc.data() || {}) : {};
+    let liveData = (await getKV<any>(getImportStateKey(eventId), '[API /live-tracking/feibot/fdb-import GET]')) || {};
 
     const progress = liveData?.progress || null;
     const progressStatus = String(progress?.status || '').toUpperCase();
@@ -2078,8 +2156,7 @@ export async function GET(request: NextRequest) {
       };
     }
 
-    const historySnap = await db.collection('liveTracking').doc(eventId).collection('importHistory').orderBy('completedAt', 'desc').limit(10).get();
-    const importHistory = historySnap.docs.map((doc) => ({ id: doc.id, ...(serializeValue(doc.data() || {}) || {}) }));
+    const importHistory = ((await getKV<any[]>(getImportHistoryKey(eventId), '[API /live-tracking/feibot/fdb-import GET]')) || []).slice(0, 10);
 
     const summary = await getKV<any>(`live:event:${eventId}:import-summary:latest`, '[API /live-tracking/feibot/fdb-import GET]');
     const logs = await getKV<any[]>(`live:event:${eventId}:logs`, '[API /live-tracking/feibot/fdb-import GET]');
@@ -2105,10 +2182,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ success: false, message: 'eventId is required' }, { status: 400 });
     }
 
-    const db = getFirestoreInstance();
-    const liveRef = db.collection('liveTracking').doc(eventId);
-    const liveSnap = await liveRef.get();
-    const liveData = liveSnap.exists ? serializeValue(liveSnap.data() || {}) : {};
+    const liveData = (await getKV<any>(getImportStateKey(eventId), '[API /live-tracking/feibot/fdb-import DELETE]')) || {};
     const activeJobId = String(liveData?.activeImportJobId || liveData?.progress?.jobId || '').trim();
 
     if (activeJobId) {
@@ -2180,7 +2254,7 @@ export async function DELETE(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { jobId } = await startJob();
+  let jobId = '';
 
   try {
     const formData = await request.formData();
@@ -2191,15 +2265,15 @@ export async function POST(request: NextRequest) {
     const forceEmptyImport = String(formData.get('forceEmptyImport') || 'false') === 'true';
 
     if (!eventId) {
+      console.error('[FDB Import] 400: eventId is missing from formData', { formDataKeys: Array.from(formData.keys()) });
       return NextResponse.json({ success: false, message: 'eventId is required.' }, { status: 400 });
     }
     if (!file) {
+      console.error('[FDB Import] 400: file is missing from formData', { eventId, formDataKeys: Array.from(formData.keys()) });
       return NextResponse.json({ success: false, message: 'FDB file is required.' }, { status: 400 });
     }
 
-    const liveRef = getFirestoreInstance().collection('liveTracking').doc(eventId);
-    const liveSnap = await liveRef.get();
-    const liveData = liveSnap.exists ? serializeValue(liveSnap.data() || {}) : {};
+    const liveData = (await getKV<any>(getImportStateKey(eventId), '[API /live-tracking/feibot/fdb-import POST]')) || {};
     const progress = liveData?.progress || null;
     const progressStatus = String(progress?.status || '').toUpperCase();
     const progressUpdatedAt = progress?.updatedAt ? new Date(String(progress.updatedAt)).getTime() : 0;
@@ -2274,12 +2348,18 @@ export async function POST(request: NextRequest) {
     const lowerName = fileName.toLowerCase();
     const allowed = lowerName.endsWith('.fdb') || lowerName.endsWith('.sqlite') || lowerName.endsWith('.db');
     if (!allowed) {
+      console.error('[FDB Import] 400: invalid file extension', { eventId, fileName, lowerName });
       return NextResponse.json({ success: false, message: 'Only .fdb SQLite database files are allowed.' }, { status: 400 });
     }
 
     if (file.size > MAX_FILE_SIZE_BYTES) {
+      console.error('[FDB Import] 400: file too large', { eventId, fileName, fileSizeBytes: file.size, limitBytes: MAX_FILE_SIZE_BYTES, limitMb: MAX_FILE_SIZE_MB });
       return NextResponse.json({ success: false, message: `File exceeds the ${MAX_FILE_SIZE_MB}MB upload limit.` }, { status: 400 });
     }
+
+    // All validation passed — now start the job
+    const { jobId: newJobId } = await startJob();
+    jobId = newJobId;
 
     const bytes = Buffer.from(await file.arrayBuffer());
 
@@ -2299,11 +2379,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, message: 'FDB import started.', jobId });
   } catch (error: any) {
-    await updateJobProgress(jobId, {
-      status: 'failed',
-      progress: 100,
-      message: `FDB import failed to start: ${error.message}`,
-    } as any);
+    if (jobId) {
+      await updateJobProgress(jobId, {
+        status: 'failed',
+        progress: 100,
+        message: `FDB import failed to start: ${error.message}`,
+      } as any);
+    }
     return NextResponse.json({ success: false, message: `FDB import failed: ${error.message}` }, { status: 500 });
   }
 }

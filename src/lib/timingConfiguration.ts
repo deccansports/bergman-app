@@ -82,6 +82,79 @@ export type ResolvedTimingConfiguration = {
   provider?: string | null;
   updatedAt?: string | number | null;
   meta?: AnyRecord | null;
+  legSplitMappingsByContest?: Record<string, {
+    event_id: string;
+    contest_id: string;
+    contest_name: string;
+    legs: Array<{
+      leg_index: number;
+      leg_name: string;
+      display_order: number;
+      enabled: boolean;
+      metadata?: AnyRecord;
+    }>;
+    splits: Array<{
+      split_index: number;
+      split_name: string;
+      timing_point_id: string;
+      timing_point_name: string;
+      leg_index: number;
+      display_order: number;
+      distance?: number | null;
+      split_type?: string | null;
+      visibility?: 'visible' | 'hidden';
+      metadata?: AnyRecord;
+    }>;
+    updated_at?: string;
+    updated_by?: string;
+    version?: string;
+  }>;
+  legSplitMappingUpdatedAt?: string | null;
+  raceFlowByContest?: Record<string, {
+    event_id: string;
+    contest_id: string;
+    contest_name: string;
+    legs: Array<{
+      leg_index: number;
+      leg_name: string;
+      display_order: number;
+      enabled: boolean;
+      metadata?: AnyRecord;
+    }>;
+    splits: Array<{
+      split_index: number;
+      split_name: string;
+      timing_point_id: string;
+      timing_point_name: string;
+      leg_index: number;
+      display_order: number;
+      distance?: number | null;
+      split_type?: string | null;
+      visibility?: 'visible' | 'hidden';
+      metadata?: AnyRecord;
+    }>;
+    sections?: Array<{
+      leg_index: number;
+      leg_name: string;
+      display_order: number;
+      splits: Array<Record<string, any>>;
+    }>;
+    updated_at?: string;
+    updated_by?: string;
+    version?: string;
+  }>;
+  raceFlowTimelineByContest?: Record<string, {
+    event_id: string;
+    contest_id: string;
+    contest_name: string;
+    legs: Array<Record<string, any>>;
+    splits: Array<Record<string, any>>;
+    sections?: Array<Record<string, any>>;
+    updated_at?: string;
+    updated_by?: string;
+    version?: string;
+  }>;
+  raceFlowTimelineUpdatedAt?: string | null;
 };
 
 const LEG_ALIASES: Array<{ test: RegExp; value: string }> = [

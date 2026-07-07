@@ -30,6 +30,18 @@ const sanitizeAgeGroupLabel = (value: unknown) => {
     return label;
 };
 
+const parseContestDistanceScore = (value: unknown) => {
+    const text = String(value ?? '').trim().toLowerCase();
+    if (!text) return -1;
+    const match = text.match(/(\d+(?:\.\d+)?)\s*(km|kms|mtrs|mtr|m)/i);
+    if (!match) return -1;
+    const amount = Number(match[1]);
+    if (!Number.isFinite(amount)) return -1;
+    const unit = match[2].toLowerCase();
+    if (unit === 'm' || unit === 'mtr' || unit === 'mtrs') return amount / 1000;
+    return amount;
+};
+
 interface LeaderboardViewProps {
   athletes: LiveAthlete[];
   onAthleteSelect: (athlete: LiveAthlete) => void;
@@ -43,6 +55,9 @@ interface LeaderboardViewProps {
   setGenderFilter: (value: string) => void;
   ticketFilter: string;
   setTicketFilter: (value: string) => void;
+  getAthleteContestFilterKey?: (athlete: LiveAthlete) => string;
+  eventId?: string;
+  authHeaders?: Record<string, string>;
 }
 
 const RankDelta = ({ delta }: { delta: number | undefined }) => {
@@ -64,70 +79,74 @@ export default function LeaderboardView({
   setGenderFilter,
   ticketFilter,
   setTicketFilter,
+  getAthleteContestFilterKey: getAthleteContestFilterKeyProp,
+  eventId,
+  authHeaders = {},
 }: LeaderboardViewProps) {
-        const resolveCountry = (athlete: LiveAthlete) => String(
-            athlete.country
-            || (athlete as any)?.countryCode
-            || (athlete as any)?.country_code
-            || (athlete as any)?.countryName
-            || (athlete as any)?.countryAtRace
-            || (athlete as any)?.nationality
-            || (athlete as any)?.registration?.country
-            || (athlete as any)?.registration?.countryCode
-            || (athlete as any)?.registration?.country_code
-            || (athlete as any)?.registration?.countryName
-            || (athlete as any)?.registration?.countryAtRace
-            || (athlete as any)?.provider?.country
-            || (athlete as any)?.provider?.countryCode
-            || (athlete as any)?.provider?.countryName
-            || '',
-        ).trim();
-        const normalizeFullName = (athlete: LiveAthlete) => {
-                const fullName = String(
-                    (athlete as any)?.fullName
-                    || athlete.name
-                    || [ (athlete as any)?.firstName, (athlete as any)?.lastName ].filter(Boolean).join(' ')
-                    || athlete.bib
-                    || 'Unknown Athlete',
-                ).trim();
-                return fullName || 'Unknown Athlete';
-        };
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-        const initialsFromName = (value: string) => {
-                const initials = String(value || '')
-                    .trim()
-                    .split(/\s+/)
-                    .filter(Boolean)
-                    .slice(0, 2)
-                    .map((part) => part[0])
-                    .join('')
-                    .toUpperCase();
-                return initials || 'AT';
-        };
+  // Poll KV leaderboard endpoint if eventId provided
+  useEffect(() => {
+    if (!eventId || !authHeaders || Object.keys(authHeaders).length === 0) return;
 
-        const dedupedAthletes = useMemo(() => {
-                const byKey = new Map<string, LiveAthlete>();
-                for (const athlete of athletes) {
-                                                const contestKey = String(
-                                                    athlete?.contestUuid
-                                                    || athlete?.contest_uuid
-                                                    || athlete?.providerContestUuid
-                                                    || athlete?.ticketId
-                                                    || athlete?.liveTracking?.contestUuid
-                                                    || '',
-                                                ).trim();
-                                                const key = String(
-                                                    athlete?.participantUuid
-                                                    || athlete?.participant_uuid
-                                                    || athlete?.athleteUid
-                                                    || athlete?.id
-                                                    || [athlete?.bib, contestKey, (athlete as any)?.registration?.subCategoryId || (athlete as any)?.subCategoryId || (athlete as any)?.selectedSubCategory || '']
-                                                        .map((value) => String(value || '').trim())
-                                                        .filter(Boolean)
-                                                        .join('|')
-                                                    || athlete?.name
-                                                    || '',
-                                                ).trim();
+    const pollLeaderboard = async () => {
+      try {
+        const params = new URLSearchParams();
+        if (categoryFilter && categoryFilter !== 'all') params.append('ageGroup', categoryFilter);
+        if (genderFilter && genderFilter !== 'all') params.append('gender', genderFilter);
+        if (ticketFilter && ticketFilter !== 'all') params.append('contest', ticketFilter);
+
+        const response = await fetch(`/api/live/leaderboard/${encodeURIComponent(eventId)}?${params.toString()}`, {
+          cache: 'no-store',
+          headers: authHeaders,
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          // Athletes will be updated through the parent component's state management
+          // This just ensures we're polling fresh data from KV
+          console.log('[Leaderboard] Polled KV:', { count: data.count, timestamp: data.timestamp });
+        }
+      } catch (error) {
+        console.error('[Leaderboard] Poll error:', error);
+      }
+    };
+
+    // Poll every 2 seconds during race
+    pollLeaderboard();
+    pollIntervalRef.current = setInterval(pollLeaderboard, 2000);
+
+    return () => {
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    };
+  }, [eventId, authHeaders, categoryFilter, genderFilter, ticketFilter]);
+
+  const dedupedAthletes = useMemo(() => {
+    const byKey = new Map<string, LiveAthlete>();
+    for (const athlete of athletes) {
+                        const contestKey = String(
+                            athlete?.contestUuid
+                            || athlete?.contest_uuid
+                            || athlete?.providerContestUuid
+                            || athlete?.ticketId
+                            || athlete?.liveTracking?.contestUuid
+                            || '',
+                        ).trim();
+                        const bib = String(athlete?.bib || athlete?.bibNumber || '').trim();
+                        const key = bib
+                          ? `bib:${bib.toLowerCase()}${contestKey ? `:${contestKey.toLowerCase()}` : ''}`
+                          : String(
+                              athlete?.participantUuid
+                              || athlete?.participant_uuid
+                              || athlete?.athleteUid
+                              || athlete?.id
+                              || [contestKey, (athlete as any)?.registration?.subCategoryId || (athlete as any)?.subCategoryId || (athlete as any)?.selectedSubCategory || '']
+                                  .map((value) => String(value || '').trim())
+                                  .filter(Boolean)
+                                  .join('|')
+                              || athlete?.name
+                              || '',
+                            ).trim();
                         if (!key) continue;
                         if (!byKey.has(key)) {
                                 byKey.set(key, athlete);
@@ -138,14 +157,54 @@ export default function LeaderboardView({
                         const nextScore = Object.values(athlete || {}).filter((value) => value !== null && value !== undefined && value !== '' && !(Array.isArray(value) && value.length === 0)).length;
                         if (nextScore > existingScore) byKey.set(key, athlete);
                 }
-                                return Array.from(byKey.values()).filter((athlete) => {
-                                      const bib = String(athlete.bib || (athlete as any).bibNumber || '').trim();
-                                    const ageGroup = String(athlete.ageGroupName || athlete.age_group_name || athlete.ageGroup || '').trim();
-                                    return Boolean(bib) && bib !== '—' && ageGroup && ageGroup !== 'Unknown' && ageGroup !== 'null';
-                                });
+                                                                return Array.from(byKey.values()).filter((athlete) => {
+                                                                            const bib = String(athlete.bib || (athlete as any).bibNumber || '').trim();
+                                                                        return Boolean(bib) && bib !== '—';
+                                                                });
         }, [athletes]);
 
-                const resolveContestLabel = useCallback((athlete: LiveAthlete) => {
+  const normalizeFullName = (athlete: LiveAthlete) => {
+    const fullName = String(
+      (athlete as any)?.fullName
+      || athlete.name
+      || [(athlete as any)?.firstName, (athlete as any)?.lastName].filter(Boolean).join(' ')
+      || athlete.bib
+      || 'Unknown Athlete',
+    ).trim();
+    return fullName || 'Unknown Athlete';
+  };
+
+  const initialsFromName = (value: string) => {
+    const initials = String(value || '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0])
+      .join('')
+      .toUpperCase();
+    return initials || 'AT';
+  };
+
+  const resolveCountry = (athlete: LiveAthlete) => String(
+    athlete.country
+    || (athlete as any)?.countryCode
+    || (athlete as any)?.country_code
+    || (athlete as any)?.countryName
+    || (athlete as any)?.countryAtRace
+    || (athlete as any)?.nationality
+    || (athlete as any)?.registration?.country
+    || (athlete as any)?.registration?.countryCode
+    || (athlete as any)?.registration?.country_code
+    || (athlete as any)?.registration?.countryName
+    || (athlete as any)?.registration?.countryAtRace
+    || (athlete as any)?.provider?.country
+    || (athlete as any)?.provider?.countryCode
+    || (athlete as any)?.provider?.countryName
+    || '',
+  ).trim();
+
+  const resolveContestLabel = useCallback((athlete: LiveAthlete) => {
                     const contestUuid = getContestUuid(athlete);
                     const contest = contestUuid ? (contestByUuid as any)?.[contestUuid.toLowerCase()] : null;
                     const contestFromAthlete = String(athlete.contestName || athlete.contest_name || athlete.providerContestName || '').trim();
@@ -187,6 +246,11 @@ export default function LeaderboardView({
             }, [ageGroupByUuid]);
 
         const getAthleteContestFilterKey = useCallback((athlete: LiveAthlete) => {
+                        // Use the prop function if provided (more reliable as it uses resolveAthleteTicketIdentity)
+                        if (getAthleteContestFilterKeyProp) {
+                            return getAthleteContestFilterKeyProp(athlete);
+                        }
+
                         const ticketId = String(athlete.ticketId || (athlete as any)?.registration?.ticketId || (athlete as any)?.provider?.ticketId || '').trim();
             const subCategoryId = String(
                 (athlete as any)?.subCategoryId
@@ -216,7 +280,7 @@ export default function LeaderboardView({
                             return subName && (contestLabel.includes(subName) || subName.includes(contestLabel));
                         });
                         return matchedTicketId ? (matchedSub ? `${matchedTicketId}:${String(matchedSub.id || '').trim()}` : matchedTicketId) : '';
-        }, [resolveContestLabel, tickets]);
+        }, [resolveContestLabel, tickets, getAthleteContestFilterKeyProp]);
 
     const getGenderLabel = (athlete: LiveAthlete) => {
         const raw = String(athlete.gender || (athlete as any)?.registration?.gender || (athlete as any)?.provider?.gender || '').trim().toLowerCase();
@@ -227,48 +291,165 @@ export default function LeaderboardView({
 
         const uniqueAgeGroups = useMemo(() => {
         // Filter athletes by selected contest first, then get unique categories
-        const filteredByTicket = ticketFilter === 'all' 
-            ? dedupedAthletes 
-                        : dedupedAthletes.filter((a) => getAthleteContestFilterKey(a) === ticketFilter || a.ticketId === ticketFilter);
-        
+        const filteredByTicket = ticketFilter === 'all'
+            ? dedupedAthletes
+            : dedupedAthletes.filter((a) => {
+                const athleteKey = getAthleteContestFilterKey(a);
+                if (athleteKey === ticketFilter) return true;
+
+                if (ticketFilter.includes(':') && !athleteKey.includes(':')) {
+                    const colonIndex = ticketFilter.indexOf(':');
+                    const parentId = ticketFilter.slice(0, colonIndex);
+                    const subId = ticketFilter.slice(colonIndex + 1);
+                    if (athleteKey !== parentId) return false;
+                    const ticket = tickets.find(t => String(t.id) === parentId);
+                    const subCategories = Array.isArray((ticket as any)?.subCategories) ? (ticket as any).subCategories : [];
+                    const sub = subCategories.find((s: any) => String(s?.id || '').trim() === subId);
+                    if (!sub) return false;
+                    const athleteLabel = resolveContestLabel(a).toLowerCase();
+                    const subLabels = [sub?.id, sub?.name, sub?.title, sub?.label]
+                        .map((v: any) => String(v || '').trim().toLowerCase())
+                        .filter(Boolean);
+                    return subLabels.some((sl: string) => athleteLabel.includes(sl) || sl.includes(athleteLabel));
+                }
+
+                if (!ticketFilter.includes(':')) {
+                    return athleteKey === ticketFilter || athleteKey.startsWith(ticketFilter + ':');
+                }
+                return false;
+            });
+
         const cats = new Set(filteredByTicket.map(getAgeGroupLabel).filter((cat): cat is string => !!cat && cat !== 'Unknown'));
         return ['all', ...Array.from(cats).sort()];
-    }, [dedupedAthletes, ticketFilter, getAthleteContestFilterKey, getAgeGroupLabel]);
+    }, [dedupedAthletes, ticketFilter, getAthleteContestFilterKey, getAgeGroupLabel, tickets, resolveContestLabel]);
 
         const availableTickets = useMemo(() => {
-                const values: Array<{ id: string; label: string }> = [];
+                const values: Array<{ id: string; label: string; order: number }> = [];
+                const seen = new Set<string>();
+
+                for (const athlete of dedupedAthletes) {
+                    let key = getAthleteContestFilterKey(athlete);
+                    if (!key) continue;
+                    const label = String(resolveContestLabel(athlete) || '').trim();
+
+                    // If the key resolved to just a parent ticket (no colon), try to map it
+                    // to a specific sub-category using the athlete's contest label.
+                    // This handles cases where the athlete data lacks an explicit subCategoryId.
+                    if (!key.includes(':')) {
+                        const ticket = tickets.find(t => String(t.id) === key);
+                        const subCategories = Array.isArray((ticket as any)?.subCategories) ? (ticket as any).subCategories : [];
+                        if (subCategories.length > 0 && label) {
+                            const labelLower = label.toLowerCase();
+                            const matchedSub = subCategories.find((sub: any) => {
+                                const subLabels = [sub?.id, sub?.name, sub?.title, sub?.label]
+                                    .map((v: any) => String(v || '').trim().toLowerCase())
+                                    .filter(Boolean);
+                                return subLabels.some((sl: string) => labelLower.includes(sl) || sl.includes(labelLower));
+                            });
+                            if (matchedSub?.id) {
+                                key = `${key}:${String(matchedSub.id).trim()}`;
+                            }
+                        }
+                    }
+
+                    const dedupeKey = `${key.toLowerCase()}::${label.toLowerCase()}`;
+                    if (seen.has(dedupeKey)) continue;
+                    seen.add(dedupeKey);
+                    values.push({
+                        id: key,
+                        label: label || 'Contest',
+                        order: Number((athlete as any)?.rank || values.length + 1),
+                    });
+                }
+
+                if (values.length > 0) {
+                    return values;
+                }
+
                 for (const ticket of tickets.filter((t) => t.id && t.ticketName)) {
                     const subCategories = Array.isArray((ticket as any)?.subCategories) ? (ticket as any).subCategories : [];
                     if (subCategories.length === 0) {
                         values.push({
                             id: String(ticket.id),
                             label: String(ticket.ticketName || 'Contest').trim() || 'Contest',
+                            order: Number((ticket as any)?.order || 0),
                         });
                         continue;
                     }
 
                     for (const sub of subCategories) {
                         const subId = String(sub?.id || '').trim();
-                        const subName = String(sub?.name || 'Sub Category').trim() || 'Sub Category';
+                        const subName = String(sub?.name || sub?.title || sub?.label || 'Sub Category').trim() || 'Sub Category';
                         if (!subId) continue;
                         values.push({
                             id: `${ticket.id}:${subId}`,
-                            label: `${String(ticket.ticketName || '').trim()} · ${subName}`,
+                            label: `${String(ticket.ticketName || '').trim()} - ${subName}`,
+                            order: Number(sub?.order ?? ticket.order ?? 0),
                         });
                     }
                 }
                 return values;
-    }, [tickets]);
+    }, [dedupedAthletes, getAthleteContestFilterKey, resolveContestLabel, tickets]);
 
     const contestOptions = useMemo(() => {
         const seen = new Set<string>();
-                return availableTickets.filter((item) => {
-                    const key = `${item.id.toLowerCase()}::${item.label.toLowerCase()}`;
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-    }, [availableTickets]);
+        const seenLabels = new Set<string>();
+        
+        // First, identify parent ticket IDs that have sub-categories (from both availableTickets AND tickets prop)
+        const parentTicketsWithSubs = new Set<string>();
+        
+        // From availableTickets
+        for (const item of availableTickets) {
+            if (item.id.includes(':')) {
+                const parentId = item.id.split(':')[0];
+                parentTicketsWithSubs.add(parentId);
+            }
+        }
+        
+        // From tickets prop - include parents that have sub-categories even if no athletes exist
+        for (const ticket of tickets) {
+            const subCategories = Array.isArray((ticket as any)?.subCategories) ? (ticket as any).subCategories : [];
+            if (subCategories.length > 0) {
+                parentTicketsWithSubs.add(String(ticket.id));
+            }
+        }
+        
+        return availableTickets
+                    .sort((a, b) => {
+                        const distanceA = parseContestDistanceScore(a.label);
+                        const distanceB = parseContestDistanceScore(b.label);
+                        const aHasDistance = distanceA >= 0;
+                        const bHasDistance = distanceB >= 0;
+                        if (aHasDistance && bHasDistance && distanceA !== distanceB) return distanceB - distanceA;
+                        if (aHasDistance !== bHasDistance) return aHasDistance ? -1 : 1;
+                        return a.label.localeCompare(b.label);
+                    })
+                    .filter((item) => {
+                        // Filter out parent ticket IDs when sub-categories exist (Swimathon only shows sub-categories)
+                        if (parentTicketsWithSubs.has(item.id) && !item.id.includes(':')) {
+                            return false;
+                        }
+                        
+                        const key = `${item.id.toLowerCase()}::${item.label.toLowerCase()}`;
+                        if (seen.has(key)) return false;
+                        const labelKey = item.label.trim().toLowerCase();
+                        if (seenLabels.has(labelKey)) return false;
+                        seen.add(key);
+                        seenLabels.add(labelKey);
+                        return true;
+                    })
+                    .map(({ order, ...item }) => item);
+    }, [availableTickets, tickets]);
+
+        useEffect(() => {
+            if (contestOptions.length === 0) return;
+
+            if (ticketFilter === 'all') return;
+            const hasCurrentSelection = contestOptions.some((option) => option.id === ticketFilter);
+            if (!hasCurrentSelection) {
+                setTicketFilter('all');
+            }
+        }, [contestOptions, ticketFilter, setTicketFilter]);
 
     const rankedAthletes = useMemo(() => {
         const legOrder: (Leg | 'NOT_STARTED' | 'FINISHED')[] = ['FINISHED', 'FINISH', 'RUN2', 'RUN', 'T2', 'BIKE', 'T1', 'SWIM', 'RUN1', 'NOT_STARTED'];
@@ -300,26 +481,73 @@ export default function LeaderboardView({
     }, [dedupedAthletes]);
 
     const filteredAthletes = useMemo(() => {
+        const selectedContestLabel = contestOptions.find((option) => option.id === ticketFilter)?.label || '';
+        const selectedContestDistance = parseContestDistanceScore(selectedContestLabel);
+
+        const hasCompatibleDistance = (athlete: LiveAthlete) => {
+            if (selectedContestDistance < 0) return true;
+            const athleteContestDistance = parseContestDistanceScore(resolveContestLabel(athlete));
+            if (athleteContestDistance < 0) return true;
+            return Math.abs(athleteContestDistance - selectedContestDistance) < 0.001;
+        };
+
         const filtered = rankedAthletes
-            .filter((a) => ticketFilter === 'all' || getAthleteContestFilterKey(a) === ticketFilter || a.ticketId === ticketFilter)
+            .filter((a) => {
+                if (ticketFilter === 'all') return true;
+
+                const athleteKey = getAthleteContestFilterKey(a);
+                // Exact match on contest key (includes sub-category if applicable)
+                if (athleteKey === ticketFilter) return hasCompatibleDistance(a);
+
+                // If ticketFilter has sub-category but athlete key is parent-only,
+                // try label-based sub-category matching as a fallback.
+                if (ticketFilter.includes(':') && !athleteKey.includes(':')) {
+                    const colonIndex = ticketFilter.indexOf(':');
+                    const parentId = ticketFilter.slice(0, colonIndex);
+                    const subId = ticketFilter.slice(colonIndex + 1);
+                    // Must at least belong to the same parent ticket
+                    if (athleteKey !== parentId) return false;
+                    // Find the sub-category entry from tickets prop
+                    const ticket = tickets.find(t => String(t.id) === parentId);
+                    const subCategories = Array.isArray((ticket as any)?.subCategories) ? (ticket as any).subCategories : [];
+                    const sub = subCategories.find((s: any) => String(s?.id || '').trim() === subId);
+                    if (!sub) return false;
+                    // Compare the athlete's contest label against the sub-category names
+                    const athleteLabel = resolveContestLabel(a).toLowerCase();
+                    const subLabels = [sub?.id, sub?.name, sub?.title, sub?.label]
+                        .map((v: any) => String(v || '').trim().toLowerCase())
+                        .filter(Boolean);
+                    const labelMatch = subLabels.some((sl: string) => athleteLabel.includes(sl) || sl.includes(athleteLabel));
+                    return labelMatch && hasCompatibleDistance(a);
+                }
+
+                // Only allow parent-level match if sub-categories don't exist
+                if (!ticketFilter.includes(':') && athleteKey === ticketFilter) return hasCompatibleDistance(a);
+
+                return false;
+            })
             .filter(a => categoryFilter === 'all' || getAgeGroupLabel(a) === categoryFilter)
             .filter(a => genderFilter === 'all' || getGenderLabel(a) === genderFilter);
-        
+
         return filtered.map((athlete, index) => ({...athlete, rank: index + 1}));
 
-    }, [rankedAthletes, categoryFilter, genderFilter, ticketFilter, getAgeGroupLabel, getAthleteContestFilterKey]);
+    }, [rankedAthletes, categoryFilter, genderFilter, ticketFilter, getAgeGroupLabel, getAthleteContestFilterKey, tickets, resolveContestLabel, contestOptions]);
 
     const leader = filteredAthletes[0];
 
     return (
         <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <Select value={ticketFilter} onValueChange={setTicketFilter}>
-                    <SelectTrigger><SelectValue placeholder="Contest" /></SelectTrigger>
-                    <SelectContent>
+                    <SelectTrigger className="h-11 rounded-xl border border-border bg-background font-bold text-left shadow-sm ring-1 ring-transparent focus:ring-2 focus:ring-primary/20">
+                        <SelectValue placeholder="All Contests" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[300px] overflow-y-auto">
                         <SelectItem value="all">All Contests</SelectItem>
-                        {contestOptions.map(ticket => (
-                            <SelectItem key={ticket.id} value={ticket.id}>{ticket.label}</SelectItem>
+                        {contestOptions.map((ticket) => (
+                            <SelectItem key={ticket.id} value={ticket.id} title={ticket.label}>
+                                {ticket.label}
+                            </SelectItem>
                         ))}
                     </SelectContent>
                 </Select>
@@ -340,17 +568,17 @@ export default function LeaderboardView({
                     </SelectContent>
                 </Select>
             </div>
-            <div className="overflow-x-auto">
+                        <div className="max-h-[70vh] overflow-auto rounded-2xl border border-border bg-background shadow-sm">
               <Table>
                   <TableHeader>
                     <TableRow>
-                        <TableHead>Rank</TableHead>
-                        <TableHead>Athlete</TableHead>
-                        <TableHead>Contest</TableHead>
-                        <TableHead>Age Group</TableHead>
-                        <TableHead>Current Leg</TableHead>
-                        <TableHead>Gap</TableHead>
-                        <TableHead>Δ</TableHead>
+                                                <TableHead className="sticky top-0 z-10 bg-background">Rank</TableHead>
+                                                <TableHead className="sticky top-0 z-10 bg-background">Athlete</TableHead>
+                                                <TableHead className="sticky top-0 z-10 bg-background">Contest</TableHead>
+                                                <TableHead className="sticky top-0 z-10 bg-background">Age Group</TableHead>
+                                                <TableHead className="sticky top-0 z-10 bg-background">Current Leg</TableHead>
+                                                <TableHead className="sticky top-0 z-10 bg-background">Gap</TableHead>
+                                                <TableHead className="sticky top-0 z-10 bg-background">Δ</TableHead>
                     </TableRow>
                   </TableHeader>
                   <AnimatePresence>

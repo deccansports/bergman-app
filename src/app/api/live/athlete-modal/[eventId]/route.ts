@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getKV } from '@/lib/cloudflare/kv';
+import { getKV, listKVByPrefix } from '@/lib/cloudflare/kv';
 import { loadParticipantPublicView } from '@/lib/liveTrackingParticipantStore';
-import { canAccessPrivateLiveTracking, getParticipantLiveTrackingPrivacy, resolveLiveTrackingAccess } from '@/lib/liveTrackingPrivacy';
+import { canAccessPrivateLiveTracking, getParticipantLiveTrackingPrivacy, maskAnonymousAthlete } from '@/lib/liveTrackingPrivacy';
+import { resolveLiveTrackingAccess } from '@/lib/liveTrackingAccess';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -278,7 +279,64 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
       return NextResponse.json({ success: false, eventId, message: 'Course configuration missing' }, { status: 500 });
     }
 
-    const timingConfiguration = buildTimingConfigurationFromCourseIndex(courseIndex);
+    const timingConfiguration = buildTimingConfigurationFromCourseIndex(courseIndex) as any;
+    const timingSnapshot = await getKV<any>(`live:event:${eventId}:timingConfiguration`, 'api-live-athlete-modal').catch(() => null);
+    if (timingSnapshot && typeof timingSnapshot === 'object') {
+      timingConfiguration.legSplitMappingsByContest = {
+        ...(timingConfiguration.legSplitMappingsByContest || {}),
+        ...(timingSnapshot.legSplitMappingsByContest && typeof timingSnapshot.legSplitMappingsByContest === 'object' ? timingSnapshot.legSplitMappingsByContest : {}),
+      };
+      timingConfiguration.raceFlowByContest = {
+        ...(timingConfiguration.raceFlowByContest || {}),
+        ...(timingSnapshot.raceFlowByContest && typeof timingSnapshot.raceFlowByContest === 'object' ? timingSnapshot.raceFlowByContest : {}),
+      };
+      timingConfiguration.raceFlowTimelineByContest = {
+        ...(timingConfiguration.raceFlowTimelineByContest || {}),
+        ...(timingSnapshot.raceFlowTimelineByContest && typeof timingSnapshot.raceFlowTimelineByContest === 'object' ? timingSnapshot.raceFlowTimelineByContest : {}),
+      };
+      timingConfiguration.legSplitMappingUpdatedAt = timingSnapshot.legSplitMappingUpdatedAt || timingConfiguration.legSplitMappingUpdatedAt || null;
+      timingConfiguration.raceFlowTimelineUpdatedAt = timingSnapshot.raceFlowTimelineUpdatedAt || timingConfiguration.raceFlowTimelineUpdatedAt || null;
+    }
+    const savedMappingsByContest: Record<string, any> = {};
+
+    const mappingKeys = await listKVByPrefix(`live:event:${eventId}:contest:`, 'api-live-athlete-modal').catch(() => []);
+    const legSplitMappingKeys = mappingKeys.filter((key) => key.includes(':leg-split-mapping'));
+
+    await Promise.all(legSplitMappingKeys.map(async (key) => {
+      const savedMapping = await getKV<any>(key, 'api-live-athlete-modal').catch(() => null);
+      if (!savedMapping || typeof savedMapping !== 'object') return;
+
+      const contestCandidates = [
+        savedMapping?.contest_id,
+        savedMapping?.contest_uuid,
+        savedMapping?.contestId,
+        savedMapping?.contestUuid,
+        savedMapping?.contest_name,
+        savedMapping?.contestName,
+      ]
+        .map((value) => normalize(value))
+        .filter(Boolean);
+
+      for (const candidate of contestCandidates) {
+        savedMappingsByContest[candidate] = savedMapping;
+        savedMappingsByContest[candidate.toLowerCase()] = savedMapping;
+      }
+    }));
+
+    timingConfiguration.legSplitMappingsByContest = {
+      ...(timingConfiguration.legSplitMappingsByContest || {}),
+      ...savedMappingsByContest,
+    };
+    timingConfiguration.raceFlowByContest = {
+      ...(timingConfiguration.raceFlowByContest || {}),
+      ...savedMappingsByContest,
+    };
+    timingConfiguration.raceFlowTimelineByContest = {
+      ...(timingConfiguration.raceFlowTimelineByContest || {}),
+      ...savedMappingsByContest,
+    };
+    timingConfiguration.legSplitMappingUpdatedAt = new Date().toISOString();
+    timingConfiguration.raceFlowTimelineUpdatedAt = new Date().toISOString();
     const courseSummary = summarizeContestCourse(contestContext.contest);
     const timingStarted = Boolean(
       resolved?.participantLive?.startTime
@@ -321,15 +379,24 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
       distanceRemainingKm,
     });
 
+    const athletePayload = privacy === 'ANONYMOUS' && access.isPublic
+      ? maskAnonymousAthlete({
+          ...resolved.merged,
+          profile: null,
+          registration: resolved.participant,
+          participantLive: resolved.participantLive,
+        })
+      : {
+          ...resolved.merged,
+          profile: null,
+          registration: resolved.participant,
+          participantLive: resolved.participantLive,
+        };
+
     return NextResponse.json({
       success: true,
       eventId,
-      athlete: {
-        ...resolved.merged,
-        profile: null,
-        registration: resolved.participant,
-        participantLive: resolved.participantLive,
-      },
+      athlete: athletePayload,
       contestContext,
       contestDefinition: contestContext.contest,
       timingConfiguration,

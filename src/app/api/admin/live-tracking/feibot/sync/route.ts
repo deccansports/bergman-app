@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { FieldValue } from 'firebase-admin/firestore';
 
 import { getFirestoreInstance } from '@/lib/firebaseAdmin';
-import { putKV } from '@/lib/cloudflare/kv';
+import { batchDeleteKV, getKV, listKVByPrefix, putKV } from '@/lib/cloudflare/kv';
 import { callFeibotAPIWithCredentialFallback } from '@/lib/feibot-integration/api-client';
 import { syncFeibotCloudEventInfo } from '@/lib/feibot-integration/cloud-event-sync';
 import { syncFeibotLiveTimingToKv } from '@/lib/feibot-integration/live-timing-worker';
@@ -22,10 +22,85 @@ type StepResult = {
   warning?: string | null;
   error?: string | null;
   lastSync: string;
+  details?: Record<string, any>;
+};
+
+type SyncLogEntry = {
+  id: string;
+  timestamp: string;
+  eventId: string;
+  action: SyncAction;
+  clearExisting: boolean;
+  successCount: number;
+  warningCount: number;
+  errorCount: number;
+  importedRecords: number;
+  participantCount: number;
+  imported: number;
+  lookupCount: number;
+  steps: StepResult[];
+  cleanupSummary?: any;
+  diagnostics?: Record<string, any>;
 };
 
 function normalize(value: unknown) {
   return String(value ?? '').trim();
+}
+
+const FEIBOT_LIVE_EVENT_PREFIXES = [
+  'timingConfiguration',
+  'contest:index',
+  'timingPoint:index',
+  'split:index',
+  'leg:index',
+  'ageGroup:index',
+  'providerParticipants',
+  'participants',
+  'participant:',
+  'participant:index',
+  'participantLookup:',
+  'participantMappings',
+  'participant-mapping',
+  'participant-mapping-by-uid',
+  'participant-mapping-by-provider',
+  'participant-mapping-review',
+  'providerLookup',
+  'providerIndex',
+  'provider:',
+  'import-summary',
+  'fdb-import:',
+  'logs',
+];
+
+async function clearFeibotLiveEventData(eventId: string) {
+  const allKeys = await listKVByPrefix(`live:event:${eventId}:`, '[admin/feibot/sync:clear]');
+  const keysToDelete = allKeys.filter((key) => {
+    const prefix = `live:event:${eventId}:`;
+    if (!key.startsWith(prefix)) return false;
+    const suffix = key.slice(prefix.length);
+    return FEIBOT_LIVE_EVENT_PREFIXES.some((allowed) => suffix === allowed || suffix.startsWith(allowed));
+  });
+
+  if (!keysToDelete.length) {
+    return {
+      scanned: allKeys.length,
+      targeted: 0,
+      deleted: 0,
+      failed: 0,
+      sample: [] as string[],
+      errors: [] as string[],
+    };
+  }
+
+  const deleted = await batchDeleteKV(keysToDelete, '[admin/feibot/sync:clear]', 12);
+  return {
+    scanned: allKeys.length,
+    targeted: keysToDelete.length,
+    deleted: deleted.successful,
+    failed: deleted.failed,
+    sample: keysToDelete.slice(0, 20),
+    errors: deleted.errors.slice(0, 20),
+  };
 }
 
 function countRecords(value: any): number {
@@ -33,6 +108,18 @@ function countRecords(value: any): number {
   if (value && Array.isArray(value?.data)) return value.data.length;
   if (value && typeof value === 'object') return Object.keys(value).length;
   return 0;
+}
+
+function countObjectKeys(value: unknown): number {
+  return value && typeof value === 'object' ? Object.keys(value as Record<string, unknown>).length : 0;
+}
+
+function firstFiniteNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return null;
 }
 
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3, baseDelayMs = 400): Promise<T> {
@@ -178,6 +265,8 @@ export async function POST(request: NextRequest) {
     const eventId = normalize(body?.eventId);
     const action = normalize(body?.action || 'everything').toLowerCase() as SyncAction;
     const manualEventUuid = normalize(body?.eventUuid);
+    const clearExisting = body?.clearExisting === true || body?.resetExisting === true || body?.clearFeibotLiveEvent === true;
+    const persistToFirestore = body?.persistToFirestore === true;
 
     if (!eventId) {
       return NextResponse.json({ success: false, message: 'eventId is required.' }, { status: 400 });
@@ -220,6 +309,7 @@ export async function POST(request: NextRequest) {
 
     const nowIso = new Date().toISOString();
     const steps: StepResult[] = [];
+    const cleanupSummary = clearExisting ? await clearFeibotLiveEventData(eventId) : null;
 
     const runConfigStep = async () => {
       const startedAt = Date.now();
@@ -242,15 +332,40 @@ export async function POST(request: NextRequest) {
       }
 
       const contestsCount = Number((result as any)?.snapshot?.contestsCount || 0);
+      const participantsCount = Number(
+        (result as any)?.snapshot?.participantsCount
+        || (result as any)?.snapshot?.diagnostics?.participants?.importedRows
+        || 0,
+      );
+      const downloadedParticipantsCount = Number(
+        (result as any)?.snapshot?.downloadedParticipantsCount
+        || (result as any)?.snapshot?.diagnostics?.participants?.downloadedRows
+        || 0,
+      );
+      const duplicateByParticipantUuid = Number((result as any)?.snapshot?.stats?.duplicateByParticipantUuid || 0);
+      const excludedByStatus = Number((result as any)?.snapshot?.stats?.excludedByStatus || 0);
+      const warning = duplicateByParticipantUuid > 0
+        ? `Cloud rows had duplicates: ${duplicateByParticipantUuid} rows merged by participant_uuid.`
+        : null;
       return {
         key: 'config',
         ok: true,
-        status: 'success',
+        status: warning ? 'warning' : 'success',
         durationMs: Date.now() - startedAt,
-        importedRecords: contestsCount,
-        warning: null,
+        importedRecords: Math.max(contestsCount, participantsCount),
+        warning,
         error: null,
         lastSync: new Date().toISOString(),
+        details: {
+          contestsCount,
+          participantsCount,
+          downloadedParticipantsCount,
+          importedParticipants: participantsCount,
+          downloadedParticipants: downloadedParticipantsCount,
+          skippedParticipants: Math.max(downloadedParticipantsCount - participantsCount, 0),
+          duplicateByParticipantUuid,
+          excludedByStatus,
+        },
       } as StepResult;
     };
 
@@ -313,18 +428,89 @@ export async function POST(request: NextRequest) {
     const errorCount = steps.filter((step) => !step.ok).length;
     const warningCount = steps.filter((step) => step.status === 'warning').length;
 
+    const configStep = steps.find((step) => step.key === 'config');
+    const configDetails = (configStep?.details || {}) as Record<string, any>;
+    const downloaded = firstFiniteNumber(
+      configDetails.downloadedParticipants,
+      configDetails.participantRowsRaw,
+      configDetails.downloadedRows,
+      configDetails.total,
+    ) ?? 0;
+    const imported = firstFiniteNumber(
+      configDetails.importedParticipants,
+      configDetails.participantsCount,
+      configDetails.participantRows,
+      configDetails.importedRows,
+      configDetails.total,
+    ) ?? 0;
+
+    const providerParticipantsIndex = await getKV<Record<string, any>>(`live:event:${eventId}:providerParticipants:index`, '[admin/feibot/sync]');
+    const lookupCount =
+      countObjectKeys(providerParticipantsIndex?.byBib)
+      + countObjectKeys(providerParticipantsIndex?.byProviderUuid)
+      + countObjectKeys(providerParticipantsIndex?.byChip)
+      + countObjectKeys(providerParticipantsIndex?.byEmail);
+
+    const skipped = Math.max(downloaded - imported, 0);
+    const durationMs = steps.reduce((sum, step) => sum + Number(step.durationMs || 0), 0);
+
     const dashboard = {
       eventId,
       action,
+      clearExisting,
+      cleanupSummary,
       source: 'feibot-cloud-api',
       lastSync: nowIso,
       successCount,
       errorCount,
       warningCount,
       importedRecords: steps.reduce((sum, step) => sum + Number(step.importedRecords || 0), 0),
+      participantCount: imported,
+      imported,
+      lookupCount,
+      diagnostics: {
+        downloaded,
+        imported,
+        participantKvWrites: imported,
+        lookupWrites: lookupCount,
+        skipped,
+        durationMs,
+      },
       steps,
       updatedAt: nowIso,
     };
+
+    console.log('[FEIBOT SYNC] Import Summary', {
+      eventId,
+      action,
+      downloaded,
+      imported,
+      participantKvWrites: imported,
+      lookupWrites: lookupCount,
+      skipped,
+      durationMs,
+    });
+
+    const syncLogKey = `live:event:${eventId}:provider:sync-logs`;
+    const existingLogs = (await getKV<SyncLogEntry[]>(syncLogKey, '[admin/feibot/sync]')) || [];
+    const nextLog: SyncLogEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      timestamp: nowIso,
+      eventId,
+      action,
+      clearExisting,
+      successCount,
+      warningCount,
+      errorCount,
+      importedRecords: Number(dashboard.importedRecords || 0),
+      participantCount: Number(dashboard.participantCount || 0),
+      imported: Number(dashboard.imported || 0),
+      lookupCount: Number(dashboard.lookupCount || 0),
+      steps,
+      cleanupSummary,
+      diagnostics: dashboard.diagnostics,
+    };
+    const mergedLogs = [nextLog, ...existingLogs].slice(0, 100);
 
     if (action === 'config' && steps.some((step) => step.key === 'config' && !step.ok)) {
       return NextResponse.json(
@@ -345,24 +531,60 @@ export async function POST(request: NextRequest) {
     }
 
     await putKV(`live:event:${eventId}:provider:sync-dashboard`, dashboard, '[admin/feibot/sync]');
+    await putKV(syncLogKey, mergedLogs, '[admin/feibot/sync]');
 
-    const db = getFirestoreInstance();
-    await db.collection('liveTracking').doc(eventId).set({
-      feibotSyncDashboard: {
-        ...dashboard,
+    if (persistToFirestore) {
+      const db = getFirestoreInstance();
+      await db.collection('liveTracking').doc(eventId).set({
+        feibotSyncDashboard: {
+          ...dashboard,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        feibotSyncLogs: mergedLogs.slice(0, 20),
         updatedAt: FieldValue.serverTimestamp(),
-      },
-      updatedAt: FieldValue.serverTimestamp(),
-    }, { merge: true });
+      }, { merge: true });
+    }
 
     return NextResponse.json({
       success: errorCount === 0,
       eventId,
       action,
+      participantCount: Number(dashboard.participantCount || 0),
+      imported: Number(dashboard.imported || 0),
+      lookupCount: Number(dashboard.lookupCount || 0),
+      diagnostics: dashboard.diagnostics,
       dashboard,
       message: errorCount === 0 ? 'Feibot sync completed.' : 'Feibot sync completed with errors.',
     }, { status: errorCount === 0 ? 200 : 207 });
   } catch (error: any) {
     return NextResponse.json({ success: false, message: error?.message || 'Failed to run Feibot sync.' }, { status: 500 });
+  }
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    const eventId = normalize(request.nextUrl.searchParams.get('eventId'));
+    const limit = Math.max(1, Math.min(200, Number(request.nextUrl.searchParams.get('limit') || '100') || 100));
+
+    if (!eventId) {
+      return NextResponse.json({ success: false, message: 'eventId is required.' }, { status: 400 });
+    }
+
+    const [dashboard, logs] = await Promise.all([
+      getKV<Record<string, any>>(`live:event:${eventId}:provider:sync-dashboard`, '[admin/feibot/sync:get]'),
+      getKV<SyncLogEntry[]>(`live:event:${eventId}:provider:sync-logs`, '[admin/feibot/sync:get]'),
+    ]);
+
+    const recentLogs = Array.isArray(logs) ? logs.slice(0, limit) : [];
+    return NextResponse.json({
+      success: true,
+      eventId,
+      dashboard: dashboard || null,
+      logs: recentLogs,
+      lastCloudSyncAt: dashboard?.updatedAt || recentLogs[0]?.timestamp || null,
+      count: recentLogs.length,
+    });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, message: error?.message || 'Failed to load Feibot sync logs.' }, { status: 500 });
   }
 }

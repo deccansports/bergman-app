@@ -84,13 +84,33 @@ export type ParticipantIndexPayload = {
 
 export type ParticipantImportStats = {
   downloaded: number;
+  excludedByStatus: number;
   normalized: number;
   matchedUsers: number;
   userLookupFailures: number;
   participantFailures: number;
+  duplicateByParticipantUuid: number;
   duplicateByProviderUuid: number;
   duplicateByBookingId: number;
 };
+
+const EXCLUDED_CLOUD_PARTICIPANT_STATUSES = new Set([
+  'cancelled',
+  'canceled',
+  'cancel',
+  'deleted',
+  'inactive',
+  'withdrawn',
+  'withdraw',
+  'transferred',
+  'transfer',
+  'refunded',
+  'refund',
+  'dns',
+  'did_not_start',
+  'duplicate',
+  'hidden',
+]);
 
 const COUNTRY_CODE_BY_NAME: Record<string, string> = {
   india: 'IN',
@@ -395,6 +415,29 @@ function getRawProviderRecordId(row: AnyRecord) {
   );
 }
 
+function shouldIncludeCloudParticipant(row: AnyRecord) {
+  const status = lower(
+    firstNonEmpty(
+      row?.status,
+      row?.providerStatus,
+      row?.registrationStatus,
+      row?.registration_status,
+      row?.ticketStatus,
+      row?.ticket_status,
+    ),
+  );
+
+  if (status && EXCLUDED_CLOUD_PARTICIPANT_STATUSES.has(status)) {
+    return false;
+  }
+
+  if (row?.deleted === true || row?.isDeleted === true || row?.hidden === true || row?.isHidden === true) {
+    return false;
+  }
+
+  return true;
+}
+
 function getRecordNumber(row: AnyRecord, fallback: number) {
   const text = firstNonEmpty(row?.recordNumber, row?.record_number, row?.recordNo, row?.record_no, '') || '';
   const parsed = Number(text);
@@ -517,20 +560,30 @@ export async function buildFeibotParticipantImport(input: ParticipantImportInput
   const byBookingIdIndex: Record<string, number> = {};
   const stats: ParticipantImportStats = {
     downloaded: input.rawParticipants.length,
+    excludedByStatus: 0,
     normalized: 0,
     matchedUsers: 0,
     userLookupFailures: 0,
     participantFailures: 0,
+    duplicateByParticipantUuid: 0,
     duplicateByProviderUuid: 0,
     duplicateByBookingId: 0,
   };
 
+  const byParticipantUuidIndex: Record<string, number> = {};
+
   for (let index = 0; index < input.rawParticipants.length; index += 1) {
     try {
       const row = input.rawParticipants[index] || {};
+
+      if (input.source === 'feibot-cloud-api' && !shouldIncludeCloudParticipant(row)) {
+        stats.excludedByStatus += 1;
+        continue;
+      }
+
       const sourceBookingId = getRawBookingId(row, `${input.source === 'feibot-fdb' ? 'fdb' : 'cloud'}:${getRawParticipantUuid(row) || index + 1}`);
       const participantUuid = getRawParticipantUuid(row) || sourceBookingId;
-      const providerUuid = firstNonEmpty(row?.providerUuid, row?.provider_uuid, row?.providerId, row?.provider_id, participantUuid) || participantUuid;
+      const providerUuid = firstNonEmpty(participantUuid, row?.providerUuid, row?.provider_uuid, row?.providerId, row?.provider_id) || participantUuid;
       const bib = firstNonEmpty(row?.bib, row?.bibNumber, row?.bib_number, row?.raceBib, '') || '';
       const chip = firstNonEmpty(row?.chip, row?.chipNumber, row?.chip_number, row?.chipCode, '') || '';
       const name = resolveName(row);
@@ -622,12 +675,17 @@ export async function buildFeibotParticipantImport(input: ParticipantImportInput
       };
 
       const providerKey = normalizeLookupKey(providerUuid);
+      const participantKey = normalizeLookupKey(participantUuid);
       const bookingKey = normalizeLookupKey(sourceBookingId);
       const existingIndex =
+        (participantKey && Number.isFinite(byParticipantUuidIndex[participantKey]) ? byParticipantUuidIndex[participantKey] : undefined) ??
         (providerKey && Number.isFinite(byProviderUuidIndex[providerKey]) ? byProviderUuidIndex[providerKey] : undefined) ??
         (bookingKey && Number.isFinite(byBookingIdIndex[bookingKey]) ? byBookingIdIndex[bookingKey] : undefined);
 
       if (existingIndex !== undefined) {
+        if (participantKey && Number.isFinite(byParticipantUuidIndex[participantKey])) {
+          stats.duplicateByParticipantUuid += 1;
+        }
         if (providerKey && Number.isFinite(byProviderUuidIndex[providerKey])) {
           stats.duplicateByProviderUuid += 1;
         }
@@ -640,6 +698,7 @@ export async function buildFeibotParticipantImport(input: ParticipantImportInput
       }
 
       const finalIndex = existingIndex ?? (participants.length - 1);
+  if (participantKey) byParticipantUuidIndex[participantKey] = finalIndex;
       if (providerKey) byProviderUuidIndex[providerKey] = finalIndex;
       if (bookingKey) byBookingIdIndex[bookingKey] = finalIndex;
     } catch {

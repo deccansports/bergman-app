@@ -310,6 +310,7 @@ export const TicketDefinitionSchema = z.object({
   eventDate: z.string().optional().nullable(),
   openDate: z.string().min(1, "Open date required"),
   startTime: z.string().optional().nullable(),
+  raceStartTime: z.string().optional().nullable(),
   closeDate: z.string().min(1, "Close date required"),
   endTime: z.string().optional().nullable(),
   price: z.number().optional().nullable(),

@@ -18,6 +18,7 @@ import {
   calculateRefundAmount,
   normalizeToE164
 } from '@/lib/utils';
+import { getRegistrationsCollectionRef } from '@/lib/eventDataPaths';
 import { sendClubAffiliationNoticeToOwnerEmail } from '../auth/brevoService';
 import { getKV, putKV, deleteKV, batchGetKV, listKVByPrefix } from '../cloudflare/kv';
 
@@ -34,8 +35,8 @@ import type {
 } from '@/lib/types';
 import { NO_CLUB_SELECTED_VALUE } from '../constants';
 import { _syncUserToKV, _deleteParticipantFromKV, _syncClubUpcomingAthletes, _mirrorParticipantToKV } from './dataSyncActions';
-import { _syncParticipantsToKV } from './dataSyncActions';
 import { getRewardTierByPoints } from '../rewardsEngine';
+import { normalizeLiveTrackingPrivacy } from '@/lib/liveTrackingPrivacy';
 
 /**
  * AUTO-LINK: Executed on login to merge bulk-upload placeholders with real auth accounts.
@@ -420,7 +421,7 @@ export async function updateUserProfile(
       'name', 'mobile', 'photoURL', 'email', 'country', 'state', 'gender', 
       'dob', 'tshirtSize', 'bloodGroup', 'address', 'city', 'pincode', 
       'emergencyContactNumber', 'isVolunteer', 'idProofUrl', 'personalRaceEmail', 
-            'clubAffiliationDate', 'clubId', 'liveTrackingPrivacy'
+            'clubAffiliationDate', 'clubId', 'liveTrackingPrivacy', 'trackingVisibility'
     ];
     
     fields.forEach(f => {
@@ -450,7 +451,11 @@ export async function updateUserProfile(
     }
 
     if (data.liveTrackingPrivacy !== undefined) {
-        updateDataFirestore.liveTrackingPrivacy = String(data.liveTrackingPrivacy || '').trim().toUpperCase() === 'PRIVATE' ? 'PRIVATE' : 'PUBLIC';
+        updateDataFirestore.liveTrackingPrivacy = normalizeLiveTrackingPrivacy(data.liveTrackingPrivacy);
+    }
+
+    if (data.trackingVisibility !== undefined) {
+        updateDataFirestore.trackingVisibility = normalizeLiveTrackingPrivacy(data.trackingVisibility);
     }
 
     if (!isClubOwner && data.clubId !== undefined) {
@@ -620,11 +625,11 @@ export async function updateUserProfile(
 
 export async function updateLiveTrackingPrivacyAction(
     uid: string,
-    privacy: 'PUBLIC' | 'PRIVATE',
+    privacy: 'PUBLIC' | 'ANONYMOUS' | 'PRIVATE',
 ): Promise<{ success: boolean; message: string; updatedCount?: number }> {
     try {
         const adminDb = getFirestoreInstance();
-        const normalizedPrivacy = String(privacy || '').trim().toUpperCase() === 'PRIVATE' ? 'PRIVATE' : 'PUBLIC';
+        const normalizedPrivacy = normalizeLiveTrackingPrivacy(privacy);
         const userRef = adminDb.collection('users').doc(uid);
         const userSnap = await userRef.get();
         if (!userSnap.exists) {
@@ -632,7 +637,11 @@ export async function updateLiveTrackingPrivacyAction(
         }
 
         const userData = userSnap.data() || {};
-        await userRef.set({ liveTrackingPrivacy: normalizedPrivacy, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        await userRef.set({
+            liveTrackingPrivacy: normalizedPrivacy,
+            trackingVisibility: normalizedPrivacy,
+            updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
 
         const eventRows = Array.isArray((userData as any)?.upcomingEvents) ? (userData as any).upcomingEvents : [];
         const bookingRefs = new Map<string, { eventId: string; bookingId: string }>();
@@ -645,8 +654,8 @@ export async function updateLiveTrackingPrivacyAction(
         const email = String(userData?.email || '').trim().toLowerCase();
         const participantDocs: Array<{ ref: any; eventId: string }> = [];
         const collectionGroupQueries: Array<Promise<any>> = [];
-        collectionGroupQueries.push(adminDb.collectionGroup('participants').where('athleteUid', '==', uid).get());
-        if (email) collectionGroupQueries.push(adminDb.collectionGroup('participants').where('email', '==', email).get());
+        collectionGroupQueries.push(adminDb.collectionGroup('registrations').where('athleteUid', '==', uid).get());
+        if (email) collectionGroupQueries.push(adminDb.collectionGroup('registrations').where('email', '==', email).get());
 
         const querySnapshots = await Promise.all(collectionGroupQueries.map((p) => p.catch(() => null)));
         for (const snap of querySnapshots) {
@@ -659,7 +668,7 @@ export async function updateLiveTrackingPrivacyAction(
         }
 
         for (const ref of bookingRefs.values()) {
-            const docRef = adminDb.collection('events').doc(ref.eventId).collection('participants').doc(ref.bookingId);
+            const docRef = getRegistrationsCollectionRef(adminDb, ref.eventId).doc(ref.bookingId);
             participantDocs.push({ ref: docRef, eventId: ref.eventId });
         }
 
@@ -667,21 +676,32 @@ export async function updateLiveTrackingPrivacyAction(
         for (const item of participantDocs) uniqueDocs.set(item.ref.path, item);
 
         let updatedCount = 0;
-        const touchedEvents = new Set<string>();
+        const mirrorPromises: Array<Promise<any>> = [];
         for (const item of uniqueDocs.values()) {
-            touchedEvents.add(item.eventId);
             await item.ref.set({
                 liveTrackingPrivacy: normalizedPrivacy,
+                trackingVisibility: normalizedPrivacy,
                 privacy: normalizedPrivacy,
-                registration: { liveTrackingPrivacy: normalizedPrivacy },
+                registration: { liveTrackingPrivacy: normalizedPrivacy, trackingVisibility: normalizedPrivacy },
                 updatedAt: FieldValue.serverTimestamp(),
             }, { merge: true });
+
+            // Read the updated doc and mirror only this participant to KV (no full event re-index)
+            const updatedSnap = await item.ref.get();
+            if (updatedSnap.exists) {
+                const participantData = {
+                    ...updatedSnap.data(),
+                    eventId: item.eventId,
+                    bookingId: updatedSnap.id,
+                } as any;
+                mirrorPromises.push(_mirrorParticipantToKV(participantData, false).catch(() => null));
+            }
             updatedCount++;
         }
 
         await Promise.all([
             _syncUserToKV(uid),
-            ...Array.from(touchedEvents).map((eventId) => _syncParticipantsToKV(eventId).catch(() => ({ participantCount: 0 }))),
+            ...mirrorPromises,
         ]);
 
         revalidatePath('/dashboard');

@@ -1,7 +1,4 @@
-import { getAuthInstance, getFirestoreInstance } from '@/lib/firebaseAdmin';
-import type { NextRequest } from 'next/server';
-
-export type LiveTrackingPrivacy = 'PUBLIC' | 'PRIVATE';
+export type LiveTrackingPrivacy = 'PUBLIC' | 'ANONYMOUS' | 'PRIVATE';
 
 export type LiveTrackingAccessContext = {
   isPublic: boolean;
@@ -22,7 +19,10 @@ function lower(value: unknown) {
 }
 
 export function normalizeLiveTrackingPrivacy(value: unknown): LiveTrackingPrivacy {
-  return String(value ?? '').trim().toUpperCase() === 'PRIVATE' ? 'PRIVATE' : 'PUBLIC';
+  const raw = String(value ?? '').trim().toUpperCase();
+  if (raw === 'PRIVATE' || raw === 'OFFICIALS_ONLY' || raw === 'OFFICIALS ONLY') return 'PRIVATE';
+  if (raw === 'ANONYMOUS' || raw === 'ANON') return 'ANONYMOUS';
+  return 'PUBLIC';
 }
 
 export function getParticipantLiveTrackingPrivacy(row: Record<string, any> | null | undefined): LiveTrackingPrivacy {
@@ -30,10 +30,13 @@ export function getParticipantLiveTrackingPrivacy(row: Record<string, any> | nul
 
   const candidates = [
     row?.privacy,
+    row?.trackingVisibility,
     row?.liveTrackingPrivacy,
     row?.registration?.liveTrackingPrivacy,
+    row?.registration?.trackingVisibility,
     row?.registration?.privacy,
     row?.userProfile?.liveTrackingPrivacy,
+    row?.userProfile?.trackingVisibility,
     row?.userProfile?.registration?.liveTrackingPrivacy,
     row?.profile?.liveTrackingPrivacy,
   ];
@@ -41,6 +44,7 @@ export function getParticipantLiveTrackingPrivacy(row: Record<string, any> | nul
   for (const candidate of candidates) {
     const privacy = normalizeLiveTrackingPrivacy(candidate);
     if (privacy === 'PRIVATE') return 'PRIVATE';
+    if (privacy === 'ANONYMOUS') return 'ANONYMOUS';
   }
 
   return 'PUBLIC';
@@ -48,61 +52,6 @@ export function getParticipantLiveTrackingPrivacy(row: Record<string, any> | nul
 
 export function isPrivateLiveTracking(row: Record<string, any> | null | undefined) {
   return getParticipantLiveTrackingPrivacy(row) === 'PRIVATE';
-}
-
-export async function resolveLiveTrackingAccess(req: NextRequest): Promise<LiveTrackingAccessContext> {
-  const authorization = req.headers.get('authorization') || '';
-  const token = authorization.replace(/^Bearer\s+/i, '').trim();
-
-  if (!token) {
-    return {
-      isPublic: true,
-      isAdmin: false,
-      uid: null,
-      email: null,
-      emailLower: null,
-      tokenValid: false,
-      userData: null,
-    };
-  }
-
-  try {
-    const decoded = await getAuthInstance().verifyIdToken(token);
-    const uid = normalize(decoded?.uid);
-    let userData: Record<string, any> | null = null;
-
-    if (uid) {
-      try {
-        const userSnap = await getFirestoreInstance().collection('users').doc(uid).get();
-        userData = userSnap.exists ? (userSnap.data() || {}) : null;
-      } catch {
-        userData = null;
-      }
-    }
-
-    const isAdmin = Boolean(userData?.isAdmin || decoded?.admin || decoded?.isAdmin || userData?.role === 'admin' || decoded?.role === 'admin');
-    const email = normalize(userData?.email || decoded?.email || null) || null;
-
-    return {
-      isPublic: false,
-      isAdmin,
-      uid: uid || null,
-      email,
-      emailLower: email ? lower(email) : null,
-      tokenValid: true,
-      userData,
-    };
-  } catch {
-    return {
-      isPublic: true,
-      isAdmin: false,
-      uid: null,
-      email: null,
-      emailLower: null,
-      tokenValid: false,
-      userData: null,
-    };
-  }
 }
 
 export function isSelfViewingParticipant(row: Record<string, any> | null | undefined, access: Pick<LiveTrackingAccessContext, 'uid' | 'emailLower'>) {
@@ -135,6 +84,34 @@ export function isSelfViewingParticipant(row: Record<string, any> | null | undef
 
 export function canAccessPrivateLiveTracking(row: Record<string, any> | null | undefined, access: LiveTrackingAccessContext) {
   if (access.isAdmin) return true;
+  const roleCandidates = [
+    access?.userData?.role,
+    access?.userData?.adminRole,
+    ...(Array.isArray(access?.userData?.roles) ? access.userData.roles : []),
+    ...(Array.isArray(access?.userData?.permissions) ? access.userData.permissions : []),
+  ].map((value) => String(value || '').trim().toLowerCase()).filter(Boolean);
+
+  const officialAllowList = [
+    'super admin',
+    'super_admin',
+    'timing director',
+    'timing_director',
+    'race director',
+    'race_director',
+    'live tracking volunteer',
+    'live_tracking_volunteer',
+    'timing volunteer',
+    'timing_volunteer',
+    'medical',
+    'marshal',
+  ];
+
+  const isOfficialRole = roleCandidates.some((role) => officialAllowList.includes(role));
+  if (isOfficialRole) return true;
+
+  const volunteerTag = String(access?.userData?.volunteerRole || access?.userData?.volunteerType || '').trim().toLowerCase();
+  if (officialAllowList.includes(volunteerTag)) return true;
+
   return isSelfViewingParticipant(row, access);
 }
 
@@ -147,6 +124,7 @@ export function maskPrivateAthlete(row: Record<string, any>) {
   return {
     ...row,
     privacy,
+    trackingVisibility: privacy,
     liveTrackingPrivacy: privacy,
     searchVisible: false,
     mapVisible: false,
@@ -177,6 +155,53 @@ export function maskPrivateAthlete(row: Record<string, any>) {
     },
     registration: {
       ...(row?.registration || {}),
+      liveTrackingPrivacy: privacy,
+    },
+  };
+}
+
+export function maskAnonymousAthlete(row: Record<string, any>) {
+  const privacy = 'ANONYMOUS' as const;
+  const rawBib = String(row?.bib || row?.bibNumber || '').trim();
+  const bibSuffix = rawBib
+    ? (rawBib.replace(/\D/g, '').slice(-4) || rawBib.slice(-4))
+    : '';
+  const maskedBib = bibSuffix ? `****${bibSuffix}` : '****';
+  return {
+    ...row,
+    privacy,
+    trackingVisibility: privacy,
+    liveTrackingPrivacy: privacy,
+    searchVisible: false,
+    mapVisible: true,
+    modalVisible: true,
+    name: 'Anonymous Athlete',
+    fullName: 'Anonymous Athlete',
+    firstName: null,
+    lastName: null,
+    initials: 'AA',
+    bib: maskedBib,
+    bibNumber: maskedBib,
+    email: null,
+    mobile: null,
+    clubName: null,
+    country: null,
+    city: null,
+    state: null,
+    athleteUid: null,
+    participantUuid: null,
+    participant_uuid: null,
+    providerParticipantUuid: null,
+    avatarUrl: null,
+    photoURL: null,
+    photoUrl: null,
+    liveTracking: {
+      ...(row?.liveTracking || {}),
+      privacy,
+    },
+    registration: {
+      ...(row?.registration || {}),
+      trackingVisibility: privacy,
       liveTrackingPrivacy: privacy,
     },
   };

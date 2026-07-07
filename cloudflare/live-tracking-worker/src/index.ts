@@ -252,7 +252,6 @@ async function persistTimingConfigurationSnapshot(env: WorkerEnv, eventId: strin
     importedAt: timingConfiguration?.importedAt || new Date().toISOString(),
   };
 
-  await writeKvJson(env, `event:${eventId}:timingConfiguration`, snapshot);
   await writeKvJson(env, `live:event:${eventId}:timingConfiguration`, snapshot);
 }
 
@@ -1326,7 +1325,6 @@ async function getOverview(env: WorkerEnv, eventId: string) {
     },
   };
   const timingConfigurationSnapshot =
-    (await readKvJson(env, `event:${eventId}:timingConfiguration`)) ||
     (await readKvJson(env, `live:event:${eventId}:timingConfiguration`)) ||
     null;
   const timingConfigurationAgeGroups = Array.isArray(timingConfigurationSnapshot?.ageGroups)
@@ -4194,7 +4192,6 @@ const workerModule = {
       }
       if (request.method === 'GET' && tail === 'timings') {
         const timingConfiguration =
-          await readKvJson(env, `event:${eventId}:timingConfiguration`) ||
           await readKvJson(env, `live:event:${eventId}:timingConfiguration`) ||
           null;
 

@@ -70,10 +70,12 @@ export function LiveEventSelector({
   }, []);
 
   const handleEventChange = (eventId: string) => {
+    const event = events.find((e) => e.id === eventId);
     if (onEventChange) {
       onEventChange(eventId);
     } else {
-      router.push(`/live-tracking/${eventId}`);
+      const slug = event?.customSlug || eventId;
+      router.push(`/live-tracking/${slug}`);
     }
   };
 

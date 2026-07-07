@@ -17,6 +17,7 @@ import { revalidatePath } from 'next/cache';
 import type { EventParticipant, RaceResult, EventCalendarEntry, User, Coupon, StoreProduct, Announcement } from '@/lib/types';
 import { serializeValue, serializeParticipantData, normalizeStatus } from '@/lib/utils';
 import { startJob, updateJobProgress } from '@/lib/jobManager';
+import { normalizeLiveTrackingPrivacy } from '@/lib/liveTrackingPrivacy';
 
 /**
  * HELPER: Safe Time Parsing for Standings
@@ -199,7 +200,16 @@ export async function _syncParticipantsToKV(eventId: string): Promise<{ particip
       const contestName = String(participant?.contestName || participant?.contest_name || participant?.liveTracking?.contestName || '').trim() || null;
       const providerParticipantUuid = String(participant?.providerParticipantUuid || participant?.participantUuid || participant?.providerUuid || participant?.liveTracking?.participantUuid || '').trim() || null;
       const providerContestUuid = String(participant?.providerContestUuid || participant?.providerContestUuid || contestUuid || '').trim() || null;
-      const privacy = String(participant?.liveTrackingPrivacy || participant?.privacy || participant?.registration?.liveTrackingPrivacy || participant?.userProfile?.liveTrackingPrivacy || 'PUBLIC').trim().toUpperCase() === 'PRIVATE' ? 'PRIVATE' : 'PUBLIC';
+      const privacy = normalizeLiveTrackingPrivacy(
+        participant?.liveTrackingPrivacy
+        || participant?.trackingVisibility
+        || participant?.privacy
+        || participant?.registration?.liveTrackingPrivacy
+        || participant?.registration?.trackingVisibility
+        || participant?.userProfile?.liveTrackingPrivacy
+        || participant?.userProfile?.trackingVisibility
+        || 'PUBLIC'
+      );
       return {
         ...participant,
         contestUuid,
@@ -208,10 +218,12 @@ export async function _syncParticipantsToKV(eventId: string): Promise<{ particip
         providerParticipantUuid,
         providerContestUuid,
         liveTrackingPrivacy: privacy,
+        trackingVisibility: privacy,
         privacy,
         registration: {
           ...(participant?.registration || {}),
           liveTrackingPrivacy: privacy,
+          trackingVisibility: privacy,
         },
       };
     }).filter(p => !!p.bookingId);
@@ -232,6 +244,7 @@ export async function _syncParticipantsToKV(eventId: string): Promise<{ particip
       athleteUid: p.athleteUid || (p as any).userId || null,
       email: p.email || null,
       privacy: p.privacy || p.liveTrackingPrivacy || 'PUBLIC',
+      trackingVisibility: p.trackingVisibility || p.liveTrackingPrivacy || 'PUBLIC',
     }));
 
     const indexKey = `event:${eventId}:index`;
@@ -258,7 +271,8 @@ export async function _mirrorParticipantToKV(participantData: EventParticipant, 
     contestId: (participantData as any).contestId || (participantData as any).contestUuid || (participantData as any).contest_uuid || null,
     providerParticipantUuid: (participantData as any).providerParticipantUuid || (participantData as any).participantUuid || (participantData as any).providerUuid || (participantData as any).liveTracking?.participantUuid || null,
     providerContestUuid: (participantData as any).providerContestUuid || (participantData as any).contestUuid || (participantData as any).contest_uuid || null,
-    liveTrackingPrivacy: String((participantData as any).liveTrackingPrivacy || (participantData as any).privacy || (participantData as any).registration?.liveTrackingPrivacy || 'PUBLIC').trim().toUpperCase() === 'PRIVATE' ? 'PRIVATE' : 'PUBLIC',
+    liveTrackingPrivacy: normalizeLiveTrackingPrivacy((participantData as any).liveTrackingPrivacy || (participantData as any).privacy || (participantData as any).registration?.liveTrackingPrivacy || 'PUBLIC'),
+    trackingVisibility: normalizeLiveTrackingPrivacy((participantData as any).trackingVisibility || (participantData as any).liveTrackingPrivacy || (participantData as any).privacy || (participantData as any).registration?.trackingVisibility || 'PUBLIC'),
   } as EventParticipant;
   
   await putKV(`event:${eventId}:participant:${bookingId}`, normalizedParticipantData, actionName);
@@ -280,6 +294,7 @@ export async function _mirrorParticipantToKV(participantData: EventParticipant, 
       athleteUid: normalizedParticipantData.athleteUid || null,
       email: participantData.email || null,
       privacy: normalizedParticipantData.liveTrackingPrivacy || 'PUBLIC',
+      trackingVisibility: normalizedParticipantData.trackingVisibility || normalizedParticipantData.liveTrackingPrivacy || 'PUBLIC',
     };
     const existingIdx = eventIndex.findIndex(p => p.bookingId === bookingId);
     if (existingIdx > -1) eventIndex[existingIdx] = summary;

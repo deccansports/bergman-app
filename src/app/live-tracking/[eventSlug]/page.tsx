@@ -7,13 +7,15 @@ import LiveTrackingClientPage from '@/components/live-tracking/LiveTrackingClien
 import type { EventCalendarEntry, LiveAthlete } from '@/lib/types';
 import { loadParticipantIndex, getParticipantRowsFromIndex } from '@/lib/liveTrackingParticipantStore';
 import { getFirestoreInstance } from '@/lib/firebaseAdmin';
-import { getParticipantLiveTrackingPrivacy, maskPrivateAthlete } from '@/lib/liveTrackingPrivacy';
+import { getParticipantLiveTrackingPrivacy, maskAnonymousAthlete } from '@/lib/liveTrackingPrivacy';
+import { resolveEventBySlug } from '@/lib/broadcast/public';
+import { loadReplayIndex } from '@/lib/live-tracking/replay';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 interface Props {
-  params: { eventId: string };
+  params: { eventSlug: string };
 }
 
 async function loadEventFromKv(eventId: string) {
@@ -31,7 +33,10 @@ async function loadEventFromKv(eventId: string) {
         eventId,
         eventName: String((event as any).eventName || (event as any).name || 'Live Event'),
         eventDate: String((event as any).eventDate || (event as any).date || (event as any).startDate || 'TBD'),
+        ticketDefinitions: Array.isArray((event as any).ticketDefinitions) ? (event as any).ticketDefinitions : [],
         liveDataSource: String((event as any).liveDataSource || 'timing_partner'),
+        liveTrackingHub: (event as any).liveTrackingHub || null,
+        showLiveTrackingOnHomepage: Boolean((event as any).showLiveTrackingOnHomepage),
         source: 'firestore-master',
       } as Record<string, any>;
     }
@@ -47,6 +52,11 @@ async function loadEventFromKv(eventId: string) {
     eventId,
     eventName: String(fromFirestore?.eventName || fromKv?.eventName || fromKv?.name || 'Live Event').trim() || 'Live Event',
     eventDate: String(fromFirestore?.eventDate || fromKv?.eventDate || fromKv?.date || 'TBD').trim() || 'TBD',
+    ticketDefinitions: Array.isArray(fromFirestore?.ticketDefinitions)
+      ? fromFirestore.ticketDefinitions
+      : Array.isArray(fromKv?.ticketDefinitions)
+        ? fromKv.ticketDefinitions
+        : [],
     liveDataSource: String(fromFirestore?.liveDataSource || fromKv?.liveDataSource || 'timing_partner'),
   } as Record<string, any>;
 }
@@ -61,7 +71,10 @@ function toEventCalendarEntry(eventId: string, event: Record<string, any>): Even
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const event = await loadEventFromKv(params.eventId);
+  const eventBySlug = await resolveEventBySlug(params.eventSlug);
+  if (!eventBySlug) return { title: 'Live Tracking' };
+  
+  const event = await loadEventFromKv(eventBySlug.id);
   return {
     title: event ? `${event.eventName || 'Live Tracking'} — Live Tracking` : 'Live Tracking',
     description: event ? `Real-time athlete tracking for ${event.eventName || 'this event'}` : 'Follow athletes live on course.',
@@ -69,17 +82,33 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function LiveTrackingPage({ params }: Props) {
-  const { eventId } = params;
+  const { eventSlug } = params;
+  
+  // Resolve the slug to get the actual event ID
+  const eventBySlug = await resolveEventBySlug(eventSlug);
+  if (!eventBySlug) notFound();
+  
+  const eventId = eventBySlug.id;
   const eventRaw = await loadEventFromKv(eventId);
   if (!eventRaw) notFound();
   const event = toEventCalendarEntry(eventId, eventRaw);
+  
+  // Ensure customSlug is set from the resolved slug
+  event.customSlug = eventBySlug.customSlug || eventSlug;
+  const isLiveTrackingPublic = Boolean(
+    eventRaw?.liveTrackingHub?.trackingConfig?.enabled
+    ?? eventRaw?.liveTrackingHub?.trackingConfig?.showOnHomepage
+    ?? eventRaw?.showLiveTrackingOnHomepage
+    ?? false,
+  );
 
   const eventDate = String(event.eventDate || '').trim();
   const isPastEvent = !!(eventDate && eventDate !== 'TBD' && isPast(parseISO(eventDate)) && !isToday(parseISO(eventDate)));
 
-  const liveResult = (event.liveDataSource === 'timing_partner' || event.liveDataSource === 'participants' || event.liveDataSource === 'racemap')
+  const liveResult = isLiveTrackingPublic && (event.liveDataSource === 'timing_partner' || event.liveDataSource === 'participants' || event.liveDataSource === 'racemap')
     ? await getLiveTimingDataAction(eventId, isPastEvent ? 'history' : 'live')
-    : { success: false, message: 'Live data source not enabled', participants: [] as LiveAthlete[] };
+    : { success: false, message: isLiveTrackingPublic ? 'Live data source not enabled' : 'Live tracking is yet to open', participants: [] as LiveAthlete[] };
+  const replayIndex = await loadReplayIndex(eventId).catch(() => null);
 
   const participantIndex = await loadParticipantIndex(eventId);
   const indexRows = getParticipantRowsFromIndex(participantIndex);
@@ -102,16 +131,22 @@ export default async function LiveTrackingPage({ params }: Props) {
     const source = (providerUuid && byProvider.get(providerUuid)) || (bib && byBib.get(bib)) || (athleteUid && byUid.get(athleteUid)) || null;
     const privacy = getParticipantLiveTrackingPrivacy(source || row);
     const merged = { ...row, ...(source || {}), privacy, liveTrackingPrivacy: privacy };
-    return privacy === 'PRIVATE' ? maskPrivateAthlete(merged) : merged;
+    if (privacy === 'PRIVATE') return null;
+    if (privacy === 'ANONYMOUS') return maskAnonymousAthlete(merged);
+    return merged;
   };
 
-  const initialLiveData = liveResult.success && liveResult.participants ? liveResult.participants.map((row: any) => applyPrivacy(row)) : [];
+  const initialLiveData = liveResult.success && liveResult.participants
+    ? liveResult.participants.map((row: any) => applyPrivacy(row)).filter((row: any) => Boolean(row))
+    : [];
 
   return (
     <LiveTrackingClientPage
       initialEventDetails={event}
       isPastEvent={isPastEvent}
       initialLiveData={initialLiveData}
+      isLiveTrackingPublic={isLiveTrackingPublic}
+      initialReplayIndex={replayIndex}
     />
   );
 }

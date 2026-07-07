@@ -8,11 +8,67 @@ import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { X, Waves, ChevronsRight, Bike, Footprints, Flag, Clock, MapPin, User as UserIcon, Building, ShieldCheck, AlertTriangle, TrendingUp, LocateFixed, Route, Hourglass } from 'lucide-react';
+import { Waves, ChevronsRight, Bike, Footprints, Flag, Clock, MapPin, User as UserIcon, Building, ShieldCheck, AlertTriangle, TrendingUp, LocateFixed, Route, Hourglass, X } from 'lucide-react';
 import { isDuathlonEvent, formatSecondsToHMS, hmsToSeconds, isValidImageUrl, getInitials, normalizeStatus } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import { cn } from "@/lib/utils";
 import { buildSplitModalModel } from './split-modal/utils';
+
+const countryNameToCode: Record<string, string> = {
+  india: 'IN',
+  'united states': 'US',
+  'usa / canada': 'US',
+  usa: 'US',
+  us: 'US',
+  'united kingdom': 'GB',
+  uk: 'GB',
+  canada: 'CA',
+  australia: 'AU',
+  germany: 'DE',
+  france: 'FR',
+  singapore: 'SG',
+  'united arab emirates': 'AE',
+  uae: 'AE',
+};
+
+const iso3ToIso2CountryCode: Record<string, string> = {
+  IND: 'IN',
+  USA: 'US',
+  GBR: 'GB',
+  CAN: 'CA',
+  AUS: 'AU',
+  DEU: 'DE',
+  FRA: 'FR',
+  SGP: 'SG',
+  ARE: 'AE',
+};
+
+function resolveCountryCode(value?: string | null) {
+  const normalized = String(value || '').trim();
+  if (!normalized) return '';
+
+  const upper = normalized.toUpperCase();
+  if (/^[A-Z]{2}$/.test(upper)) return upper;
+
+  if (/^[A-Z]{3}$/.test(upper) && iso3ToIso2CountryCode[upper]) {
+    return iso3ToIso2CountryCode[upper];
+  }
+
+  const lowered = normalized.toLowerCase();
+  if (countryNameToCode[lowered]) return countryNameToCode[lowered];
+
+  const trailingCountry = lowered.includes(',') ? lowered.split(',').pop()?.trim() || '' : '';
+  if (trailingCountry && countryNameToCode[trailingCountry]) return countryNameToCode[trailingCountry];
+
+  return '';
+}
+
+const getCountryFlagEmoji = (country?: string | null) => {
+  if (!country) return '';
+  const code = resolveCountryCode(country);
+  if (!code || code.length !== 2) return '';
+  return String.fromCodePoint(...Array.from(code).map((char) => 0x1f1e6 + char.charCodeAt(0) - 65));
+};
 
 const LegIcon = ({ leg, className }: { leg: Leg | 'NOT_STARTED' | 'FINISHED'; className?: string }) => {
     const baseClass = "h-4 w-4";
@@ -184,6 +240,38 @@ interface BergmanTrackerCardProps {
 
 export default function BergmanTrackerCard({ data, timingConfiguration, ticketDef, onViewMap, onRemove, onSelect }: BergmanTrackerCardProps) {
   const [now, setNow] = useState(new Date());
+  const countryFlag = useMemo(() => {
+    const countryValue = String(
+      (data as any)?.country
+      || (data as any)?.countryCode
+      || (data as any)?.country_code
+      || (data as any)?.countryISO
+      || (data as any)?.countryIso
+      || (data as any)?.country_iso
+      || (data as any)?.countryIso2
+      || (data as any)?.country_iso2
+      || (data as any)?.countryIso3
+      || (data as any)?.country_iso3
+      || (data as any)?.countryName
+      || (data as any)?.countryAtRace
+      || (data as any)?.nationality
+      || (data as any)?.registration?.country
+      || (data as any)?.registration?.countryCode
+      || (data as any)?.registration?.country_code
+      || (data as any)?.registration?.countryName
+      || (data as any)?.registration?.countryAtRace
+      || (data as any)?.registration?.nationality
+      || (data as any)?.provider?.country
+      || (data as any)?.provider?.countryCode
+      || (data as any)?.provider?.country_code
+      || (data as any)?.provider?.countryName
+      || (data as any)?.provider?.countryAtRace
+      || (data as any)?.provider?.nationality
+      || (data as any)?.nationality
+      || '',
+    ).trim();
+    return getCountryFlagEmoji(countryValue || null);
+  }, [data]);
 
   const isOpaqueId = (value: unknown) => {
     const text = String(value ?? '').trim();
@@ -333,7 +421,7 @@ export default function BergmanTrackerCard({ data, timingConfiguration, ticketDe
   }, [progressModel, data.legProgressPct]);
 
   return (
-    <Card className="bg-card text-foreground cursor-pointer hover:bg-muted/40 transition-colors" onClick={() => onSelect(data)}>
+    <Card className="bg-card text-card-foreground cursor-pointer transition-colors hover:bg-accent/50" onClick={() => onSelect(data)}>
       <CardHeader className="p-3 flex flex-row items-start justify-between">
         <div className="flex items-center gap-2">
           <Avatar className="h-8 w-8">
@@ -341,7 +429,14 @@ export default function BergmanTrackerCard({ data, timingConfiguration, ticketDe
             <AvatarFallback>{getInitials(data.name)}</AvatarFallback>
           </Avatar>
           <div>
-            <p className="font-semibold text-sm">{data.name}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="font-semibold text-sm">{data.name}</p>
+              {countryFlag ? (
+                <span className="inline-flex items-center rounded-full border border-border bg-muted px-1.5 py-0.5 text-[11px] leading-none" aria-label="Country flag">
+                  {countryFlag}
+                </span>
+              ) : null}
+            </div>
             <div className="flex items-center gap-2">
                 <p className="text-xs text-muted-foreground">BIB: {data.bib}</p>
               <p className="text-xs text-muted-foreground">Age Group: {resolvedAgeGroupLabel}</p>
@@ -363,8 +458,15 @@ export default function BergmanTrackerCard({ data, timingConfiguration, ticketDe
                <MapPin className="h-4 w-4 text-blue-600" />
             </Button>
           )}
-          <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); onRemove(data.id);}} className="h-6 w-6">
-            <X className="h-4 w-4 text-destructive" />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={(e) => { e.stopPropagation(); onRemove(data.id); }}
+            aria-label={`Remove ${data.name} from watchlist`}
+            title="Remove from watchlist"
+          >
+            <X className="h-4 w-4 text-muted-foreground" />
           </Button>
         </div>
       </CardHeader>

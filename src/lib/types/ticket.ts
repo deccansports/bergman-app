@@ -32,6 +32,7 @@ export interface TicketDefinition {
   eventDate?: string | null;
   openDate?: string | null;
   startTime?: string | null; // HH:mm format (24-hour)
+  raceStartTime?: string | null; // HH:mm format (24-hour)
   closeDate?: string | null;
   endTime?: string | null; // HH:mm format (24-hour)
   hsnCode?: string | null;

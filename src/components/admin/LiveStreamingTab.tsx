@@ -345,7 +345,7 @@ export default function LiveStreamingTab() {
                                     </div>
                                 ) : (
                                     <div className="w-full h-full flex flex-col items-center justify-center bg-black p-4 text-center">
-                                        <Image src="/Bmlogowhite.png" alt="Bergman Logo" width={200} height={66} className="object-contain" />
+                                        <Image src="/Bmlogowhite.png" alt="Bergman Logo" width={200} height={66} className="h-auto w-auto object-contain" style={{ width: 'auto', height: 'auto' }} />
                                         <p className="text-slate-400 mt-4 text-lg">LIVE SCREEN STANDBY</p>
                                     </div>
                                 )}

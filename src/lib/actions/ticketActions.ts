@@ -11,6 +11,7 @@ import { merge } from 'lodash';
 import { deleteKV, getKV, putKV } from '../cloudflare/kv';
 import { _syncCalendarToKV } from './eventActions';
 import { getCachedServerValue } from '@/lib/serverCache';
+import { loadRegistrationParticipantsForEventMetrics } from '@/lib/participantMetricsSource';
 
 function getEventTicketDefinitionsCacheKey(eventId: string): string {
   return `event:${eventId}:ticketDefinitions:v1`;
@@ -31,13 +32,16 @@ export async function _computeAllEventTicketStats(): Promise<{ success: boolean;
         try {
           const eventData = eventDoc.data();
           const ticketDefsSnapshot = await eventDoc.ref.collection('ticketDefinitions').get();
-          const participantsSnapshot = await eventDoc.ref.collection('participants').get();
+          const { participants: participantsFromIndex } = await loadRegistrationParticipantsForEventMetrics({
+            db: adminDb,
+            eventId: eventDoc.id,
+            actionName,
+          });
 
           const participantsByTicketId = new Map<string, number>();
           let totalRevenueFromEventPaisa = 0;
 
-          participantsSnapshot.forEach(pDoc => {
-            const pData = pDoc.data();
+          participantsFromIndex.forEach((pData: any) => {
             if (pData.ticketId) {
               participantsByTicketId.set(pData.ticketId, (participantsByTicketId.get(pData.ticketId) || 0) + 1);
             }
@@ -67,7 +71,7 @@ export async function _computeAllEventTicketStats(): Promise<{ success: boolean;
           allEventTicketStats.push({
             eventId: eventDoc.id,
             eventName: eventData.eventName || 'N/A',
-            totalTicketsSoldInEvent: participantsSnapshot.size,
+            totalTicketsSoldInEvent: participantsFromIndex.length,
             totalRevenueFromEventPaisa,
             tickets: ticketDetailsForEvent
           });

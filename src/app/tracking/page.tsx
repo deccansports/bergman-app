@@ -168,7 +168,7 @@ function RaceTrackingContent() {
                     </CardContent>
                     <CardFooter className="p-0 pt-4 mt-auto">
                         <Button asChild className="w-full">
-                          <Link href={`/live-tracking/${event.id}`}>
+                        <Link href={`/live-tracking/${event.customSlug || event.id}`}>
                                 {title === 'Past Events' ? 'View Results / Replay' : 'Go to Tracking'}
                                 <ArrowRight className="ml-2 h-4 w-4" />
                             </Link>

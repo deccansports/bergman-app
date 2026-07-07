@@ -1,10 +1,10 @@
 // src/components/live-tracking/MapViewer.tsx
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { GoogleMap, Polyline, Marker, InfoWindow, useJsApiLoader } from '@react-google-maps/api';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { GoogleMap, Polyline, Marker, InfoWindow, useJsApiLoader, OverlayView } from '@react-google-maps/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Loader2, Waves, ChevronsRight, Bike, Footprints, Flag } from 'lucide-react';
+import { Loader2, Waves, ChevronsRight, Bike, Footprints, Flag, Clock } from 'lucide-react';
 import type { LiveAthlete, Split, CustomSplitPoint } from '@/lib/types';
 import ElevationProfileChart from './ElevationProfileChart';
 import { interpolatePositionFromPaths } from '@/lib/utils'; // NEW IMPORT
@@ -15,6 +15,17 @@ const getInitials = (name?: string | null) => {
     const names = name?.split(' ') ?? [];
     if (names.length > 1) { return `${names[0][0]}${names[names.length - 1][0]}`.toUpperCase(); }
     return name?.substring(0, 2).toUpperCase() ?? '';
+};
+
+const getLegIcon = (leg?: string | null) => {
+    const legUpper = String(leg || '').toUpperCase();
+    if (/SWIM/.test(legUpper)) return '🏊';
+    if (/BIKE/.test(legUpper)) return '🚴';
+    if (/RUN|FOOTPRINTS/.test(legUpper)) return '🏃';
+    if (/T[12]|TRANSITION/.test(legUpper)) return '🔄';
+    if (/FINISH|FINISHED/.test(legUpper)) return '🏁';
+    if (/START|NOT.STARTED/.test(legUpper)) return '⏳';
+    return '⏳';
 };
 
 const LegIcon = ({ leg }: { leg: Split['segment'] }) => {
@@ -63,6 +74,23 @@ const SPLIT_ICON_BY_KIND: Record<SplitMarkerKind, { emoji: string; color: string
   finish: { emoji: '🏁', color: '#eab308' },
 };
 
+function buildClockMarkerIcon(color: string, scale = 30): google.maps.Icon {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none">
+      <circle cx="32" cy="32" r="21" fill="white" stroke="${color}" stroke-width="4" />
+      <circle cx="32" cy="32" r="2.75" fill="#111827" />
+      <path d="M32 20V32L39.5 36.5" stroke="#111827" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" />
+      <path d="M24 14.5H40" stroke="#111827" stroke-width="2.4" stroke-linecap="round" opacity="0.75" />
+    </svg>
+  `;
+
+  return {
+    url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+    scaledSize: new window.google.maps.Size(scale, scale),
+    anchor: new window.google.maps.Point(scale / 2, scale / 2),
+  };
+}
+
 function inferSplitMarkerKind(route: { type?: string; assetKey?: string }, splitPoint: RouteSplitPoint, splitIndex: number, routeIndex: number, routeCount: number): SplitMarkerKind {
   const text = [
     splitPoint?.splitType,
@@ -95,6 +123,15 @@ function formatSplitDetails(splitPoint: RouteSplitPoint, kind: SplitMarkerKind, 
     `Timing point/device: ${timingPoint || device || '—'}`,
     `Cutoff: ${cutoff || '—'}`,
   ];
+}
+
+function parseDistanceKm(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const text = String(value ?? '').trim();
+  if (!text) return NaN;
+  const normalized = text.replace(/,/g, '.');
+  const match = normalized.match(/-?\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : NaN;
 }
 
 
@@ -135,9 +172,9 @@ export default function MapViewer({ routes, trackedAthletes, focusedAthlete, tim
 
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const [activeInfoWindow, setActiveInfoWindow] = useState<string | null>(null);
-  const [activeSplitMarker, setActiveSplitMarker] = useState<string | null>(null);
   const [gpxPaths, setGpxPaths] = useState<GpxPath[]>([]);
   const [isGpxLoading, setIsGpxLoading] = useState(true);
+  const hasUserAdjustedViewportRef = useRef(false);
 
   const routeSplitMarkers = useMemo(() => {
     if (!gpxPaths.length || !routes.length) return [] as RouteMarker[][];
@@ -187,25 +224,108 @@ export default function MapViewer({ routes, trackedAthletes, focusedAthlete, tim
         return markers;
       }
 
-      return [...(route.splitPoints || [])]
-        .filter((splitPoint) => Number.isFinite(Number(splitPoint.distance)))
-        .sort((a, b) => Number(a.distance || 0) - Number(b.distance || 0))
+      const customMarkers = [...(route.splitPoints || [])]
+        .filter((splitPoint) => Number.isFinite(parseDistanceKm((splitPoint as any).distance ?? (splitPoint as any).distanceKm ?? (splitPoint as any).DistanceFromStart ?? (splitPoint as any).distanceFromStart ?? (splitPoint as any).meters)))
+        .sort((a, b) => parseDistanceKm((a as any).distance ?? (a as any).distanceKm ?? (a as any).DistanceFromStart ?? (a as any).distanceFromStart ?? (a as any).meters) - parseDistanceKm((b as any).distance ?? (b as any).distanceKm ?? (b as any).DistanceFromStart ?? (b as any).distanceFromStart ?? (b as any).meters))
         .map((splitPoint, splitIndex) => {
-          const position = interpolatePositionFromPaths([{ path: path.path }], Number(splitPoint.distance || 0));
-          if (!position) return null;
+          const distanceKm = parseDistanceKm((splitPoint as any).distance ?? (splitPoint as any).distanceKm ?? (splitPoint as any).DistanceFromStart ?? (splitPoint as any).distanceFromStart ?? (splitPoint as any).meters);
+          const position = interpolatePositionFromPaths([{ path: path.path }], distanceKm);
+          // Still create marker even if position interpolation fails - use start + some offset
+          const finalPosition = position || (path.path.length > 0 ? path.path[Math.min(Math.floor((distanceKm / 100) * path.path.length), path.path.length - 1)] : null);
+          if (!finalPosition) return null;
           const kind = inferSplitMarkerKind(route, splitPoint, splitIndex, routeIndex, routes.length);
           return {
             id: `${routeIndex}-${splitIndex}-${splitPoint.id || splitPoint.name || kind}`,
             kind,
             label: String(splitPoint.name || splitPoint.id || kind).trim() || kind,
-            distanceKm: Number(splitPoint.distance || 0),
-            position,
+            distanceKm,
+            position: finalPosition,
             details: formatSplitDetails(splitPoint, kind, route?.type),
           } as RouteMarker;
         })
         .filter((marker): marker is RouteMarker => Boolean(marker));
+
+      // Always surface race anchors even when custom split points are configured.
+      const hasStart = customMarkers.some((marker) => marker.kind === 'start');
+      const hasFinish = customMarkers.some((marker) => marker.kind === 'finish');
+
+      if (routeIndex === 0 && !hasStart) {
+        customMarkers.unshift({
+          id: `forced-${routeIndex}-start`,
+          kind: 'start',
+          label: 'Start',
+          distanceKm: 0,
+          position: start,
+          details: ['Leg: START', 'Distance: 0.00 km', 'Timing point/device: —', 'Cutoff: —'],
+        });
+      }
+
+      if (routeIndex === routes.length - 1 && !hasFinish) {
+        customMarkers.push({
+          id: `forced-${routeIndex}-finish`,
+          kind: 'finish',
+          label: 'Finish',
+          distanceKm: null,
+          position: end,
+          details: ['Leg: FINISH', 'Distance: —', 'Timing point/device: —', 'Cutoff: —'],
+        });
+      }
+
+      return customMarkers;
     });
   }, [gpxPaths, routes]);
+
+  const athleteMarkerPalette = useMemo(() => [
+    '#2563eb', '#16a34a', '#dc2626', '#9333ea', '#ea580c', '#0f766e', '#db2777', '#4f46e5', '#ca8a04', '#0891b2',
+  ], []);
+
+  const getAthleteMarkerIcon = useCallback((athlete: LiveAthlete, index: number): google.maps.Icon | google.maps.Symbol => {
+    const fallbackKey = String(athlete.id || athlete.athleteUid || athlete.bib || athlete.name || index);
+    const hash = Array.from(fallbackKey).reduce((acc, char) => ((acc * 31) + char.charCodeAt(0)) >>> 0, 0);
+    const color = athleteMarkerPalette[hash % athleteMarkerPalette.length] || '#2563eb';
+    return {
+      path: google.maps.SymbolPath.CIRCLE,
+      scale: 13,
+      fillColor: color,
+      fillOpacity: 1,
+      strokeColor: '#ffffff',
+      strokeOpacity: 1,
+      strokeWeight: 2.5,
+    };
+  }, [athleteMarkerPalette]);
+
+  const buildAthleteMarkerSvg = useCallback((athlete: LiveAthlete, index: number, currentLeg?: string | null): string => {
+    const fallbackKey = String(athlete.id || athlete.athleteUid || athlete.bib || athlete.name || index);
+    const hash = Array.from(fallbackKey).reduce((acc, char) => ((acc * 31) + char.charCodeAt(0)) >>> 0, 0);
+    const color = athleteMarkerPalette[hash % athleteMarkerPalette.length] || '#2563eb';
+    const initials = getInitials(athlete.name);
+    const legEmoji = getLegIcon(currentLeg);
+    
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="72" height="96" viewBox="0 0 72 96">
+        <!-- Marker pin shape -->
+        <defs>
+          <linearGradient id="athleteGrad${index}" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" style="stop-color:${color};stop-opacity:1" />
+            <stop offset="100%" style="stop-color:${color}cc;stop-opacity:1" />
+          </linearGradient>
+        </defs>
+        <path d="M 36 0 C 54 0 68 14 68 32 C 68 32 36 96 36 96 C 36 96 4 32 4 32 C 4 14 18 0 36 0 Z" fill="url(#athleteGrad${index})" stroke="white" stroke-width="2"/>
+        
+        <!-- Avatar circle background -->
+        <circle cx="36" cy="30" r="20" fill="white" stroke="${color}" stroke-width="2"/>
+        
+        <!-- Athlete initials or placeholder -->
+        <text x="36" y="35" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="${color}">${initials || 'A'}</text>
+        
+        <!-- Leg icon overlay -->
+        <circle cx="50" cy="16" r="12" fill="${color}" stroke="white" stroke-width="1.5"/>
+        <text x="50" y="22" font-family="Arial, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="middle">${legEmoji}</text>
+      </svg>
+    `;
+    
+    return svg;
+  }, [athleteMarkerPalette]);
 
   const getLastRecordedSplit = useCallback((athlete: LiveAthlete) => {
     const sorted = [...(athlete.splits || [])]
@@ -233,8 +353,13 @@ export default function MapViewer({ routes, trackedAthletes, focusedAthlete, tim
 
   const getAthletePosition = useCallback((athlete: LiveAthlete) => {
     const trackingStatus = getTrackingStatus(athlete);
+    const hasPredictionFeed = Boolean(
+      athlete.predictedLocation
+      || (typeof athlete.courseProgress === 'number' && athlete.courseProgress > 0)
+      || ((athlete as any)?.participantLive && Number((athlete as any)?.participantLive?.distanceCovered || 0) > 0),
+    );
 
-    if (trackingStatus.isOverdueForNextSplit && trackingStatus.lastRecordedSplit && gpxPaths.length > 0) {
+    if (trackingStatus.isOverdueForNextSplit && trackingStatus.lastRecordedSplit && gpxPaths.length > 0 && !hasPredictionFeed) {
       return interpolatePositionFromPaths(gpxPaths, trackingStatus.lastRecordedSplit.distance || 0);
     }
 
@@ -253,6 +378,19 @@ export default function MapViewer({ routes, trackedAthletes, focusedAthlete, tim
     // 4. Fallback if no data is available
     return null;
   }, [gpxPaths, getTrackingStatus]);
+
+  const getCurrentAthleteSegment = useCallback((athlete: LiveAthlete) => {
+    const splits = athlete.splits || [];
+    if (!splits.length) return null;
+    const sorted = [...splits].sort((a, b) => (a.time || 0) - (b.time || 0));
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      const split = sorted[i];
+      if (split.time && split.time > 0) {
+        return split.segment || split.name;
+      }
+    }
+    return null;
+  }, []);
 
   useEffect(() => {
     const fetchAllGpx = async () => {
@@ -326,56 +464,58 @@ export default function MapViewer({ routes, trackedAthletes, focusedAthlete, tim
   
   const onMapLoad = useCallback((mapInstance: google.maps.Map) => {
     setMap(mapInstance);
+    mapInstance.addListener('zoom_changed', () => {
+      hasUserAdjustedViewportRef.current = true;
+    });
+    mapInstance.addListener('dragstart', () => {
+      hasUserAdjustedViewportRef.current = true;
+    });
   }, []);
 
   useEffect(() => {
+    // Re-enable one-time auto-fit when route context changes.
+    hasUserAdjustedViewportRef.current = false;
+  }, [gpxPaths, focusedAthlete?.id, visibleRouteIndices]);
+
+  useEffect(() => {
     if (!map) return;
-  
+
     const bounds = new window.google.maps.LatLngBounds();
     let hasPoints = false;
-  
-    // Always calculate bounds based on GPX paths or tracked athletes
+
     if (gpxPaths.length > 0) {
       gpxPaths.forEach((p, index) => {
         const isVisible = !visibleRouteIndices?.length || visibleRouteIndices.includes(index);
         if (!isVisible || !p.path.length) return;
-        p.path.forEach(point => bounds.extend(point));
+        p.path.forEach((point) => bounds.extend(point));
         hasPoints = true;
       });
-    } else if (trackedAthletes.length > 0) {
-      trackedAthletes.forEach(athlete => {
-        const position = getAthletePosition(athlete);
-        if (position) {
-          bounds.extend(position);
-          hasPoints = true;
-        }
-      });
     }
-  
-    // If we have a focused athlete, pan and zoom to them.
+
+    trackedAthletes.forEach((athlete) => {
+      const position = getAthletePosition(athlete);
+      if (position) {
+        bounds.extend(position);
+        hasPoints = true;
+      }
+    });
+
     if (focusedAthlete) {
-        const position = getAthletePosition(focusedAthlete);
-        if (position) {
-            map.panTo(position);
-            map.setZoom(15);
-            setActiveInfoWindow(focusedAthlete.id);
-        }
-    } 
-    // If no focused athlete, fit the map to the calculated bounds.
-    else if (hasPoints && !bounds.isEmpty()) {
+      setActiveInfoWindow(focusedAthlete.id);
+    }
+
+    if (hasPoints && !bounds.isEmpty() && !hasUserAdjustedViewportRef.current) {
       map.fitBounds(bounds);
       const currentZoom = map.getZoom();
-      // Prevent excessive zooming on a single point or very small area
       if (currentZoom && currentZoom > 16) {
         map.setZoom(16);
       }
-      setActiveInfoWindow(null);
     }
-  
-  }, [map, gpxPaths, trackedAthletes, focusedAthlete, getAthletePosition, visibleRouteIndices]);
-  
 
-  const athletesToDisplay = focusedAthlete ? [focusedAthlete] : trackedAthletes;
+  }, [map, gpxPaths, trackedAthletes, focusedAthlete, getAthletePosition, visibleRouteIndices]);
+
+
+  const athletesToDisplay = trackedAthletes;
   
   const finalContainerStyle = containerStyle || { height: '600px', width: '100%' };
 
@@ -410,32 +550,9 @@ export default function MapViewer({ routes, trackedAthletes, focusedAthlete, tim
                       <Marker
                         position={marker.position}
                         title={`${marker.label} · ${marker.distanceKm != null ? `${marker.distanceKm.toFixed(2)} km` : 'route marker'}`}
-                        onClick={() => setActiveSplitMarker(marker.id)}
-                        icon={{
-                          path: google.maps.SymbolPath.CIRCLE,
-                          scale: marker.kind === 'start' || marker.kind === 'finish' ? 11 : 9,
-                          fillColor: iconMeta.color,
-                          fillOpacity: 0.95,
-                          strokeColor: '#ffffff',
-                          strokeWeight: 2,
-                        }}
-                        label={{
-                          text: iconMeta.emoji,
-                          color: '#ffffff',
-                          fontSize: '12px',
-                          fontWeight: '700',
-                        }}
+                        clickable={false}
+                        icon={buildClockMarkerIcon(iconMeta.color, marker.kind === 'start' || marker.kind === 'finish' ? 34 : 30)}
                       />
-                      {activeSplitMarker === marker.id && (
-                        <InfoWindow position={marker.position} onCloseClick={() => setActiveSplitMarker(null)}>
-                          <div className="min-w-[220px] space-y-1 p-1 text-sm">
-                            <div className="font-semibold">{iconMeta.emoji} {marker.label}</div>
-                            {marker.details.map((detail) => (
-                              <div key={detail} className="text-xs text-slate-700">{detail}</div>
-                            ))}
-                          </div>
-                        </InfoWindow>
-                      )}
                     </React.Fragment>
                   );
                 })}
@@ -469,38 +586,25 @@ export default function MapViewer({ routes, trackedAthletes, focusedAthlete, tim
                     key={`timing-point-${point.id || pointIndex}`}
                     position={{ lat, lng }}
                     title={point.displayName || point.shortName || `Timing Point ${pointIndex + 1}`}
-                    icon={{
-                      path: google.maps.SymbolPath.CIRCLE,
-                      scale: 9,
-                      fillColor: color,
-                      fillOpacity: 0.95,
-                      strokeColor: '#ffffff',
-                      strokeWeight: 2,
-                    }}
-                    label={{
-                      text: point.shortName || point.displayName || `${pointIndex + 1}`,
-                      color: '#ffffff',
-                      fontSize: '10px',
-                      fontWeight: '700',
-                    }}
+                      icon={buildClockMarkerIcon(color, 36)}
                   />
                 );
               })}
-            {athletesToDisplay.map(athlete => {
+            {athletesToDisplay.map((athlete, index) => {
               const position = getAthletePosition(athlete);
               const trackingStatus = getTrackingStatus(athlete);
-              const icon: google.maps.Icon = {
-                url: athlete.avatarUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(athlete.name)}&background=0D8ABC&color=fff&size=40`,
-                scaledSize: new window.google.maps.Size(36, 36),
-                anchor: new window.google.maps.Point(18, 18),
-                origin: new window.google.maps.Point(0, 0),
-              };
+              const currentSegment = getCurrentAthleteSegment(athlete);
+              const markerSvg = buildAthleteMarkerSvg(athlete, index, currentSegment);
 
               return position && (
                 <React.Fragment key={athlete.id}>
                     <Marker 
                         position={position} 
-                        icon={icon}
+                        icon={{
+                          url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(markerSvg)}`,
+                          scaledSize: new window.google.maps.Size(44, 56),
+                          anchor: new window.google.maps.Point(22, 56),
+                        }}
                         onClick={() => setActiveInfoWindow(athlete.id)}
                     />
                     {activeInfoWindow === athlete.id && (

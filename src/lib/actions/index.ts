@@ -263,6 +263,8 @@ export {
   getParticipantForEventByEmailAction,
   getParticipantsForEventAction,
   getParticipantsPaginatedAction,
+  repairLegacyParticipantsMirrorAction,
+  verifyParticipantIntegrityAction,
   registerParticipantFromDatabaseAction,
   transferParticipantToEventAction,
   updateCategoryForParticipantAction,

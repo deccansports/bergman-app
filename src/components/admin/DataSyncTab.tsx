@@ -384,7 +384,7 @@ export default function DataSyncTab({ events, isLoadingEvents }: { events: Event
                             </SelectTrigger>
                             <SelectContent className="text-left">{availableYears.map(y => <SelectItem key={y} value={y} className="text-left">{y} Season</SelectItem>)}</SelectContent>
                         </Select>
-                        <Button variant="secondary" size="sm" onClick={() => handleSync('kvMigration')} disabled={!!activeJobId} className="w-full font-black text-[9px] uppercase tracking-widest h-9 text-left justify-start bg-primary text-white hover:bg-primary/90 shadow-md">
+                        <Button variant="secondary" size="sm" onClick={() => handleSync('kvMigration')} disabled={!!activeJobId} className="w-full font-black text-[9px] uppercase tracking-widest h-9 text-left justify-start bg-slate-800 text-white hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 shadow-md">
                             <Database className={cn("mr-1.5 h-3 w-3", !!activeJobId && "animate-pulse")}/>
                             Migrate All Data To KV
                         </Button>

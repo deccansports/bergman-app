@@ -29,6 +29,7 @@ const PUBLIC_VIEW_ROUTES = [
     '/athlete-rankings',
     '/rewards',
     '/tracking',
+    '/live-tracking',
     '/content',
     '/privacy-policy',
     '/refund-policy',
@@ -51,6 +52,11 @@ export default function ClientAuthManager({ children }: { children: React.ReactN
   useEffect(() => {
     // 1. Wait for auth to settle
     if (loading || isAuthenticating) return;
+
+    if (pathname.startsWith('/live-tracking')) {
+      isRedirecting.current = false;
+      return;
+    }
 
     const isRoot = pathname === '/';
     const isPublicAuthRoute = PUBLIC_AUTH_ROUTES.some(route => pathname.startsWith(route));

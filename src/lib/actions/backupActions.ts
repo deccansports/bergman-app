@@ -7,6 +7,7 @@ import { revalidatePath } from 'next/cache';
 import type { BackupRecord } from '@/lib/types';
 import { serializeParticipantData, toIsoStringSafe, serializeValue } from '@/lib/utils';
 import * as zlib from 'zlib';
+import { getParticipantsPaginatedAction } from './participantActions';
 
 const BACKUPS_COLLECTION = 'eventBackups';
 
@@ -28,14 +29,22 @@ export async function createBackupAction(
     const eventData = eventSnap.data()!;
     const eventName = eventData.eventName || 'Unknown Event';
 
-    // Fetch all related data
+    // Fetch the full participant list from the same KV/Firestore-backed source used by the Participants tab.
+    // This keeps backups aligned with the UI and prevents cancelled/deferred rows from being dropped.
+    const participantsResult = await getParticipantsPaginatedAction(eventId, 10000, null, false);
+    const participantRows = participantsResult?.success && Array.isArray(participantsResult.participants)
+      ? participantsResult.participants
+      : [];
+
+    // Fallback for older data that may not yet be reflected in the paginated source.
     const participantsSnap = await eventRef.collection('participants').get();
     const ticketsSnap = await eventRef.collection('ticketDefinitions').get();
     const bibsSnap = await eventRef.collection('bibAssignments').get();
     const sponsorsSnap = await eventRef.collection('sponsors').get();
     const inventorySnap = await eventRef.collection('inventory').doc('mainInventory').get();
 
-    const participantsData = participantsSnap.docs.map(doc => serializeParticipantData(doc));
+    const firestoreParticipantsData = participantsSnap.docs.map(doc => serializeParticipantData(doc));
+    const participantsData = participantRows.length > 0 ? participantRows : firestoreParticipantsData;
     const ticketDefinitionsData = ticketsSnap.docs.map(doc => serializeValue({ id: doc.id, ...doc.data() }));
     const bibAssignmentsData = bibsSnap.docs.map(doc => serializeValue({ id: doc.id, ...doc.data() }));
     const sponsorsData = sponsorsSnap.docs.map(doc => serializeValue({ id: doc.id, ...doc.data() }));
@@ -129,12 +138,25 @@ export async function getBackupsForEventAction(
 
     const backups: BackupRecord[] = snapshot.docs.map(doc => {
       const data = doc.data();
+      let derivedParticipantCount = Number(data.participantCount || 0);
+
+      if (typeof data.participantsData === 'string' && data.participantsData.trim()) {
+        try {
+          const parsedParticipants = JSON.parse(data.participantsData);
+          if (Array.isArray(parsedParticipants)) {
+            derivedParticipantCount = parsedParticipants.length;
+          }
+        } catch {
+          // Keep stored count if payload cannot be parsed.
+        }
+      }
+
       return {
         id: doc.id,
         eventId: data.eventId,
         eventName: data.eventName,
         createdAt: toIsoStringSafe(data.createdAt) || '',
-        participantCount: data.participantCount,
+        participantCount: derivedParticipantCount,
         participantsData: data.participantsData,
         eventDocument: data.eventDocument,
         ticketDefinitionsData: data.ticketDefinitionsData,

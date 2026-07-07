@@ -42,6 +42,7 @@ export interface EventParticipant {
       mobile: string;
     } | null;
   } | null;
+  trackingVisibility?: 'PUBLIC' | 'ANONYMOUS' | 'PRIVATE' | null;
   bikeCheckInStatus?: 'Pending' | 'CheckedIn';
   bikeCheckedInAt?: string | null;
   bikeCheckOutStatus?: 'Pending' | 'CheckedOut';
@@ -87,7 +88,7 @@ export interface EventParticipant {
   agreedWaiver?: boolean;
   agreedCutoff?: boolean;
   agreedPolicyChangeFlow?: boolean;
-  liveTrackingPrivacy?: 'PUBLIC' | 'PRIVATE' | null;
+  liveTrackingPrivacy?: 'PUBLIC' | 'ANONYMOUS' | 'PRIVATE' | null;
   previousTimingCertificateUrl?: string | null;
   digitalSignatureName?: string | null;
   personalRaceEmail?: string | null;

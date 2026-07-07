@@ -13,8 +13,10 @@ import LiveTrackingAdminTab from '@/components/admin/LiveTrackingAdminTab';
 import FeibotSyncRebuildCard from '@/components/admin/FeibotSyncRebuildCard';
 import FeibotCredentialCards from '@/components/admin/FeibotCredentialCards';
 import { ContestMappingPanel } from '@/components/admin/ContestMappingPanel';
+import { LegSplitMappingAdmin } from '@/components/admin/LegSplitMappingAdmin';
 import CourseMapDialog from '@/components/events/CourseMapDialog';
 import { updateTicketDefinitionAction } from '@/lib/actions/ticketActions';
+import { getCalendarEventsAction } from '@/lib/actions/eventActions';
 import { fetchJsonCached, invalidateJsonCache } from '@/lib/liveTrackingRequestCache';
 
 type CredentialStatus = {
@@ -76,7 +78,7 @@ type ProviderConfig = {
       resolvedEventUuid?: string;
       legacyEventUuid?: string;
       apiBaseUrl?: string;
-      cloud?: { eventUuid?: string; apiBaseUrl?: string; hasCredentials?: boolean };
+      cloud?: { eventUuid?: string; apiBaseUrl?: string; hasCredentials?: boolean; authenticated?: boolean; lastVerifiedAt?: string };
       score?: { eventUuid?: string; overviewUrl?: string; progressUrl?: string; available?: boolean };
       timingRuleSource?: string;
     };
@@ -345,7 +347,7 @@ function normalizeSplitDraftRows(rows: CourseSplitDraft[]): CourseSplit[] {
 
 export default function LiveTrackingHub() {
   const [credentials, setCredentials] = useState<CredentialStatus | null>(null);
-  const [activeTab, setActiveTab] = useState<'setup' | 'course_maps' | 'upload_results'>('setup');
+  const [activeTab, setActiveTab] = useState<'setup' | 'contest_mapping' | 'leg_split_mapping' | 'course_maps' | 'feibot_sync' | 'upload_results'>('setup');
   const [events, setEvents] = useState<FeibotEvent[]>([]);
   const [selectedEventUuid, setSelectedEventUuid] = useState('');
   const [bergmanEventId, setBergmanEventId] = useState('');
@@ -421,6 +423,9 @@ export default function LiveTrackingHub() {
   const [fdbImportSummary, setFdbImportSummary] = useState<any>(null);
   const [fdbMetadata, setFdbMetadata] = useState<any>(null);
   const [fdbImportLogs, setFdbImportLogs] = useState<any[]>([]);
+  const [splitMappings, setSplitMappings] = useState<Record<string, any> | null>(null);
+  const [splitMappingSummary, setSplitMappingSummary] = useState<{ importedCount: number; mappedCount: number; unmappedCount: number } | null>(null);
+  const [loadingSplitMappings, setLoadingSplitMappings] = useState(false);
   const [eventUuidTestLoading, setEventUuidTestLoading] = useState(false);
   const [eventUuidTestResult, setEventUuidTestResult] = useState<any>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -480,6 +485,188 @@ export default function LiveTrackingHub() {
       setError(err instanceof Error ? err.message : 'Failed to load provider configuration.');
     }
   }, []);
+
+  const loadEvents = useCallback(async (eventIdInput?: string) => {
+    const eventId = String(eventIdInput || bergmanEventId.trim() || '').trim();
+    if (!eventId) {
+      setEvents([]);
+      setEventDiscoverySupported(null);
+      return;
+    }
+
+    setLoadingEvents(true);
+    try {
+      const data = await fetchJsonCached<any>(`providerEvents:${eventId}`, async () => {
+        const response = await fetch(`/api/live/provider/events?eventId=${encodeURIComponent(eventId)}`, { cache: 'no-store' });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.success) {
+          throw new Error(payload?.message || `Request failed with HTTP ${response.status}`);
+        }
+        return payload;
+      });
+
+      setEvents(Array.isArray(data?.events) ? data.events : []);
+      setEventDiscoverySupported(Boolean(data?.authenticated || data?.credentialsValid || (Array.isArray(data?.events) && data.events.length > 0)));
+    } catch (err) {
+      setEvents([]);
+      setEventDiscoverySupported(false);
+      setError(err instanceof Error ? err.message : 'Failed to load Feibot events.');
+    } finally {
+      setLoadingEvents(false);
+    }
+  }, [bergmanEventId]);
+
+  const loadProviderDatabase = useCallback(async (eventIdInput?: string) => {
+    const eventId = String(eventIdInput || bergmanEventId.trim() || '').trim();
+    if (!eventId) return;
+
+    try {
+      await fetchJsonCached<any>(`providerDatabase:${eventId}`, async () => {
+        const response = await fetch(`/api/live/provider-database/${encodeURIComponent(eventId)}`, { cache: 'no-store' });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.success) {
+          throw new Error(payload?.message || `Request failed with HTTP ${response.status}`);
+        }
+        return payload;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load provider database metadata.');
+    }
+  }, [bergmanEventId]);
+
+  const loadStatus = useCallback(async () => {
+    const eventId = bergmanEventId.trim();
+    if (!eventId) return;
+
+    setLoadingStatus(true);
+    try {
+      await Promise.all([
+        loadProviderConfig(eventId),
+        loadProviderDatabase(eventId),
+      ]);
+    } finally {
+      setLoadingStatus(false);
+    }
+  }, [bergmanEventId, loadProviderConfig, loadProviderDatabase]);
+
+  const loadUpcomingEvents = useCallback(async () => {
+    setLoadingUpcomingEvents(true);
+    try {
+      const result = await getCalendarEventsAction();
+      if (result?.success && Array.isArray(result.events)) {
+        setUpcomingEvents(
+          result.events.map((event: any) => ({
+            id: String(event?.id || ''),
+            name: String(event?.eventName || event?.name || event?.id || ''),
+            date: event?.eventDate ? String(event.eventDate) : null,
+            status: (event?.status as 'upcoming' | 'live' | 'completed') || 'upcoming',
+            isUpcoming: true,
+            customSlug: event?.customSlug || null,
+          })),
+        );
+      }
+    } catch {
+      // non-critical; silently ignore
+    } finally {
+      setLoadingUpcomingEvents(false);
+    }
+  }, []);
+
+  const loadCredentials = useCallback(async (eventId: string) => {
+    if (!eventId) return;
+    try {
+      const [data, credentialStatus] = await Promise.all([
+        fetchJsonCached<any>(`credentials:${eventId}`, async () => {
+          const response = await fetch(`/api/live/provider-config/${encodeURIComponent(eventId)}`, { cache: 'no-store' });
+          const payload = await response.json().catch(() => null);
+          if (!response.ok || !payload?.success) {
+            throw new Error(payload?.message || `Request failed with HTTP ${response.status}`);
+          }
+          return payload;
+        }),
+        fetchJsonCached<any>(`credentialStatus:${eventId}`, async () => {
+          const response = await fetch(`/api/live/provider/credentials?eventId=${encodeURIComponent(eventId)}`, { cache: 'no-store' });
+          const payload = await response.json().catch(() => null);
+          if (!response.ok) {
+            throw new Error(payload?.message || payload?.error || `Request failed with HTTP ${response.status}`);
+          }
+          return payload;
+        }),
+      ]);
+
+      const feibot = data?.config?.feibotConfig || {};
+      const providerState = data?.config?.providerState || {};
+      const cloudAuthenticated = Boolean(feibot?.cloud?.authenticated);
+      const providerVerified = providerState.authentication === 'verified' || providerState.status === 'connected';
+      setCredentials((prev) => ({
+        ...(prev || {}),
+        configured: Boolean(feibot.hasCredentials ?? credentialStatus?.configured ?? credentialStatus?.eventCredentialConfigured ?? prev?.configured),
+        source: (credentialStatus?.source as any) || (feibot.credentialsSource as any) || prev?.source || 'none',
+        encryptionEnabled: Boolean(credentialStatus?.encryptionEnabled ?? prev?.encryptionEnabled ?? true),
+        eventUuid: feibot.eventUuid || credentialStatus?.eventUuid || prev?.eventUuid || null,
+        linkedEventUuid: credentialStatus?.linkedEventUuid || prev?.linkedEventUuid || null,
+        cloudEventUuid: credentialStatus?.cloudEventUuid || prev?.cloudEventUuid || null,
+        credentialBoundEventUuid: credentialStatus?.credentialBoundEventUuid || prev?.credentialBoundEventUuid || null,
+        runtimeEventUuid: credentialStatus?.runtimeEventUuid || prev?.runtimeEventUuid || null,
+        lastAuthResult: providerVerified || cloudAuthenticated ? 'success' : credentialStatus?.lastAuthResult || prev?.lastAuthResult || null,
+        lastAuthAt: credentialStatus?.lastAuthAt || prev?.lastAuthAt || null,
+        updatedAt: providerState.updatedAt || credentialStatus?.updatedAt || prev?.updatedAt || null,
+      }));
+    } catch {
+      // non-critical
+    }
+  }, []);
+
+  const loadSplitMappings = useCallback(async (eventId: string) => {
+    if (!eventId) {
+      setSplitMappings(null);
+      setSplitMappingSummary(null);
+      return;
+    }
+
+    setLoadingSplitMappings(true);
+    try {
+      const data = await fetchJsonCached<any>(`splitMappingSummary:${eventId}`, async () => {
+        const response = await fetch(`/api/live/split-mapping-view/${encodeURIComponent(eventId)}`, { cache: 'no-store' });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.success) {
+          throw new Error(payload?.message || `Request failed with HTTP ${response.status}`);
+        }
+        return payload;
+      });
+
+      const mappedRows = Array.isArray(data?.splitMappings) ? data.splitMappings : [];
+      setSplitMappings(mappedRows.length ? ({ rows: mappedRows } as any) : null);
+      setSplitMappingSummary({
+        importedCount: Number(data?.summary?.importedCount || 0),
+        mappedCount: Number(data?.summary?.mappedCount || 0),
+        unmappedCount: Number(data?.summary?.unmappedCount || 0),
+      });
+    } catch {
+      setSplitMappings(null);
+      setSplitMappingSummary(null);
+    } finally {
+      setLoadingSplitMappings(false);
+    }
+  }, []);
+
+  // ── On mount: load upcoming Bergman events for the event selector ──────────
+  useEffect(() => {
+    void loadUpcomingEvents();
+  }, [loadUpcomingEvents]);
+
+  // ── When bergmanEventId changes: load all event-specific data ────────────
+  useEffect(() => {
+    const eventId = bergmanEventId.trim();
+    if (!eventId) return;
+    void loadStatus();
+    void loadCredentials(eventId);
+    void loadSplitMappings(eventId);
+    void loadCourseConfig(eventId);
+    void loadFdbMetadata(eventId);
+    void loadSelectedEventCounts();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bergmanEventId]);
 
   const loadCourseConfig = useCallback(async (eventId: string) => {
     if (!eventId) {
@@ -639,199 +826,13 @@ export default function LiveTrackingHub() {
         }
         setFdbImportMessage(progress.message || null);
       }
-    } catch {
-      // ignore metadata load failures
-    }
-  }, []);
-
-  const loadEvents = useCallback(async () => {
-    setLoadingEvents(true);
-    try {
-      const data = await fetchJsonCached<any>('providerEvents', async () => {
-        const response = await fetch('/api/live/provider/events', { cache: 'no-store' });
-        const payload = await response.json().catch(() => null);
-        if (response.status === 404) {
-          return { success: false, notFound: true, events: [] };
-        }
-        if (!response.ok || !payload?.success || !Array.isArray(payload.events)) {
-          throw new Error(payload?.message || `Request failed with HTTP ${response.status}`);
-        }
-        return payload;
-      });
-      if (data.notFound) {
-        setEventDiscoverySupported(false);
-        setEvents([]);
-        return;
-      }
-
-      setEventDiscoverySupported(true);
-      setEvents(data.events);
-      if (data.events[0]?.event_uuid) {
-        const firstEventUuid = String(data.events[0].event_uuid || '').trim();
-        if (firstEventUuid) {
-          setSelectedEventUuid((prev) => (String(prev || '').trim() ? prev : firstEventUuid));
-        }
-      }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load events.';
-      if (message.includes('404')) {
-        setEventDiscoverySupported(false);
-        setEvents([]);
-      } else {
-        setError(message);
+        setError(err instanceof Error ? err.message : 'Failed to load FDB import metadata.');
       }
-    } finally {
-      setLoadingEvents(false);
-    }
-  }, []);
-
-  const loadUpcomingBergmanEvents = useCallback(async () => {
-    setLoadingUpcomingEvents(true);
-    try {
-      const data = await fetchJsonCached<any>('upcomingBergmanEvents', async () => {
-        const response = await fetch('/api/live/events', { cache: 'no-store' });
-        const payload = await response.json().catch(() => null);
-        if (!response.ok || !payload?.success || !Array.isArray(payload.events)) {
-          throw new Error(payload?.error || payload?.message || `Request failed with HTTP ${response.status}`);
-        }
-        return payload;
-      });
-
-      const upcoming = data.events
-        .filter((event: BergmanUpcomingEvent) => event?.isUpcoming)
-        .map((event: BergmanUpcomingEvent) => ({
-          id: String(event.id),
-          name: String(event.name || 'Unnamed Event'),
-          date: event.date || null,
-          status: event.status,
-          isUpcoming: Boolean(event.isUpcoming),
-          customSlug: event.customSlug || null,
-        }));
-
-      setUpcomingEvents(upcoming);
-      if (upcoming[0]?.id) {
-        const firstUpcomingId = String(upcoming[0].id || '').trim();
-        if (firstUpcomingId) {
-          setBergmanEventId((prev) => (String(prev || '').trim() ? prev : firstUpcomingId));
-        }
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load upcoming Bergman events.');
-    } finally {
-      setLoadingUpcomingEvents(false);
-    }
-  }, []);
-
-  const loadStatus = useCallback(async () => {
-    setLoadingStatus(true);
-    setError(null);
-    try {
-      const data = await fetchJsonCached<any>('providerCredentials', async () => {
-        const response = await fetch('/api/live/provider/credentials', { cache: 'no-store' });
-        const payload = await response.json().catch(() => null);
-        if (!response.ok || !payload) {
-          throw new Error(payload?.error || payload?.message || `Request failed with HTTP ${response.status}`);
-        }
-        return payload;
-      });
-
-      setCredentials(data);
-      setSelectedEventUuid((prev) => {
-        const nextFromCreds = String(data?.linkedEventUuid || data?.cloudEventUuid || data?.eventUuid || '').trim();
-        if (!nextFromCreds) return String(prev || '').trim();
-        return nextFromCreds;
-      });
-      if (data?.configured) {
-        void loadEvents();
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load credential status.');
-    } finally {
-      setLoadingStatus(false);
-    }
-  }, [loadEvents]);
-
-  const loadProviderDatabase = useCallback(async (eventId: string) => {
-    if (!eventId) return;
-    try {
-      await fetch(`/api/live/provider-database/${encodeURIComponent(eventId)}`, { cache: 'no-store' });
-    } catch {
-      // non-fatal
-    }
-  }, []);
+    }, []);
 
   useEffect(() => {
-    void loadUpcomingBergmanEvents();
-  }, [loadUpcomingBergmanEvents]);
-
-  useEffect(() => {
-    void loadStatus();
-  }, [loadStatus]);
-
-  useEffect(() => {
-    if (bergmanEventId) {
-      void loadProviderConfig(bergmanEventId);
-      void loadCourseConfig(bergmanEventId);
-      void loadFdbMetadata(bergmanEventId);
-    } else {
-      setProviderConfig(null);
-      setCourseConfig(null);
-      setFdbMetadata(null);
-    }
-  }, [bergmanEventId, loadCourseConfig, loadFdbMetadata, loadProviderConfig]);
-
-  useEffect(() => {
-    void loadTimingRules(selectedEventUuid);
-  }, [loadTimingRules, selectedEventUuid]);
-
-  useEffect(() => {
-    void loadSelectedEventCounts();
-  }, [loadSelectedEventCounts]);
-
-  useEffect(() => {
-    if (!fdbImportJobId) return;
-
-    const interval = setInterval(async () => {
-      try {
-        const response = await fetch(`/api/admin/upload-status/${fdbImportJobId}`, { cache: 'no-store' });
-        if (!response.ok) return;
-        const data = await response.json().catch(() => null);
-        if (!data) return;
-
-        if (typeof data.progress === 'number') setFdbImportProgress(data.progress);
-        if (typeof data.stage === 'string') setFdbImportStage(data.stage);
-        if (typeof data.message === 'string') setFdbImportMessage(data.message);
-        if (data.summary) setFdbImportSummary(data.summary);
-
-        if (data.status === 'completed' || data.status === 'completed_with_warnings' || data.status === 'failed' || data.status === 'cancelled') {
-          setFdbImportStatus(data.status);
-          setFdbImportJobId(null);
-          clearInterval(interval);
-          if (data.status === 'completed' || data.status === 'completed_with_warnings') {
-            invalidateJsonCache('providerCredentials');
-            invalidateJsonCache(`kvSummary:${bergmanEventId.trim()}`);
-            invalidateJsonCache(`courseConfig:${bergmanEventId.trim()}`);
-            invalidateJsonCache(`fdbMetadata:${bergmanEventId.trim()}`);
-            await Promise.all([
-              loadStatus(),
-              loadSelectedEventCounts(),
-              loadCourseConfig(bergmanEventId.trim()),
-              loadFdbMetadata(bergmanEventId.trim()),
-            ]);
-          }
-        } else {
-          setFdbImportStatus('processing');
-        }
-      } catch {
-        // ignore transient polling errors
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [bergmanEventId, fdbImportJobId, loadCourseConfig, loadFdbMetadata, loadSelectedEventCounts, loadStatus]);
-
-  useEffect(() => {
-    if (fdbImportJobId || fdbImportStatus !== 'processing' || !bergmanEventId.trim()) return;
+    if (fdbImportStatus !== 'processing' || !bergmanEventId.trim()) return;
 
     const interval = setInterval(() => {
       void loadFdbMetadata(bergmanEventId.trim());
@@ -1410,6 +1411,7 @@ export default function LiveTrackingHub() {
   const provider = providerConfig?.config?.feibotConfig;
   const providerState = providerConfig?.config?.providerState;
   const trackingEnabled = Boolean(providerConfig?.config?.trackingConfig?.enabled ?? true);
+  const trackingVisibility = trackingEnabled ? 'Public' : 'Closed';
 
     const handleDisableLiveTracking = useCallback(async () => {
       if (!bergmanEventId.trim()) return;
@@ -1438,7 +1440,12 @@ export default function LiveTrackingHub() {
   const linkedLegacyEventUuid = String(provider?.legacyEventUuid || provider?.eventUuid || '').trim();
   const linkedResolvedEventUuid = String(provider?.resolvedEventUuid || provider?.cloud?.eventUuid || provider?.eventUuid || '').trim();
   const hasSavedCredentials = Boolean(provider?.hasCredentials || credentials?.configured);
-  const authVerified = credentials?.lastAuthResult === 'success' || providerState?.authentication === 'verified';
+  const authVerified =
+    credentials?.lastAuthResult === 'success'
+    || providerState?.authentication === 'verified'
+    || providerState?.status === 'connected'
+    || Boolean(provider?.cloud?.authenticated)
+    || eventDiscoverySupported === true;
   const cloudConnected = Boolean(provider?.cloud?.eventUuid || selectedEventUuid);
   const publicScoreConfigured = Boolean(provider?.score?.eventUuid || selectedEventUuid);
   const connected = hasSavedCredentials && authVerified && cloudConnected;
@@ -1451,6 +1458,22 @@ export default function LiveTrackingHub() {
     [courseConfig?.ticketDefinitions, selectedCourseTicketId],
   );
   const selectedCourseMaps = selectedTicket?.courseMaps || null;
+  const splitMappingReady = useMemo(() => {
+    if (!splitMappings) return false;
+
+    const values = Array.isArray(splitMappings)
+      ? splitMappings
+      : Object.values(splitMappings as Record<string, any>);
+
+    return values.some((mapping: any) => {
+      if (!mapping) return false;
+      if (Array.isArray(mapping)) return mapping.length > 0;
+      if (Array.isArray(mapping?.splits)) return mapping.splits.length > 0;
+      if (Array.isArray(mapping?.legs)) return mapping.legs.length > 0;
+      return Boolean(mapping?.splitMappings?.length || mapping?.splits?.length || mapping?.legs?.length);
+    });
+  }, [splitMappings]);
+  const splitMappingConfigured = Boolean(Number(splitMappingSummary?.mappedCount || 0) > 0);
   const visibleCourseAssetFields = useMemo(() => {
     if (!selectedTicket) return COURSE_ASSET_FIELDS;
     const profile = inferCourseProfile(selectedTicket as any);
@@ -1477,11 +1500,19 @@ export default function LiveTrackingHub() {
   const selectedFeibotEventUuid = selectedEventUuid.trim() || manualEventUuid.trim() || '—';
   const selectedFeibotEventName = selectedEvent?.name || (selectedFeibotEventUuid !== '—' ? 'Manual Feibot Event' : 'Not selected');
   const fdbLocalEventUuid = String(fdbImportSummary?.detected?.eventUuid || fdbMetadata?.database?.localEventUuid || '').trim();
+  const fdbLatestSummary = fdbImportSummary || fdbMetadata?.latestSummary || null;
   const linkedEventUuid = linkedResolvedEventUuid || fdbLocalEventUuid || selectedEventUuid.trim() || manualEventUuid.trim() || '';
   const linkedEventName = selectedBergmanEventName;
   const hasParticipantImport = Number(feibotParticipantCount || fdbImportSummary?.counts?.participants || fdbMetadata?.database?.participants || 0) > 0;
   const linkedEventExists = Boolean(linkedEventUuid || bergmanEventId.trim());
   const canShowConnectedState = Boolean(credentials?.configured && linkedEventExists && hasParticipantImport);
+  const databaseImported = Boolean(
+    String(fdbLatestSummary?.status || fdbMetadata?.database?.status || '').trim().toUpperCase() === 'IMPORTED'
+    || String(fdbLatestSummary?.status || '').trim().toUpperCase() === 'COMPLETED'
+    || String(fdbLatestSummary?.status || '').trim().toUpperCase() === 'COMPLETED_WITH_WARNINGS'
+    || Number(fdbLatestSummary?.counts?.participants || fdbMetadata?.database?.participants || 0) > 0
+    || Boolean(fdbMetadata?.database?.uploadedAt || fdbLatestSummary?.completedAt || fdbMetadata?.database?.localEventUuid)
+  );
   const mappedContests = useMemo(() => {
     const contests: any[] = Array.isArray(feibotTimingSummary?.contests)
       ? feibotTimingSummary.contests
@@ -1520,6 +1551,37 @@ export default function LiveTrackingHub() {
       })
       .filter((contest): contest is { contestUuid: string; contestName: string } => Boolean(contest));
   }, [feibotTimingSummary?.contests, fdbImportSummary?.importedContests]);
+
+  const kvBuildReady = useMemo(() => {
+    const validationComplete = Boolean(fdbImportSummary?.validation?.complete);
+    const validationStatus = String(fdbImportSummary?.validationStatus || '').trim().toUpperCase();
+    const importStatus = String(fdbImportSummary?.status || '').trim().toUpperCase();
+    const kvRecords = Number(fdbImportSummary?.kvRecordsWritten || fdbMetadata?.database?.kvRecordsWritten || 0);
+
+    if (validationComplete) return true;
+    if (validationStatus === 'PASS' || validationStatus === 'WARNING' || validationStatus === 'TIMEOUT') return true;
+    return importStatus.startsWith('COMPLETED') && kvRecords > 0;
+  }, [fdbImportSummary?.status, fdbImportSummary?.validation?.complete, fdbImportSummary?.validationStatus, fdbImportSummary?.kvRecordsWritten, fdbMetadata?.database?.kvRecordsWritten]);
+
+  const splitMappingGateReady = useMemo(() => {
+    if (splitMappingReady) return true;
+
+    const importedSplits = Number(fdbImportSummary?.counts?.splits || 0);
+    const importedLegs = Number(fdbImportSummary?.counts?.legs || 0);
+    const timingSplits = Array.isArray(feibotTimingSummary?.splits) ? feibotTimingSummary.splits.length : 0;
+    const timingLegs = Array.isArray(feibotTimingSummary?.legs) ? feibotTimingSummary.legs.length : 0;
+    const mappedContestCount = Array.isArray(mappedContests) ? mappedContests.length : 0;
+
+    if (importedSplits > 0 || importedLegs > 0) return true;
+    if (timingSplits > 0 || timingLegs > 0) return true;
+    if (mappedContestCount > 0) return true;
+
+    return Boolean(
+      (selectedCourseMaps?.swimSplits?.length || 0) +
+      (selectedCourseMaps?.bikeSplits?.length || 0) +
+      ((selectedCourseMaps?.run2Splits?.length || 0) || (selectedCourseMaps?.runSplits?.length || 0)) > 0,
+    );
+  }, [fdbImportSummary?.counts?.legs, fdbImportSummary?.counts?.splits, feibotTimingSummary?.legs, feibotTimingSummary?.splits, mappedContests, selectedCourseMaps?.bikeSplits?.length, selectedCourseMaps?.run2Splits?.length, selectedCourseMaps?.runSplits?.length, selectedCourseMaps?.swimSplits?.length, splitMappingReady]);
 
   const updateCourseSplitDraft = useCallback((field: CourseSplitField, splitId: string, key: 'name' | 'distance', value: string) => {
     setCourseSplitDrafts((prev) => ({
@@ -1688,306 +1750,194 @@ export default function LiveTrackingHub() {
         </Alert>
       ) : null}
 
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'setup' | 'course_maps' | 'upload_results')} className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'setup' | 'contest_mapping' | 'leg_split_mapping' | 'course_maps' | 'feibot_sync' | 'upload_results')} className="w-full">
+        <div className="sm:hidden">
+          <label htmlFor="live-tracking-hub-tab-select" className="mb-2 block text-xs font-medium text-muted-foreground">
+            Select section
+          </label>
+          <select
+            id="live-tracking-hub-tab-select"
+            value={activeTab}
+            onChange={(e) => setActiveTab(e.target.value as 'setup' | 'contest_mapping' | 'leg_split_mapping' | 'course_maps' | 'feibot_sync' | 'upload_results')}
+            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+          >
+            <option value="setup">Setup</option>
+            <option value="contest_mapping">Contest Mapping</option>
+            <option value="leg_split_mapping">Leg & Split Mapping</option>
+            <option value="course_maps">Course Maps</option>
+            <option value="feibot_sync">Feibot Sync</option>
+            <option value="upload_results">Upload Results</option>
+          </select>
+        </div>
+
+        <TabsList className="hidden w-full grid-cols-6 sm:grid">
           <TabsTrigger value="setup">Setup</TabsTrigger>
+          <TabsTrigger value="contest_mapping">Contest Mapping</TabsTrigger>
+          <TabsTrigger value="leg_split_mapping">Leg & Split Mapping</TabsTrigger>
           <TabsTrigger value="course_maps">Course Maps</TabsTrigger>
-          <TabsTrigger value="feibot_sync">Feibot Sync &amp; Rebuild</TabsTrigger>
-          <TabsTrigger value="upload_results">Upload Final Results</TabsTrigger>
+          <TabsTrigger value="feibot_sync">Feibot Sync</TabsTrigger>
+          <TabsTrigger value="upload_results">Upload Results</TabsTrigger>
         </TabsList>
 
         <TabsContent value="setup" className="mt-6 space-y-6">
-          {/* ===== Credential Cards (AK-EVENT + AK-ACCOUNT) ===== */}
-          <div className="space-y-3">
-            <h3 className="text-lg font-semibold">Feibot API Credentials</h3>
-            <p className="text-sm text-muted-foreground">
-              Secrets are sent only to the backend. The browser never receives the Secret Key back.
-            </p>
-            <FeibotCredentialCards
-              bergmanEventId={bergmanEventId}
-              resolvedEventUuid={resolvedEventUuid}
-              lockedApiBaseUrl={lockedApiBaseUrl}
-              apiBaseUrl={lockedApiBaseUrl}
-              credentials={credentials}
-              loadStatus={loadStatus}
-            />
-          </div>
-
-          {/* ===== Event Discovery & Configuration ===== */}
-          <div className="grid gap-4 xl:grid-cols-3">
-            <Card className="xl:col-span-2">
-              <CardHeader>
-                <CardTitle>Event Configuration</CardTitle>
-                <CardDescription>Link your Bergman event to a Feibot event for live tracking integration.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-medium">Bergman Event</div>
-                    <Button variant="ghost" size="sm" onClick={() => { invalidateJsonCache('upcomingBergmanEvents'); void loadUpcomingBergmanEvents(); }} disabled={loadingUpcomingEvents}>
-                      <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loadingUpcomingEvents ? 'animate-spin' : ''}`} />
-                      Refresh upcoming events
-                    </Button>
-                  </div>
-                  <select
-                    value={bergmanEventId}
-                    onChange={(e) => {
-                      const nextEventId = e.target.value;
-                      setBergmanEventId(nextEventId);
-                      if (nextEventId && resolvedEventUuid) {
-                        void handleSaveProviderConfig(resolvedEventUuid);
-                      }
-                    }}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
-                  >
-                    <option value="">Select an upcoming Bergman event</option>
-                    {upcomingEvents.map((event) => (
-                      <option key={event.id} value={event.id}>
-                        {event.name} {event.date ? `• ${event.date}` : ''}
-                      </option>
-                    ))}
-                  </select>
-                  {!upcomingEvents.length ? (
-                    <p className="text-xs text-muted-foreground">No upcoming Bergman events found yet.</p>
-                  ) : null}
-                </div>
-
-                {eventDiscoverySupported === false || linkedEventExists ? (
-                  <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
-                    <div className="text-sm font-medium">{linkedEventExists ? 'Linked Event' : 'Manual Feibot Event Link'}</div>
-                    {linkedEventExists ? (
-                      <div className="space-y-1 text-sm">
-                        <div><span className="text-muted-foreground">Name:</span> <span className="font-medium">{linkedEventName}</span></div>
-                        <div><span className="text-muted-foreground">UUID:</span> <span className="font-mono break-all">{linkedEventUuid || '—'}</span></div>
-                        <div><span className="text-muted-foreground">Import date:</span> <span className="font-medium">{fdbMetadata?.database?.uploadedAt ? formatDateTime(fdbMetadata.database.uploadedAt) : bergmanSummaryUpdatedAt ? formatDateTime(bergmanSummaryUpdatedAt) : '—'}</span></div>
-                        <div><span className="text-muted-foreground">Participant count:</span> <span className="font-medium">{Number(feibotParticipantCount || fdbImportSummary?.counts?.participants || fdbMetadata?.database?.participants || 0).toLocaleString()}</span></div>
-                      </div>
+            {/* ===== Event Configuration ===== */}
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(320px,0.95fr)]">
+              <Card className="xl:col-span-1">
+                <CardHeader className="pb-3">
+                  <CardTitle>Event Configuration</CardTitle>
+                  <CardDescription>Link your Bergman event to a Feibot event for live tracking integration.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-medium">Bergman Event</div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void loadUpcomingEvents()}
+                        disabled={loadingUpcomingEvents}
+                      >
+                        <RefreshCw className={`mr-2 h-3.5 w-3.5 ${loadingUpcomingEvents ? 'animate-spin' : ''}`} />
+                        Refresh upcoming events
+                      </Button>
+                    </div>
+                    <select
+                      value={bergmanEventId}
+                      onChange={(e) => setBergmanEventId(e.target.value)}
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                    >
+                      <option value="">Select an upcoming Bergman event</option>
+                      {upcomingEvents.map((event) => (
+                        <option key={event.id} value={event.id}>
+                          {event.name}{event.date ? ` • ${event.date}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {!upcomingEvents.length ? (
+                      <p className="text-xs text-muted-foreground">No upcoming Bergman events found yet.</p>
                     ) : null}
-                    <Input
-                      value={manualEventUuid}
-                      onChange={(e) => setManualEventUuid(e.target.value)}
-                      placeholder="Enter the Feibot event link or identifier"
-                      autoComplete="off"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      {eventDiscoverySupported === false
-                        ? 'Connected successfully, but this Feibot account does not expose event discovery. Enter the event link to connect this Bergman event.'
-                        : linkedEventExists
-                          ? 'This event is already linked. Rediscovering events is optional.'
-                          : 'No linked event found yet. You can discover events or enter the event link manually.'}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      <Button variant="outline" onClick={() => void handleSaveProviderConfig(manualEventUuid || linkedEventUuid || '')} disabled={!(manualEventUuid.trim() || linkedEventUuid) || !bergmanEventId.trim()}>
-                        {linkedEventExists ? 'Update Link' : 'Link Manual Event'}
-                      </Button>
-                      <Button variant="outline" onClick={() => { invalidateJsonCache('providerEvents'); void loadEvents(); }} disabled={loadingEvents || !credentials?.configured}>
-                        <RefreshCw className={`mr-2 h-4 w-4 ${loadingEvents ? 'animate-spin' : ''}`} />
-                        {linkedEventExists ? 'Rediscover Events' : 'Discover Events'}
-                      </Button>
-                    </div>
                   </div>
-                ) : null}
 
-                <div className="flex flex-wrap gap-2">
-                  {eventDiscoverySupported !== false ? (
-                    <Button variant="outline" onClick={() => { invalidateJsonCache('providerEvents'); void loadEvents(); }} disabled={loadingEvents || !credentials?.configured}>
-                      <Sparkles className={`mr-2 h-4 w-4 ${loadingEvents ? 'animate-spin' : ''}`} />
-                      {linkedEventExists ? 'Rediscover Events' : 'Discover Events'}
-                    </Button>
-                  ) : (
-                    <Button variant="outline" disabled>
-                      Event discovery unavailable
-                    </Button>
-                  )}
-                  <Button variant="outline" onClick={() => { invalidateJsonCache('providerCredentials'); void loadStatus(); }} disabled={loadingStatus}>
-                    <RefreshCw className={`mr-2 h-4 w-4 ${loadingStatus ? 'animate-spin' : ''}`} />
-                    Refresh Status
-                  </Button>
-                  <Button variant="ghost" onClick={() => { invalidateJsonCache(`kvSummary:${bergmanEventId.trim()}`); void loadSelectedEventCounts(); }} disabled={loadingCounts || !bergmanEventId.trim()}>
-                    <RefreshCw className={`mr-2 h-4 w-4 ${loadingCounts ? 'animate-spin' : ''}`} />
-                    Refresh Counts
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Status</CardTitle>
-                <CardDescription>Backend status and readiness gates. Status is shown only after you refresh it.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                {credentials ? (
-                  <>
-                    <div className="rounded-lg border p-3">
-                      <div className="text-xs text-muted-foreground">Configured</div>
-                      <div className="mt-1 font-medium">{credentials.configured ? 'Connected' : 'Not connected'}</div>
-                    </div>
-                    <div className="rounded-lg border p-3">
-                      <div className="text-xs text-muted-foreground">Source</div>
-                      <div className="mt-1 font-medium">{credentials.source || 'none'}</div>
-                    </div>
-                    <div className="rounded-lg border p-3">
-                      <div className="text-xs text-muted-foreground">Last auth</div>
-                      <div className="mt-1 font-medium">{credentials.lastAuthResult || '—'}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">{formatDateTime(credentials.lastAuthAt)}</div>
-                    </div>
-                    <div className="rounded-lg border p-3">
-                      <div className="text-xs text-muted-foreground">Encrypted storage</div>
-                      <div className="mt-1 font-medium">{credentials.encryptionEnabled ? 'Enabled' : 'Unknown'}</div>
-                    </div>
-                    <div className="rounded-lg border p-3">
-                      <div className="text-xs text-muted-foreground">Bergman event link</div>
-                      <div className="mt-1 font-medium">{canShowConnectedState ? 'Linked and ready' : 'Not linked yet'}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">Bergman Event: {linkedEventName}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">Link source: {selectedEvent?.name ? 'Discovered' : 'Manual'}</div>
-                    </div>
-                    <div className="rounded-lg border p-3">
-                      <div className="text-xs text-muted-foreground">Bergman KV participants</div>
-                      <div className="mt-1 font-medium">{bergmanParticipantCount === null ? '—' : bergmanParticipantCount.toLocaleString()}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">Source: event:{bergmanEventId.trim() || '{eventId}'}:participant:index</div>
-                      <div className="mt-1 text-xs text-muted-foreground">{bergmanSummaryUpdatedAt ? formatDateTime(bergmanSummaryUpdatedAt) : 'No KV summary loaded'}</div>
-                    </div>
-                    <div className="rounded-lg border p-3">
-                      <div className="text-xs text-muted-foreground">Feibot participants</div>
-                      <div className="mt-1 font-medium">
-                        {feibotParticipantCount === null ? '—' : feibotParticipantCount.toLocaleString()}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">Source: Provider (Feibot)</div>
-                      <div className="mt-1 text-xs text-muted-foreground">Bergman Event: {linkedEventName}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {hasParticipantImport
-                          ? `Imported ${Number(feibotParticipantCount || fdbImportSummary?.counts?.participants || fdbMetadata?.database?.participants || 0).toLocaleString()} participants${feibotParticipantsUpdatedAt ? ` • ${formatDateTime(feibotParticipantsUpdatedAt)}` : ''}`
-                          : 'No participant import available'}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border p-3 md:col-span-2 xl:col-span-4">
-                      <div className="text-xs text-muted-foreground">Mapping health</div>
-                      <div className="mt-1 grid gap-3 sm:grid-cols-3">
-                        <div>
-                          <div className="text-xs text-muted-foreground">Matched Participants</div>
-                          <div className="mt-1 font-medium">{matchedParticipantCount === null ? '—' : matchedParticipantCount.toLocaleString()}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {bergmanParticipantCount && bergmanParticipantCount > 0 && matchedParticipantCount !== null
-                              ? `Matched ${((matchedParticipantCount / bergmanParticipantCount) * 100).toFixed(1)}%`
-                              : '—'}
+                  {events.length ? events.map((event) => {
+                    const active = event.event_uuid === selectedEventUuid;
+                    return (
+                      <button
+                        key={event.event_uuid}
+                        type="button"
+                        onClick={() => {
+                          setSelectedEventUuid(event.event_uuid);
+                          setManualEventUuid('');
+                          if (bergmanEventId.trim()) {
+                            void handleSaveProviderConfig(event.event_uuid);
+                          }
+                        }}
+                        className={`w-full rounded-lg border p-3 text-left transition ${active ? 'border-slate-900 bg-slate-50' : 'hover:bg-slate-50/80'}`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <div className="font-medium">{event.name}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">{event.event_uuid}</div>
+                            {event.score_event_uuid ? <div className="mt-1 text-xs text-muted-foreground">Score data available</div> : null}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {active ? <Badge variant="default"><CheckCircle2 className="mr-1 h-3.5 w-3.5" />Selected</Badge> : <Badge variant="outline">Use event</Badge>}
                           </div>
                         </div>
-                        <div>
-                          <div className="text-xs text-muted-foreground">Unmatched Bergman</div>
-                          <div className="mt-1 font-medium">{unmatchedBergmanCount === null ? '—' : unmatchedBergmanCount.toLocaleString()}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">Present in Bergman, missing in Feibot</div>
-                        </div>
-                        <div>
-                          <div className="text-xs text-muted-foreground">Unmatched Provider</div>
-                          <div className="mt-1 font-medium">{unmatchedProviderCount === null ? '—' : unmatchedProviderCount.toLocaleString()}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">Present in Feibot, missing in Bergman</div>
-                        </div>
-                      </div>
+                      </button>
+                    );
+                  }) : null}
+
+                  <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
+                    Selected event: <span className="font-medium text-foreground">{selectedEvent?.name || linkedEventName || '—'}</span>
+                    <div className="mt-1 break-all">{selectedEventUuid || manualEventUuid || 'No Feibot event selected yet.'}</div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={() => void loadEvents()} disabled={loadingEvents}>
+                      {loadingEvents ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                      {loadingEvents ? 'Refreshing…' : 'Refresh events'}
+                    </Button>
+                    <Button size="sm" onClick={() => void handleSaveProviderConfig()} disabled={!bergmanEventId.trim() || !resolvedEventUuid.trim()}>
+                      Save event link
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle>Readiness gates</CardTitle>
+                  <CardDescription>Live tracking can only be enabled after all checks pass.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2 text-sm">
+                  {[
+                    { label: 'Credentials stored', ok: readiness.hasCreds },
+                    { label: 'Feibot event selected', ok: readiness.hasSelectedEvent },
+                    { label: 'Bergman event ID set', ok: readiness.hasBergmanEvent },
+                    { label: 'Connection verified', ok: readiness.authOk },
+                    { label: 'Database imported', ok: databaseImported },
+                    { label: 'Event link extracted', ok: Boolean(fdbMetadata?.database?.localEventUuid || fdbImportSummary?.detected?.eventUuid) },
+                    { label: 'KV built', ok: Boolean(fdbImportSummary?.validation?.complete) },
+                    { label: 'Participants imported', ok: Number(fdbImportSummary?.counts?.participants || fdbMetadata?.database?.participants || 0) > 0 },
+                    { label: 'Split mapping', ok: splitMappingConfigured || splitMappingReady || Boolean((selectedCourseMaps?.swimSplits?.length || 0) + (selectedCourseMaps?.bikeSplits?.length || 0) + ((selectedCourseMaps?.run2Splits?.length || 0) || (selectedCourseMaps?.runSplits?.length || 0)) > 0) },
+                  ].map((item) => (
+                    <div key={item.label} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2">
+                      <span className="font-medium">{item.label}</span>
+                      <Badge variant={item.ok ? 'default' : 'secondary'}>{item.ok ? 'Ready' : 'Pending'}</Badge>
                     </div>
-                  </>
-                ) : (
-                  <div className="rounded-lg border p-3 text-muted-foreground md:col-span-2">
-                    Status has not been loaded yet.
+                  ))}
+
+                  <Button className="w-full" onClick={() => void handleEnableLiveTracking()} disabled={!readiness.ready || enablingLiveTracking}>
+                    {enablingLiveTracking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                    {enablingLiveTracking ? 'Enabling…' : 'Enable Live Tracking'}
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => void handleDisableLiveTracking()}
+                    disabled={!bergmanEventId.trim() || disablingLiveTracking || !trackingEnabled}
+                  >
+                    {disablingLiveTracking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                    {disablingLiveTracking ? 'Disabling…' : 'Disable Live Tracking'}
+                  </Button>
+
+                  <div className="text-xs text-muted-foreground">
+                    Tracking status: <span className="font-medium">{trackingVisibility}</span>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
 
-          <div className="grid gap-4 xl:grid-cols-3">
-            <Card className="xl:col-span-2">
-              <CardHeader>
-                <CardTitle>Discovered Feibot events</CardTitle>
-                <CardDescription>Choose the event to bind to this Bergman race.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {events.length ? events.map((event) => {
-                  const active = event.event_uuid === selectedEventUuid;
-                  return (
-                    <button
-                      key={event.event_uuid}
-                      type="button"
-                      onClick={() => {
-                        setSelectedEventUuid(event.event_uuid);
-                        setManualEventUuid('');
-                        if (bergmanEventId.trim()) {
-                          void handleSaveProviderConfig(event.event_uuid);
-                        }
-                      }}
-                      className={`w-full rounded-lg border p-4 text-left transition ${active ? 'border-slate-900 bg-slate-50' : 'hover:bg-slate-50/80'}`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <div className="font-medium">{event.name}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">Ready to link this event</div>
-                          {event.score_event_uuid ? <div className="mt-1 text-xs text-muted-foreground">Score data available</div> : null}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {active ? <Badge variant="default"><CheckCircle2 className="mr-1 h-3.5 w-3.5" />Selected</Badge> : <Badge variant="outline">Use event</Badge>}
-                        </div>
-                      </div>
-                    </button>
-                  );
-                }) : (
-                  <div className="rounded-lg border p-4 text-sm text-muted-foreground">
-                    {linkedEventExists ? 'This event is already linked. Use Rediscover Events to refresh the discovery list.' : 'No events loaded yet. Save valid credentials or click Discover Events.'}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+                  {!readiness.ready ? (
+                    <p className="text-xs text-muted-foreground">
+                      The enable action stays locked until credentials are saved, an event is selected, the Bergman event ID is entered, and the connection is verified.
+                    </p>
+                  ) : null}
+                </CardContent>
+              </Card>
+            </div>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Readiness gates</CardTitle>
-                <CardDescription>Live tracking can only be enabled after all checks pass.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                {[
-                  { label: 'Credentials stored', ok: readiness.hasCreds },
-                  { label: 'Feibot event selected', ok: readiness.hasSelectedEvent },
-                  { label: 'Bergman event ID set', ok: readiness.hasBergmanEvent },
-                  { label: 'Connection verified', ok: readiness.authOk },
-                  { label: 'Database imported', ok: String(fdbMetadata?.database?.status || '').toUpperCase() === 'IMPORTED' },
-                  { label: 'Event link extracted', ok: Boolean(fdbMetadata?.database?.localEventUuid || fdbImportSummary?.detected?.eventUuid) },
-                  { label: 'KV built', ok: Boolean(fdbImportSummary?.validation?.complete) },
-                  { label: 'Participants imported', ok: Number(fdbImportSummary?.counts?.participants || fdbMetadata?.database?.participants || 0) > 0 },
-                ].map((item) => (
-                  <div key={item.label} className="flex items-center justify-between gap-3 rounded-lg border p-3">
-                    <span className="font-medium">{item.label}</span>
-                    <Badge variant={item.ok ? 'default' : 'secondary'}>{item.ok ? 'Ready' : 'Pending'}</Badge>
-                  </div>
-                ))}
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold">Feibot API Credentials</h3>
+              <p className="text-sm text-muted-foreground">
+                Secrets are sent only to the backend. The browser never receives the Secret Key back.
+              </p>
+              <FeibotCredentialCards
+                bergmanEventId={bergmanEventId}
+                resolvedEventUuid={resolvedEventUuid}
+                lockedApiBaseUrl={lockedApiBaseUrl}
+                apiBaseUrl={lockedApiBaseUrl}
+                credentials={credentials}
+                loadStatus={async () => {
+                  await loadStatus();
+                  const eventId = bergmanEventId.trim();
+                  if (eventId) {
+                    await loadCredentials(eventId);
+                    await loadSplitMappings(eventId);
+                  }
+                }}
+              />
+            </div>
 
-                <Button className="w-full" onClick={() => void handleEnableLiveTracking()} disabled={!readiness.ready || enablingLiveTracking}>
-                  {enablingLiveTracking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
-                  {enablingLiveTracking ? 'Enabling…' : 'Enable Live Tracking'}
-                </Button>
-
-                <Button
-                  variant="outline"
-                  className="w-full"
-                  onClick={() => void handleDisableLiveTracking()}
-                  disabled={!bergmanEventId.trim() || disablingLiveTracking || !trackingEnabled}
-                >
-                  {disablingLiveTracking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                  {disablingLiveTracking ? 'Disabling…' : 'Disable Live Tracking'}
-                </Button>
-
-                <div className="text-xs text-muted-foreground">
-                  Tracking status: <span className="font-medium">{trackingEnabled ? 'Enabled' : 'Disabled'}</span>
-                </div>
-
-                {!readiness.ready ? (
-                  <p className="text-xs text-muted-foreground">
-                    The enable action stays locked until credentials are saved, an event is selected, the Bergman event ID is entered, and the connection is verified.
-                  </p>
-                ) : null}
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="grid gap-4 xl:grid-cols-3">
+            <div className="grid gap-4 xl:grid-cols-3">
             <Card>
               <CardHeader>
                 <CardTitle>Provider Status</CardTitle>
@@ -2035,12 +1985,20 @@ export default function LiveTrackingHub() {
                   <div className="mt-1 font-medium">{credentials?.lastAuthResult || '—'}</div>
                 </div>
                 <div className="rounded-lg border p-3">
+                  <div className="text-xs text-muted-foreground">Connection</div>
+                  <div className="mt-1 font-medium">{connected ? '🟢 Connected' : '🟡 Verification pending'}</div>
+                </div>
+                <div className="rounded-lg border p-3">
                   <div className="text-xs text-muted-foreground">Version</div>
                   <div className="mt-1 font-medium">{credentials?.version ?? '—'}</div>
                 </div>
                 <div className="rounded-lg border p-3">
                   <div className="text-xs text-muted-foreground">Validated Event Link</div>
                   <div className="mt-1 font-medium break-all">{linkedEventName}</div>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <div className="text-xs text-muted-foreground">Mapped Splits</div>
+                  <div className="mt-1 font-medium">{loadingSplitMappings ? 'Loading…' : String(splitMappingSummary?.mappedCount || 0)}</div>
                 </div>
               </CardContent>
             </Card>
@@ -2168,23 +2126,40 @@ export default function LiveTrackingHub() {
             </CardContent>
           </Card>
 
-          {bergmanEventId.trim() ? (
-            <ContestMappingPanel eventId={bergmanEventId.trim()} />
-          ) : (
-            <Card>
-              <CardHeader className="py-3">
-                <CardTitle>Contest Mapping</CardTitle>
-                <CardDescription>Select a Bergman event to configure Feibot contest ↔ ticket mappings.</CardDescription>
-              </CardHeader>
-            </Card>
-          )}
-
           <Card>
             <CardHeader>
               <CardTitle>Feibot Event Database</CardTitle>
               <CardDescription>Import the official Feibot .fdb SQLite export and bootstrap event configuration, participants, and KV indexes.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
+              {/* Bergman event selector */}
+              <div className="space-y-1.5">
+                <div className="text-xs uppercase font-black tracking-widest text-muted-foreground">Bergman event</div>
+                {upcomingEvents.length > 0 ? (
+                  <select
+                    value={bergmanEventId}
+                    onChange={(e) => setBergmanEventId(e.target.value)}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background"
+                  >
+                    <option value="">Select a Bergman event</option>
+                    {upcomingEvents.map((event) => (
+                      <option key={event.id} value={event.id}>{event.name}{event.date ? ` • ${event.date}` : ''}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <Input
+                    placeholder="Enter Bergman event ID (e.g. my-event-2025)"
+                    value={bergmanEventId}
+                    onChange={(e) => setBergmanEventId(e.target.value)}
+                  />
+                )}
+                {bergmanEventId.trim() ? (
+                  <div className="text-xs text-muted-foreground">Selected: <span className="font-medium text-foreground">{selectedBergmanEventName}</span></div>
+                ) : (
+                  <div className="text-xs text-amber-600">⚠ Select or enter a Bergman event ID before uploading.</div>
+                )}
+              </div>
+
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <div className="text-xs uppercase font-black tracking-widest text-muted-foreground">Selected file</div>
@@ -2229,30 +2204,93 @@ export default function LiveTrackingHub() {
               </div>
 
               {fdbImportSummary ? (
-                <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
-                  <StatusRow label="Import Status" value={fdbImportSummary?.status === 'COMPLETED' ? '✅ Completed' : fdbImportSummary?.status === 'COMPLETED_WITH_WARNINGS' ? '⚠️ Completed with Warnings' : String(fdbImportSummary?.status || '—').replace(/_/g, ' ')} />
-                  <StatusRow label="Bergman Event" value={selectedBergmanEventName} />
-                  <StatusRow label="Feibot Event UUID" value={selectedFeibotEventUuid} />
-                  <StatusRow label="Feibot Event Status" value={connected ? 'Connected' : 'Pending'} />
-                  <StatusRow label="Provider Config" value={linkedResolvedEventUuid ? 'Saved' : 'Not saved'} />
-                  <StatusRow label="File" value={fdbMetadata?.database?.fileName || fdbFile?.name || '—'} />
-                  <StatusRow label="File Size" value={fdbFile ? `${(fdbFile.size / (1024 * 1024)).toFixed(1)} MB` : fdbMetadata?.database?.fileSize ? `${((Number(fdbMetadata?.database?.fileSize || 0) || 0) / (1024 * 1024)).toFixed(1)} MB` : '—'} />
-                  <StatusRow label="Imported On" value={formatDateTime(fdbMetadata?.database?.uploadedAt || fdbImportSummary?.completedAt)} />
-                  <StatusRow label="Import Duration" value={fdbImportSummary?.importDurationMs ? `${Math.round(fdbImportSummary.importDurationMs / 1000)} sec` : '—'} />
-                  <StatusRow label="Tables" value={String(fdbImportSummary?.detected?.numberOfTables ?? 0)} />
-                  <StatusRow label="Participants Imported" value={String(fdbImportSummary?.counts?.participants ?? 0)} />
-                  <StatusRow label="Contests" value={String(fdbImportSummary?.counts?.contests ?? 0)} />
-                  <StatusRow label="Splits Imported" value={String(fdbImportSummary?.counts?.splits ?? 0)} />
-                  <StatusRow label="Timing Points Imported" value={String(fdbImportSummary?.counts?.timingPoints ?? 0)} />
-                  <StatusRow label="Race Legs Imported" value={String(fdbImportSummary?.counts?.legs ?? 0)} />
-                  <StatusRow label="Age Groups Imported" value={String(fdbImportSummary?.counts?.ageGroups ?? 0)} />
-                  <StatusRow label="Timing Devices Imported" value={String(fdbImportSummary?.counts?.devices ?? 0)} />
-                  <StatusRow label="Active participants" value={String(fdbImportSummary?.counts?.activeParticipants ?? 0)} />
-                  <StatusRow label="Unknown Tables" value={String(fdbImportSummary?.unknownTables?.length ?? 0)} />
-                  <StatusRow label="KV Records" value={String(fdbImportSummary?.kvRecordsWritten ?? fdbMetadata?.database?.kvRecordsWritten ?? 0)} />
-                  <StatusRow label="Validation" value={fdbImportSummary?.validationStatus === 'PASS' || fdbImportSummary?.validation?.complete ? '✅ Validation Successful' : fdbImportSummary?.validationStatus === 'TIMEOUT' ? '⚠️ Validation Timed Out' : fdbImportSummary?.validationStatus === 'WARNING' ? '⚠️ Validation Completed with Warnings' : '⏳ Validating'} />
-                  <StatusRow label="Warnings" value={String(fdbImportSummary?.warnings ?? fdbMetadata?.database?.warnings ?? 0)} />
-                  <StatusRow label="Errors" value={String(fdbImportSummary?.errors ?? fdbMetadata?.database?.errors ?? 0)} />
+                <div className="space-y-4">
+                  <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
+                    <StatusRow label="Import Status" value={fdbImportSummary?.status === 'COMPLETED' ? '✅ Completed' : fdbImportSummary?.status === 'COMPLETED_WITH_WARNINGS' ? '⚠️ Completed with Warnings' : String(fdbImportSummary?.status || '—').replace(/_/g, ' ')} />
+                    <StatusRow label="Bergman Event" value={selectedBergmanEventName} />
+                    <StatusRow label="Feibot Event UUID" value={selectedFeibotEventUuid} />
+                    <StatusRow label="Feibot Event Status" value={connected ? 'Connected' : 'Pending'} />
+                    <StatusRow label="Provider Config" value={linkedResolvedEventUuid ? 'Saved' : 'Not saved'} />
+                    <StatusRow label="File" value={fdbMetadata?.database?.fileName || fdbFile?.name || '—'} />
+                    <StatusRow label="File Size" value={fdbFile ? `${(fdbFile.size / (1024 * 1024)).toFixed(1)} MB` : fdbMetadata?.database?.fileSize ? `${((Number(fdbMetadata?.database?.fileSize || 0) || 0) / (1024 * 1024)).toFixed(1)} MB` : '—'} />
+                    <StatusRow label="Imported On" value={formatDateTime(fdbMetadata?.database?.uploadedAt || fdbImportSummary?.completedAt)} />
+                    <StatusRow label="Import Duration" value={fdbImportSummary?.importDurationMs ? `${Math.round(fdbImportSummary.importDurationMs / 1000)} sec` : '—'} />
+                    <StatusRow label="Tables" value={String(fdbImportSummary?.detected?.numberOfTables ?? 0)} />
+                    <StatusRow label="Participants Imported" value={String(fdbImportSummary?.counts?.participants ?? 0)} />
+                    <StatusRow label="Contests" value={String(fdbImportSummary?.counts?.contests ?? 0)} />
+                    <StatusRow label="Splits Imported" value={String(fdbImportSummary?.counts?.splits ?? 0)} />
+                    <StatusRow label="Timing Points Imported" value={String(fdbImportSummary?.counts?.timingPoints ?? 0)} />
+                    <StatusRow label="Race Legs Imported" value={String(fdbImportSummary?.counts?.legs ?? 0)} />
+                    <StatusRow label="Age Groups Imported" value={String(fdbImportSummary?.counts?.ageGroups ?? 0)} />
+                    <StatusRow label="Timing Devices Imported" value={String(fdbImportSummary?.counts?.devices ?? 0)} />
+                    <StatusRow label="Active participants" value={String(fdbImportSummary?.counts?.activeParticipants ?? 0)} />
+                    <StatusRow label="Unknown Tables" value={String(fdbImportSummary?.unknownTables?.length ?? 0)} />
+                    <StatusRow label="KV Records" value={String(fdbImportSummary?.kvRecordsWritten ?? fdbMetadata?.database?.kvRecordsWritten ?? 0)} />
+                    <StatusRow label="Validation" value={fdbImportSummary?.validationStatus === 'PASS' || fdbImportSummary?.validation?.complete ? '✅ Validation Successful' : fdbImportSummary?.validationStatus === 'TIMEOUT' ? '⚠️ Validation Timed Out' : fdbImportSummary?.validationStatus === 'WARNING' ? '⚠️ Validation Completed with Warnings' : '⏳ Validating'} />
+                    <StatusRow label="Warnings" value={String(fdbImportSummary?.warnings ?? fdbMetadata?.database?.warnings ?? 0)} />
+                    <StatusRow label="Errors" value={String(fdbImportSummary?.errors ?? fdbMetadata?.database?.errors ?? 0)} />
+                  </div>
+
+                  {/* ── Unknown tables detail ── */}
+                  {Array.isArray(fdbImportSummary?.unknownTables) && fdbImportSummary.unknownTables.length > 0 ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-2">
+                      <div className="text-sm font-semibold text-amber-800">⚠️ Unknown Tables ({fdbImportSummary.unknownTables.length})</div>
+                      <div className="text-xs text-amber-700">These tables were present in the .fdb file but not imported (no recognized category).</div>
+                      <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-3 max-h-36 overflow-auto">
+                        {fdbImportSummary.unknownTables.map((t: any, i: number) => (
+                          <div key={`${String(t?.name || i)}-${i}`} className="rounded border border-amber-200 bg-white px-2 py-1 text-xs text-amber-900">
+                            <div className="font-medium break-all">{String(t?.name || 'unknown')}</div>
+                            <div className="mt-0.5 text-amber-600">{Number(t?.rowCount || 0)} rows · {Number(t?.columnCount || 0)} cols</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* ── Validation missing KV keys ── */}
+                  {Array.isArray(fdbImportSummary?.validation?.missingKeys) && fdbImportSummary.validation.missingKeys.length > 0 ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-2">
+                      <div className="text-sm font-semibold text-amber-800">⚠️ Missing KV Keys ({fdbImportSummary.validation.missingKeys.length})</div>
+                      <div className="text-xs text-amber-700">These KV keys were expected after import but were not found. Re-import or Rebuild KV to fix.</div>
+                      <div className="max-h-28 overflow-auto space-y-1">
+                        {fdbImportSummary.validation.missingKeys.map((key: string, i: number) => (
+                          <div key={`${key}-${i}`} className="rounded border border-amber-200 bg-white px-2 py-1 text-xs font-mono text-amber-900 break-all">{key}</div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* ── Warning messages ── */}
+                  {Array.isArray(fdbImportSummary?.warningMessages) && fdbImportSummary.warningMessages.length > 0 ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 space-y-2">
+                      <div className="text-sm font-semibold text-amber-800">⚠️ Import Warnings ({fdbImportSummary.warningMessages.length})</div>
+                      <div className="max-h-48 overflow-auto space-y-1">
+                        {fdbImportSummary.warningMessages.map((msg: string, i: number) => (
+                          <div key={i} className="rounded border border-amber-200 bg-white px-2 py-1 text-xs text-amber-900 break-all">{msg}</div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* ── Error messages ── */}
+                  {(Number(fdbImportSummary?.errors ?? 0) > 0 || (Array.isArray(fdbImportSummary?.errorMessages) && fdbImportSummary.errorMessages.length > 0)) ? (
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-2">
+                      <div className="text-sm font-semibold text-red-800">
+                        ❌ Import Errors ({Number(fdbImportSummary?.errors ?? fdbMetadata?.database?.errors ?? 0)})
+                      </div>
+                      {Array.isArray(fdbImportSummary?.errorMessages) && fdbImportSummary.errorMessages.length > 0 ? (
+                        <div className="max-h-64 overflow-auto space-y-1">
+                          {fdbImportSummary.errorMessages.map((msg: string, i: number) => (
+                            <div key={i} className="rounded border border-red-200 bg-white px-2 py-1 text-xs text-red-900 break-all font-mono">{msg}</div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-red-700">
+                          {Number(fdbImportSummary?.errors ?? 0)} KV write failure{Number(fdbImportSummary?.errors ?? 0) !== 1 ? 's' : ''} occurred during import. See the Runtime KV Logs below (FAILED entries) for details. These are usually Cloudflare KV timeout errors — re-running the import typically resolves them.
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -2289,22 +2327,18 @@ export default function LiveTrackingHub() {
               </div>
 
               {fdbImportLogs.length ? (
-                <div className="rounded-lg border p-4 space-y-2">
-                  <div className="text-sm font-semibold">Runtime KV logs</div>
-                  <div className="space-y-1 text-xs max-h-44 overflow-auto">
-                    {fdbImportLogs.slice(-20).reverse().map((log, index) => (
-                      <div key={`${log?.ts || 'log'}-${index}`} className="grid grid-cols-12 gap-2">
-                        <span className="col-span-3 text-muted-foreground">{formatDateTime(log?.ts)}</span>
-                        <span className="col-span-2">{String(log?.action || '—')}</span>
-                        <span className="col-span-5 break-all">{String(log?.key || '—')}</span>
-                        <span className={`col-span-2 ${log?.status === 'SUCCESS' ? 'text-emerald-600' : 'text-red-600'}`}>{String(log?.status || '—')}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <LogsPanel logs={fdbImportLogs} />
               ) : null}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="contest_mapping" className="mt-6 space-y-6">
+          <ContestMappingPanel eventId={bergmanEventId.trim()} />
+        </TabsContent>
+
+        <TabsContent value="leg_split_mapping" className="mt-6 space-y-6">
+          <LegSplitMappingAdmin eventId={bergmanEventId.trim()} />
         </TabsContent>
 
         <TabsContent value="course_maps" className="mt-6 space-y-6">
@@ -2505,73 +2539,6 @@ export default function LiveTrackingHub() {
                               />
                             </div>
 
-                            <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
-                              <div className="flex flex-wrap items-start justify-between gap-2">
-                                <div>
-                                  <div className="text-xs uppercase font-black tracking-widest text-muted-foreground">Custom Splits Per Leg</div>
-                                  <div className="text-xs text-muted-foreground">
-                                    {asset.label} · {formatDistance(resolveLegDistance(asset.distanceField))} · {currentSplits.length} split checkpoint{currentSplits.length === 1 ? '' : 's'}
-                                  </div>
-                                </div>
-                                <div className="flex flex-wrap gap-2">
-                                  <div className="space-y-1">
-                                    <div className="text-[10px] uppercase font-black tracking-widest text-muted-foreground">Interval (KM)</div>
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      step="0.1"
-                                      value={splitIntervalDrafts[asset.splitField]}
-                                      onChange={(e) => setSplitIntervalDrafts((prev) => ({ ...prev, [asset.splitField]: e.target.value }))}
-                                      placeholder="0.0"
-                                      className="h-8 w-28"
-                                    />
-                                  </div>
-                                  <Button type="button" variant="outline" size="sm" onClick={() => autoGenerateSplitDraft(asset)}>
-                                    Auto Generate
-                                  </Button>
-                                  <Button type="button" variant="outline" size="sm" onClick={() => addCourseSplitDraft(asset.splitField)}>
-                                    <Plus className="mr-2 h-4 w-4" />
-                                    Add Split
-                                  </Button>
-                                </div>
-                              </div>
-
-                              {currentSplits.length ? (
-                                <div className="space-y-2">
-                                  {currentSplits.map((split, index) => (
-                                    <div key={split.id} className="grid gap-2 md:grid-cols-[1.6fr_0.8fr_auto] md:items-end">
-                                      <div className="space-y-1">
-                                        <div className="text-xs text-muted-foreground">Split name</div>
-                                        <Input
-                                          value={split.name}
-                                          onChange={(e) => updateCourseSplitDraft(asset.splitField, split.id, 'name', e.target.value)}
-                                          placeholder={`${asset.label} split ${index + 1}`}
-                                        />
-                                      </div>
-                                      <div className="space-y-1">
-                                        <div className="text-xs text-muted-foreground">Distance (KM)</div>
-                                        <Input
-                                          type="number"
-                                          min="0"
-                                          step="0.01"
-                                          value={split.distance}
-                                          onChange={(e) => updateCourseSplitDraft(asset.splitField, split.id, 'distance', e.target.value)}
-                                          placeholder="0.0"
-                                        />
-                                      </div>
-                                      <Button type="button" variant="ghost" size="icon" onClick={() => removeCourseSplitDraft(asset.splitField, split.id)} aria-label={`Remove ${asset.label} split ${index + 1}`}>
-                                        <Trash2 className="h-4 w-4" />
-                                      </Button>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : (
-                                <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-                                  No custom {asset.label.toLowerCase()} splits configured yet.
-                                </div>
-                              )}
-                            </div>
-
                             <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
                               <span className="break-all text-muted-foreground">{currentUrl || 'No GPX URL set'}</span>
                             </div>
@@ -2720,18 +2687,46 @@ export default function LiveTrackingHub() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Feibot Timing Rules</CardTitle>
-                <CardDescription>Fetched from the documented Feibot event config endpoint.</CardDescription>
+                <CardTitle>Split & Leg Mapping</CardTitle>
+                <CardDescription>Course splits and legs from Feibot timing rules configuration.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <StatusRow label="Contests" value={String(feibotTimingSummary?.contests?.length || 0)} />
-                <StatusRow label="Splits" value={String(feibotTimingSummary?.splits?.length || 0)} />
-                <StatusRow label="Timing Points" value={String(feibotTimingSummary?.timingPoints?.length || 0)} />
-                <StatusRow label="Age Groups" value={String(feibotTimingSummary?.ageGroups?.length || 0)} />
-                <StatusRow label="Legs" value={String(feibotTimingSummary?.legs?.length || 0)} />
-                <div className="rounded-lg border p-3 text-xs text-muted-foreground">
-                  Split editing is intentionally disabled in this view.
-                </div>
+              <CardContent className="space-y-4 text-sm">
+                {feibotTimingSummary ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-lg border p-3">
+                        <div className="text-xs text-muted-foreground">Swim Splits</div>
+                        <div className="mt-1 text-lg font-semibold">{selectedCourseMaps?.swimSplits?.length || 0}</div>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="text-xs text-muted-foreground">Bike Splits</div>
+                        <div className="mt-1 text-lg font-semibold">{selectedCourseMaps?.bikeSplits?.length || 0}</div>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="text-xs text-muted-foreground">Run Splits</div>
+                        <div className="mt-1 text-lg font-semibold">{((selectedCourseMaps?.run2Splits?.length || 0) || (selectedCourseMaps?.runSplits?.length || 0))}</div>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="text-xs text-muted-foreground">Total Legs</div>
+                        <div className="mt-1 text-lg font-semibold">{feibotTimingSummary?.legs?.length || 0}</div>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="rounded-lg border p-3">
+                        <div className="text-xs text-muted-foreground">Total Contests</div>
+                        <div className="font-medium">{feibotTimingSummary?.contests?.length || 0}</div>
+                      </div>
+                      <div className="rounded-lg border p-3">
+                        <div className="text-xs text-muted-foreground">Total Timing Points</div>
+                        <div className="font-medium">{feibotTimingSummary?.timingPoints?.length || 0}</div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-lg border p-3 text-xs text-muted-foreground text-center">
+                    Load Feibot timing rules to display split and leg mapping information.
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -2768,6 +2763,52 @@ function StatusRow({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg border p-3">
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className="mt-1 font-medium break-words">{value}</div>
+    </div>
+  );
+}
+
+function LogsPanel({ logs }: { logs: any[] }) {
+  const [showFailedOnly, setShowFailedOnly] = React.useState(false);
+  const failedLogs = logs.filter((l) => l?.status === 'FAILED' || l?.status === 'ERROR');
+  const displayLogs = showFailedOnly ? failedLogs : [...logs].reverse();
+  return (
+    <div className="rounded-lg border p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-semibold">
+          Runtime KV Logs
+          <span className="ml-2 text-xs font-normal text-muted-foreground">({logs.length} total{failedLogs.length > 0 ? `, ${failedLogs.length} failed` : ''})</span>
+        </div>
+        {failedLogs.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => setShowFailedOnly((v) => !v)}
+            className={`rounded px-2 py-0.5 text-xs font-medium border transition-colors ${showFailedOnly ? 'bg-red-100 border-red-300 text-red-800' : 'bg-muted border-border text-muted-foreground hover:bg-red-50 hover:border-red-200 hover:text-red-700'}`}
+          >
+            {showFailedOnly ? `Showing ${failedLogs.length} failed` : `Show ${failedLogs.length} failed only`}
+          </button>
+        ) : null}
+      </div>
+      <div className="space-y-0.5 text-xs max-h-80 overflow-auto font-mono">
+        {displayLogs.map((log, index) => {
+          const isFailed = log?.status === 'FAILED' || log?.status === 'ERROR';
+          return (
+            <div
+              key={`${String(log?.ts || 'log')}-${index}`}
+              className={`rounded px-2 py-1 ${isFailed ? 'bg-red-50 border border-red-200' : 'border border-transparent hover:bg-muted/40'}`}
+            >
+              <div className="grid grid-cols-12 gap-2">
+                <span className="col-span-3 text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis">{String(log?.ts ? new Date(log.ts).toLocaleTimeString() : '—')}</span>
+                <span className="col-span-2 truncate">{String(log?.action || '—')}</span>
+                <span className="col-span-5 break-all">{String(log?.key || '—')}</span>
+                <span className={`col-span-2 font-semibold ${isFailed ? 'text-red-600' : 'text-emerald-600'}`}>{String(log?.status || '—')}</span>
+              </div>
+              {isFailed && log?.detail ? (
+                <div className="mt-0.5 col-span-12 text-red-700 pl-2 break-all border-t border-red-100 pt-0.5">{String(log.detail)}</div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

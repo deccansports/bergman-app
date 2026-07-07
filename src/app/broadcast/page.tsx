@@ -5,6 +5,18 @@ import { useAuth } from '@/context/AuthContext';
 import nextDynamic from 'next/dynamic';
 import type { EventCalendarEntry } from '@/lib/types';
 import { useRouter } from 'next/navigation';
+import { isAfter, isBefore, parseISO, startOfDay } from 'date-fns';
+
+function isUpcomingBroadcastEvent(event: EventCalendarEntry) {
+  if (!event.eventDate) return true;
+  try {
+    const now = new Date();
+    const eventDate = parseISO(event.eventDate);
+    return !isBefore(eventDate, startOfDay(now));
+  } catch {
+    return false;
+  }
+}
 
 const BroadcastCenterTab = nextDynamic(() => import('@/components/admin/BroadcastCenterTab'), {
   ssr: false,
@@ -34,14 +46,26 @@ export default function BroadcastPage() {
         if (res.ok) {
           const data = await res.json();
           const eventList = Array.isArray(data) ? data : data.events || [];
-          setEvents(
-            eventList.map((e: any) => ({
+          const upcomingEvents: EventCalendarEntry[] = eventList
+            .map((e: any) => ({
               id: e.id || e._id,
               eventName: e.eventName || e.name || 'Untitled Event',
               eventDate: e.eventDate ? new Date(e.eventDate).toISOString() : null,
               ...e,
-            })),
-          );
+            }))
+            .filter(isUpcomingBroadcastEvent)
+            .sort((a: EventCalendarEntry, b: EventCalendarEntry) => {
+              if (!a.eventDate && !b.eventDate) return 0;
+              if (!a.eventDate) return 1;
+              if (!b.eventDate) return -1;
+              try {
+                return isAfter(parseISO(a.eventDate), parseISO(b.eventDate)) ? 1 : -1;
+              } catch {
+                return 0;
+              }
+            });
+
+          setEvents(upcomingEvents);
         }
       } catch (error) {
         console.error('Failed to load events:', error);
