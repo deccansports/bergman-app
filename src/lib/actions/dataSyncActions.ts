@@ -321,10 +321,7 @@ export async function _mirrorParticipantToKV(participantData: EventParticipant, 
     await putKV(userEventsKey, userEvents, actionName);
   }
 
-  // Sync athlete registration indexes for fast dashboard lookups.
-  const registrationId = String((participantData as any)?.id || bookingId).trim();
-  const registrationRef = { eventId, bookingId, registrationId };
-  await putKV(`registration:${registrationId}`, normalizedParticipantData, actionName);
+  // Keep participants as the canonical registration record.
 
   const mergeRefs = async (key: string) => {
     const rows = await getKV<any[]>(key, actionName) || [];
@@ -335,7 +332,7 @@ export async function _mirrorParticipantToKV(participantData: EventParticipant, 
       if (!eId || !bId) return;
       map.set(`${eId}:${bId}`, r);
     });
-    map.set(`${eventId}:${bookingId}`, registrationRef);
+    map.set(`${eventId}:${bookingId}`, { eventId, bookingId });
     await putKV(key, Array.from(map.values()), actionName);
   };
 
@@ -469,7 +466,7 @@ export async function _deleteParticipantFromKV(
     ...Array.from(mobileCandidates).map((mobile) => removeRef(`athlete:mobile:${mobile}:registrations`)),
   ]);
 
-  if (normalizedRefId) await deleteKV(`registration:${normalizedRefId}`, actionName);
+  // Legacy per-registration KV objects are no longer written.
 
   // 4. Email-based fallback: if no uid found, look up user by email to ensure user index is cleaned.
   //    This handles cases where athleteUid was missing from the participant record.

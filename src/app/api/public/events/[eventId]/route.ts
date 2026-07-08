@@ -8,7 +8,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { eventId: string } }
 ) {
-  const authResult = await validateApiKey(request);
+  const authResult = await validateApiKey(request, { required: false });
   if (!authResult.success) {
     return NextResponse.json({ success: false, message: authResult.message }, { status: authResult.status });
   }

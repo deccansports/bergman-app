@@ -21,6 +21,54 @@ import { PAYMENT_GATEWAY_FEE_PERCENTAGE, PLATFORM_FEE_PAISA, GST_PERCENTAGE, NO_
 const DEFERRALS_COLLECTION = 'deferrals';
 const USERS_COLLECTION = 'users';
 const DASHBOARD_VISIBLE_DEFERRAL_STATUSES: Array<DeferralEntry['status']> = ['Pending Ticket Selection', 'Expired'];
+const DEFERRAL_HISTORY_BLOCKING_STATUSES: Array<DeferralEntry['status']> = ['Used', 'Confirmed'];
+
+export async function hasUsedDeferralHistoryForUserAction(
+  uid?: string | null,
+  email?: string | null
+): Promise<{ success: boolean; message: string; hasUsedDeferralHistory: boolean }> {
+  try {
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    if (!uid && !normalizedEmail) {
+      return { success: false, message: 'UID or email is required.', hasUsedDeferralHistory: false };
+    }
+
+    const adminDb = getFirestoreInstance();
+    const candidateMap = new Map<string, DeferralEntry>();
+
+    if (uid) {
+      const byUid = await adminDb.collection(DEFERRALS_COLLECTION)
+        .where('userId', '==', uid)
+        .get();
+      byUid.docs.forEach((doc) => {
+        const data = doc.data() as DeferralEntry;
+        if (DEFERRAL_HISTORY_BLOCKING_STATUSES.includes(data.status)) {
+          candidateMap.set(doc.id, data);
+        }
+      });
+    }
+
+    if (normalizedEmail) {
+      const byEmail = await adminDb.collection(DEFERRALS_COLLECTION)
+        .where('participantEmail', '==', normalizedEmail)
+        .get();
+      byEmail.docs.forEach((doc) => {
+        const data = doc.data() as DeferralEntry;
+        if (DEFERRAL_HISTORY_BLOCKING_STATUSES.includes(data.status)) {
+          candidateMap.set(doc.id, data);
+        }
+      });
+    }
+
+    return {
+      success: true,
+      message: candidateMap.size > 0 ? 'Used deferral history found.' : 'No used deferral history found.',
+      hasUsedDeferralHistory: candidateMap.size > 0,
+    };
+  } catch (error: any) {
+    return { success: false, message: error?.message || 'Failed to check deferral history.', hasUsedDeferralHistory: false };
+  }
+}
 
 function mapDeferralToActiveInfo(deferralId: string, data: Partial<DeferralEntry>) {
   return {
@@ -83,6 +131,21 @@ export async function handleDeferral(
 
     const athleteUid = participantData.athleteUid;
     if (!athleteUid) throw new Error("User profile link missing");
+
+    if (participantData.isDeferral || participantData.deferralId) {
+      throw new Error('This registration was already created using a deferral and cannot be deferred again.');
+    }
+
+    const usedDeferralCheck = await hasUsedDeferralHistoryForUserAction(athleteUid, participantData.email || null);
+    if (usedDeferralCheck.success && usedDeferralCheck.hasUsedDeferralHistory) {
+      throw new Error('This athlete has already used a deferral credit and cannot defer again.');
+    }
+
+    const userDoc = await adminDb.collection(USERS_COLLECTION).doc(athleteUid).get();
+    const activeDeferralStatus = String((userDoc.data() as any)?.activeDeferral?.status || '').trim();
+    if (['Pending Ticket Selection', 'Pending Upgrade Payment', 'Pending', 'Processing', 'ProcessingConfirmation'].includes(activeDeferralStatus)) {
+      throw new Error('This athlete already has an active deferral credit and cannot defer again.');
+    }
 
     // 🔥 ALWAYS use what user ACTUALLY PAID (Base - Discount)
     const creditAmount = sanitizeMoney(

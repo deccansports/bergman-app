@@ -358,6 +358,8 @@ export async function finalizeRegistration(
         ageCategory: ageCategory ?? undefined,
         eventDate: finalEventDate,
         ticketStatus: 'Active',
+        isDeferral: Boolean((freshAttempt as any).deferralId),
+        deferralId: (freshAttempt as any).deferralId || null,
         ticketName: finalTicketName,
         eventName: eventData.eventName,
         registeredAt: registrationTimestamp.toISOString(),

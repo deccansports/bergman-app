@@ -21,6 +21,7 @@ import {
 import { getRegistrationsCollectionRef } from '@/lib/eventDataPaths';
 import { sendClubAffiliationNoticeToOwnerEmail } from '../auth/brevoService';
 import { getKV, putKV, deleteKV, batchGetKV, listKVByPrefix } from '../cloudflare/kv';
+import { hasUsedDeferralHistoryForUserAction } from './deferralActions';
 
 import type {
   User,
@@ -917,6 +918,8 @@ export async function getAthleteRegisteredEventsAction(
 
       const eventMetaMap = new Map(calendar.map((e: any) => [e.id, e]));
       const now = new Date();
+            const usedDeferralCheck = await hasUsedDeferralHistoryForUserAction(userId, userEmail);
+            const hasUsedDeferralHistory = usedDeferralCheck.success && usedDeferralCheck.hasUsedDeferralHistory;
     const upcomingOnly = options?.upcomingOnly !== false;
     let registeredEvents: AthleteRegisteredEventDetail[] = validParticipants
     .map((p) => {
@@ -971,7 +974,7 @@ export async function getAthleteRegisteredEventsAction(
               basePricePaisa: p.basePricePaisa,
               couponDiscountPaisa: p.couponDiscountPaisa,
               currency: eData?.currency || 'INR',
-              canBeDeferred: eventDate ? isAfter(eventDate, addDays(now, 45)) : false,
+              canBeDeferred: eventDate ? isAfter(eventDate, addDays(now, 45)) && !hasUsedDeferralHistory && !p.isDeferral && !p.deferralId && !p.previousDeferralDetails : false,
               canBeCancelled: canCancel,
               canChangeCategory: eventDate ? isAfter(eventDate, addDays(now, 45)) : false,
               potentialRefundAmountPaisa: refundAmountPaisa,
@@ -1158,6 +1161,11 @@ export async function getEligibleEventsForDeferralAction(uid: string, email: str
                 const userSnap = await db.collection('users').doc(uid).get();
                 const userData = (userSnap.exists ? userSnap.data() : null) as User | null;
                 const activeDeferral = userData?.activeDeferral as ActiveDeferralInfo | undefined;
+
+                const usedDeferralCheck = await hasUsedDeferralHistoryForUserAction(uid, email);
+                if (!activeDeferral?.deferralId && usedDeferralCheck.success && usedDeferralCheck.hasUsedDeferralHistory) {
+                    return { success: true, message: 'Deferral credit already used.', events: [] };
+                }
 
                 if (activeDeferral?.originalEventId) excludedEventIds.add(activeDeferral.originalEventId);
                 if (activeDeferral?.deferredToEventId) excludedEventIds.add(activeDeferral.deferredToEventId);

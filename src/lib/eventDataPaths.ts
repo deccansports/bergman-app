@@ -1,7 +1,7 @@
 import type { CollectionReference, Firestore } from 'firebase-admin/firestore';
 
 export const EVENT_COLLECTIONS = {
-  registrations: 'registrations',
+  registrations: 'participants',
   timingParticipants: 'timingParticipants',
   timingReads: 'timingReads',
   splits: 'splits',

@@ -252,17 +252,14 @@ export async function writeCanonicalParticipant(
   const ref = await resolveCanonicalParticipantRef(db, eventId, payload, preferredDocId);
   await ref.set(payload, { merge: true });
 
-  // Backward-compatibility mirror: keep legacy participants collection populated
-  // while canonical source of truth remains registrations.
-  const legacyRef = db.collection('events').doc(eventId).collection('participants').doc(ref.id);
-  await legacyRef.set(
-    {
-      ...payload,
-      mirroredFromRegistrations: true,
-      mirroredAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
+  // Backward-compatibility mirror: keep the legacy registrations collection populated
+  // while the canonical source of truth is events/{eventId}/participants.
+  const legacyRef = db.collection('events').doc(eventId).collection('registrations').doc(ref.id);
+  await legacyRef.set({
+    ...payload,
+    mirroredFromParticipants: true,
+    mirroredAt: FieldValue.serverTimestamp(),
+  }, { merge: true });
 
   return ref;
 }
@@ -288,7 +285,7 @@ async function resolveParticipantRef(eventId: string, participantIdOrBookingId: 
   const db = getFirestoreInstance();
   const eventRef = db.collection('events').doc((eventId || '').trim());
   const participantsRef = getRegistrationsCollectionRef(db, eventId);
-  const legacyParticipantsRef = eventRef.collection('participants');
+  const legacyParticipantsRef = eventRef.collection('registrations');
   const rawId = String(participantIdOrBookingId || '').trim();
 
   if (!rawId) {

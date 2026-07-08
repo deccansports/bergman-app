@@ -824,16 +824,6 @@ async function rebuildAthleteMasterIndex(eventId: string) {
     });
   }
 
-  const collection = eventRef.collection('athleteMasterIndex');
-  for (let i = 0; i < indexDocs.length; i += 350) {
-    const batch = db.batch();
-    for (const item of indexDocs.slice(i, i + 350)) {
-      const ref = collection.doc(item.id.replace(/[^a-zA-Z0-9:_-]/g, '_').slice(0, 180));
-      batch.set(ref, { ...item.value, syncedAt: FieldValue.serverTimestamp() }, { merge: true });
-    }
-    await batch.commit();
-  }
-
   const byUuid: Record<string, any> = {};
   const byBib: Record<string, any> = {};
   const byChip: Record<string, any> = {};
@@ -931,6 +921,17 @@ async function rebuildAthleteMasterIndex(eventId: string) {
   console.log('[AthleteIndexRebuild] Duplicate Email:', mappingDiagnostics.duplicateEmail);
   console.log('[AthleteIndexRebuild] Duplicate Phone:', mappingDiagnostics.duplicatePhone);
   console.log('[AthleteIndexRebuild] Contest Mismatch:', mappingDiagnostics.contestMismatch);
+
+  // Purge the legacy Firestore athleteMasterIndex subcollection so the
+  // participant document remains the only canonical Firestore source of truth.
+  const legacyMasterIndexSnap = await eventRef.collection('athleteMasterIndex').get();
+  for (let i = 0; i < legacyMasterIndexSnap.docs.length; i += 400) {
+    const batch = db.batch();
+    for (const doc of legacyMasterIndexSnap.docs.slice(i, i + 400)) {
+      batch.delete(doc.ref);
+    }
+    await batch.commit();
+  }
 
   await putKV(`live:event:${eventId}:participant:index`, indexPayload, 'api-live-athlete-search-rebuild');
   await putKV(`event:${eventId}:contest:mapping`, categoryContestMapping, 'api-live-athlete-search-rebuild');

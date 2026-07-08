@@ -443,16 +443,9 @@ export default function ParticipantsTab({
     }
   }, [selectedEventId, fetchParticipants]);
 
-  useEffect(() => {
-    if (!selectedEventId) return;
-
-    const interval = setInterval(() => {
-      setLastVisibleId(null);
-      fetchParticipants(selectedEventId, null, false);
-    }, 20000);
-
-    return () => clearInterval(interval);
-  }, [selectedEventId, fetchParticipants]);
+  // Intentionally no auto-refresh here.
+  // Keep the participant list stable while admins are searching/filtering,
+  // and refresh only when they click Refresh / Force / action buttons.
 
   useEffect(() => {
     const loadTickets = async () => {

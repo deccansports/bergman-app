@@ -180,33 +180,17 @@ export async function GET(request: NextRequest) {
     });
 
     // Base query for participants (type filtering happens in-memory).
-    // IMPORTANT: merge registrations + legacy participants so mixed-migration events are complete.
     const participantsRef = getRegistrationsCollectionRef(adminDb, eventId);
-    const legacyParticipantsRef = adminDb.collection('events').doc(eventId).collection('participants');
 
-    const [registrationsSnapshotRaw, legacySnapshotRaw] = await Promise.all([
-      participantsRef.get(),
-      legacyParticipantsRef.get(),
-    ]);
+    const participantsSnapshotRaw = await participantsRef.get();
+    const participantDocs = backupAll
+      ? participantsSnapshotRaw.docs
+      : participantsSnapshotRaw.docs.filter((doc) => String((doc.data() as any)?.ticketStatus || '').trim() === 'Active');
 
-    const registrationsDocs = backupAll
-      ? registrationsSnapshotRaw.docs
-      : registrationsSnapshotRaw.docs.filter((doc) => String((doc.data() as any)?.ticketStatus || '').trim() === 'Active');
-
-    const legacyDocs = backupAll
-      ? legacySnapshotRaw.docs
-      : legacySnapshotRaw.docs.filter((doc) => String((doc.data() as any)?.ticketStatus || '').trim() === 'Active');
-
-    let participantListAll = dedupeParticipants([
-      ...registrationsDocs.map((doc) => ({
-        ...(serializeParticipantData(doc) as EventParticipant),
-        id: doc.id,
-      })),
-      ...legacyDocs.map((doc) => ({
-        ...(serializeParticipantData(doc) as EventParticipant),
-        id: doc.id,
-      })),
-    ]).filter((participant) => !isTimingOnlyParticipantRecord(participant));
+    let participantListAll = dedupeParticipants(participantDocs.map((doc) => ({
+      ...(serializeParticipantData(doc) as EventParticipant),
+      id: doc.id,
+    }))).filter((participant) => !isTimingOnlyParticipantRecord(participant));
 
     if (participantListAll.length === 0) {
       const [legacyIndex, fullParticipantsIndex, fullParticipantsIndexPlural, liveParticipantIndex, eventParticipantIndex] = await Promise.all([

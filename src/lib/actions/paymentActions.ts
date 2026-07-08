@@ -8,7 +8,7 @@ import { getFirestoreInstance } from '@/lib/firebaseAdmin';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { RegistrationAttempt, PaymentRecord, TicketDefinition } from '@/lib/types';
 import type { RelayTeamRegistrationFormInput, RelaySharedLegs } from '@/lib/types';
-import { handleDeferral } from './deferralActions';
+import { handleDeferral, hasUsedDeferralHistoryForUserAction } from './deferralActions';
 import { processCategoryChangeFinal } from './categoryActions';
 import { getEventRegistrationButtonState, isTicketSaleOpen } from '@/lib/utils';
 import { createRelayTeamRegistrationAction } from './relayRegistrationActions';
@@ -274,6 +274,26 @@ export async function createDeferralFeeOrderAction(
     const eventSnap = await adminDb.collection('events').doc(eventId).get();
     if (!eventSnap.exists) return { success: false, message: "Event not found." };
     const eventData = eventSnap.data() || {};
+
+    const participantSnap = await adminDb.collection('events').doc(eventId).collection('participants').doc(input.participantId).get();
+    if (!participantSnap.exists) return { success: false, message: "Participant not found." };
+
+    const participantData = participantSnap.data() as any;
+    if (participantData?.isDeferral || participantData?.deferralId) {
+      return { success: false, message: 'This registration already used a deferral and cannot be deferred again.' };
+    }
+
+    const userSnap = await adminDb.collection('users').doc(athleteUid).get();
+    const activeDeferralStatus = String((userSnap.data() as any)?.activeDeferral?.status || '').trim();
+    if (['Pending Ticket Selection', 'Pending Upgrade Payment', 'Pending', 'Processing', 'ProcessingConfirmation'].includes(activeDeferralStatus)) {
+      return { success: false, message: 'This athlete already has an active deferral credit and cannot defer again.' };
+    }
+
+    const usedDeferralCheck = await hasUsedDeferralHistoryForUserAction(athleteUid, input.athleteEmail || null);
+    if (usedDeferralCheck.success && usedDeferralCheck.hasUsedDeferralHistory) {
+      return { success: false, message: 'This athlete has already used a deferral credit and cannot defer again.' };
+    }
+
     const eventName = eventData.eventName || 'Unknown Event';
     const normalizedCurrency = String(eventData.currency || 'INR').toUpperCase();
     const isUsd = normalizedCurrency === 'USD';

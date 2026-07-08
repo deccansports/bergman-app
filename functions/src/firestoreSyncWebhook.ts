@@ -47,7 +47,7 @@ interface SyncPayload {
 
 /**
  * Cloud Function: Trigger on Firestore document writes (v2)
- * Monitors: participants, users, events, registrations collections
+ * Monitors: participants, users, events collections
  */
 export const onFirestoreWrite = onDocumentWritten(
   '{collectionName}/{docId}',
@@ -56,7 +56,7 @@ export const onFirestoreWrite = onDocumentWritten(
     const docId = event.params.docId;
 
     // Only sync specific collections
-    const syncCollections = ['participants', 'users', 'events', 'registrations'];
+    const syncCollections = ['participants', 'users', 'events'];
     if (!syncCollections.includes(collectionName)) {
       return null;
     }

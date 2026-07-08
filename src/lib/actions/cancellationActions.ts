@@ -6,7 +6,7 @@ import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore'
 import { revalidatePath } from 'next/cache';
 import { format } from 'date-fns';
 import { sendRefundInitiatedWhatsApp, sendCancellationConfirmationWhatsApp } from '../auth/aisensyService';
-import { sendDynamicTemplateEmail, sendCancellationRequestConfirmationEmail, sendAdminCancellationNoticeEmail } from '../auth/brevoService';
+import { sendDynamicTemplateEmail, sendCancellationRequestConfirmationEmail, sendAdminCancellationNoticeEmail, sendAdminNotificationEmail } from '../auth/brevoService';
 import { authOtpConfig } from '@/lib/auth/authConfig';
 import type { AdminInitiateRefundFormInput } from '@/lib/schemas';
 import { AdminInitiateRefundSchema } from '@/lib/schemas';
@@ -1043,15 +1043,48 @@ export async function cancelParticipantRegistrationByAdminAction(
         await _mirrorParticipantToKV(serializeParticipantData(updatedParticipantSnap));
     }
 
+    if (participantData.athleteUid) {
+      await adminDb.collection('users').doc(participantData.athleteUid).set({
+        activeCancellation: FieldValue.delete(),
+        activeDeferral: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    await adminDb.collection('adminActivityLog').add({
+      type: 'admin_participant_cancellation',
+      eventId,
+      participantId,
+      athleteUid: participantData.athleteUid || null,
+      participantName: participantData.name || null,
+      participantEmail: participantData.email || null,
+      eventName: participantData.eventName || null,
+      reason: reason || 'Cancelled by administrator.',
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    }).catch(() => {});
+
+    const cancellationReason = reason || 'Cancelled by administrator.';
+    const eventName = participantData.eventName || 'the event';
+    const participantName = participantData.name || 'Athlete';
+
+    await sendAdminNotificationEmail(
+      'info@bergmantri.com',
+      `Admin cancellation - ${eventName}`,
+      `${participantName} (${participantData.bibNumber || participantId}) was cancelled by admin for ${eventName}. Reason: ${cancellationReason}`
+    ).catch(() => {});
+
     if (sendEmail && participantData.email) {
       await sendAdminCancellationNoticeEmail(
         participantData.email,
-        participantData.name,
-        participantData.eventName || 'the event',
-        reason
+        participantName,
+        eventName,
+        cancellationReason
       );
     }
+
     revalidatePath('/admin/dashboard');
+    revalidatePath('/dashboard');
     return { success: true, message: 'Participant registration has been cancelled.' };
   } catch (e: any) {
     return { success: false, message: `Failed to cancel registration: ${e.message}` };

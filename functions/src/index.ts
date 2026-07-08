@@ -33,7 +33,6 @@ export {
 	syncParticipantToKV,
 	syncEventToKV,
 	syncUserToKV,
-	syncRegistrationToKV,
 } from './syncToKV';
 
 export { autoRunBirthdayCampaignDaily } from './birthdayAutomation';

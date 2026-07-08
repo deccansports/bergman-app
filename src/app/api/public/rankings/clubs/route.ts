@@ -4,7 +4,7 @@ import { getClubRankingData } from '@/lib/actions/clubActions';
 import { validateApiKey } from '@/lib/apiAuth';
 
 export async function GET(request: NextRequest) {
-  const authResult = await validateApiKey(request);
+  const authResult = await validateApiKey(request, { required: false });
   if (!authResult.success) {
     return NextResponse.json({ success: false, message: authResult.message }, { status: authResult.status });
   }
