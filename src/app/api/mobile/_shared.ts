@@ -34,11 +34,18 @@ export function parseMobileYear(request: NextRequest): number {
 export async function requireMobileAuth(request: NextRequest): Promise<{ ok: true; auth: MobileAuthContext } | { ok: false; response: NextResponse }> {
   try {
     const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return { ok: false, response: mobileJson(false, undefined, 'Unauthorized', 401) };
-    }
+    const cookieToken = request.cookies.get('firebase-token')?.value
+      || request.cookies.get('auth-token')?.value
+      || request.cookies.get('__session')?.value
+      || request.cookies.get('token')?.value
+      || null;
+    const queryToken = request.nextUrl.searchParams.get('token') || request.nextUrl.searchParams.get('auth') || null;
 
-    const token = authHeader.replace('Bearer ', '').trim();
+    const headerToken = authHeader?.toLowerCase().startsWith('bearer ')
+      ? authHeader.slice(7).trim()
+      : authHeader?.trim() || null;
+
+    const token = headerToken || cookieToken || queryToken;
     if (!token) {
       return { ok: false, response: mobileJson(false, undefined, 'Unauthorized', 401) };
     }

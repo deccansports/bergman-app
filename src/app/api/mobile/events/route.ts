@@ -1,25 +1,19 @@
-import { NextRequest } from 'next/server';
-import { mobileJson, requireMobileAuth, getMobileUpcomingEvents, getMobileLiveEvents } from '../_shared';
+import { NextRequest, NextResponse } from 'next/server';
+import { getCalendarEventsAction } from '@/lib/actions/eventActions';
+import { isEventHidden } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const authResult = await requireMobileAuth(request);
-  if (!authResult.ok) return authResult.response;
-
   try {
-    const [upcomingEvents, liveEvents] = await Promise.all([
-      getMobileUpcomingEvents(),
-      getMobileLiveEvents(),
-    ]);
+    const result = await getCalendarEventsAction();
+    if (result.success) {
+      const events = (result.events || []).filter(event => !isEventHidden(event));
+      return NextResponse.json({ success: true, events });
+    }
 
-    return mobileJson(true, {
-      upcomingEvents,
-      liveEvents,
-      totalUpcomingEvents: upcomingEvents.length,
-      totalLiveEvents: liveEvents.length,
-    });
+    return NextResponse.json({ success: false, message: result.message }, { status: 500 });
   } catch (error: any) {
-    return mobileJson(false, undefined, error?.message || 'Failed to load mobile events', 500);
+    return NextResponse.json({ success: false, message: error?.message || 'Failed to load mobile events' }, { status: 500 });
   }
 }
