@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "837999546022",
+    "firebase_url": "https://racehub-ao1fu-default-rtdb.firebaseio.com",
+    "project_id": "racehub-ao1fu",
+    "storage_bucket": "racehub-ao1fu.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:837999546022:android:0b723b351bf647760fee67",
+        "android_client_info": {
+          "package_name": "com.bergmanrace.live"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "837999546022-uchf6b06q20vlrnhmjfmq18ovv7b8mr8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC3w4uw-OrGHlZqsV5FV387OXXYySm15X4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "837999546022-uchf6b06q20vlrnhmjfmq18ovv7b8mr8.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "837999546022-2cga48qkqjibn70q9mf8eqn405bpcgt1.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.bergmanrace.live"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
